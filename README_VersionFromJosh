@@ -1,0 +1,483 @@
+How this all works!
+
+1. In setup_parameters, set
+  - size (depth range) of model
+  - most path info
+  - MINEOS parameters, e.g. number of modes, frequency range,
+                       angular order range
+
+WRAPPER
+ispsi = 0; ischeckmodel = 0;
+cardid = param.CARDID (= name of intial model file)
+icardid = cardid (initial card name)
+
+2. In read_model_card,
+  - read in CARDPATH, CARD  (i.e. param.CARDID in setup_parameters)
+      - card looks like...
+          ./new_card/(cardid).card
+          (if_anisotropic=1) (trec=-1) (ifdeck=1)
+          (n_model_layers=763) (n_inner_core_layers=63) (n_outer_core_layers=177)
+          (radius=0) (rho) (vpv) (vsv) (q_kappa) (q_mu) (vph) (vsh) (eta)
+          (radius=20000) etc etc
+
+      - Note that radius (i.e. distance from centre of Earth!) is in metres,
+        rho is in g.m^-3, velocities are in m/s
+  - can also plot starting model
+
+WRAPPER
+lmodel:                  Initial model as structure
+iv[sp][vh], ieta, irad:  Initial model parameters
+cv[sp][vh], ceta:        Current model parameters (set to equal intial)
+
+obs.[RL]periods:  periods of interest (read from input data periods)
+obs.[RL]phv:      phase velocities
+obs.[RL]std:      errors
+
+WRAPPER PLOT 73
+plot observed Love (red) and Rayleigh (blue) phase velocities
+as a function of period (circles) on one plot
+Later, for each iteration of the model, plot forward calculated
+toroidal (red) and spherical (blue) phase velocities as a function
+of period (+) on the same plot
+
+WRAPPER PLOT 77
+Plot observed Love (subplot 1,2,1) and Rayleigh (subplot 1,2,2)
+phase velocities vs. period as black '+'
+Later, for each iteration of the model, plot forward calculated toroidal (1,2,1)
+and spheroidal(1,2,2) phase velocities as circles colour coded for iteration.
+
+
+WRAPPER PLOT 78
+plot intial model model in suplots
+ - 1, 6, 1: Vsv
+ - 1, 6, 2: Vsh
+ - 1, 6, 3: Vpv
+ - 1, 6, 4: Vph
+ - 1, 6, 5: Eta
+ - 1, 6, 6: [constant value = 1] - will be (Vsv/Vsh)^2
+ Later, for each iteration after the first, plot cvsv, cvsh etc.  (In the first
+ iteration, these are still the initial values at the time of plotting).  Colour
+ by iteration number.
+
+WRAPPER PLOT 79 (not actually opened until line 407)
+This is the same as plot 78, but with dashed lines for each parameter showing
+the uncertainties (e.g. mestc.[SV|SH etc] + mestc.[SV|SH etc]_std)
+
+
+WRAPPER PLOT 80 (not actually opened until line 319)
+subplot(2,2,3) - change in Love phase velocity
+    In the first iteration, plot a grey shaded region showing the size of the
+    uncertainty (height is observed Love_std*2/Love_phasevel as a function of period)
+    Then plot on (forward.tphv - obs.Lphv)/obs.Lphv as circles coloured by iteration.
+subplot(2,2,4) - change in Rayleigh phase velocity (short periods)
+    As above, but for Rayleigh phase velocities and sphv.
+subplot(2,2,2) - change in Rayleigh phase velocities (long periods)
+
+WRAPPER PLOT 81 (not actually opened until line 464)
+subplot(2,2,1) - toroidal Vsh frechet kernels as a function of depth for each
+                 period, coloured by period
+subplot(2,2,2) = toroidal Vsh frechet kernels by period
+subplot(2,2,3) = spheroidal Vsh frechet kernels by period
+subplot(2,2,4) = spheroidl Vsv frechet kernels by period
+
+
+3. In write_mode_in(minL, -1, [ST])
+  (only run if no file
+    MINEOS_synthetics/MODE/TABLES/MODE.in/
+        [st].model(minF)_(maxF)_b(N_[ST]modes))
+      - mode table looks like
+            1.d-12  1.d-12  1.d-12 .126
+            [3 (if spherical) or 2 (if toroidal)]
+            (minL) (maxL) (minF) (maxF) (N_modes)
+            0
+      - min/max L are angular order range
+      - min/max F are frequency range
+      - N_[TS]modes are number of mode branches for Love and Rayleigh
+         i.e. 1 if just fundamental mode, 2 if fundamental mode & first overtone
+
+WRAPPER LOOP THROUGH ITERATIONS
+
+************** START OF ITERATION LOOP ******************
+
+WRAPPER
+   Path_kernels_phv = ['./StartingModel_Kernels_Phv/',cardid,'/'];
+   DATAPATH = 'MINEOS_synthetics/run_MINEOS/MODE/TABLES/(cardid)/tables_inv/'
+   MODEPATH = 'MINEOS_synthetics/run_MINEOS/MODE/TABLES/MODE.in/'
+
+WRAPPER: if it's the first iteration and [Path_kernels_phv, cardid, '.mat']
+doesn't exist....
+*** START OF IF STATEMENT ***
+4a.  In frun_mineos_check(cardid, runtable=1)
+    - Run spheroidal mode branches, then repeat for toroidal
+        - write_mineos_drivers([ST]], cardid)
+            writes a bunch of files to ./run/ - see (4ai) below
+        - cat run_nohang.s | mineos_nohang > (DATAPATH)/logS0
+            Pretty sure this is what actually runs MINEOS, so
+            propagating waves through the input vel model as
+            specified in run_nohang and writes to the files there
+        - check_mode(LOG, num_loop, 0, [ST], cardid)
+            Checks that all eigenfrequencies were calculated, then
+            goes in this big while statement to recalculate where there
+            are errors
+            **If there are errors, run three functions below**
+                - write_eig_recov(num_loop, broken_l, [ST], cardid)
+                    writes a file to ./run/ to use with eig_recover
+                - cat run_eigrecov.s | eig_recover
+                    this reads and rewrites eig files for which MINEOS aborted
+                    also save the ouput as .eig_fix as well as .eig
+                - write_chk_q_strip_table(num_loop, [ST], cardid)
+                    the same as write_mineos_drivers, but using the .eig_fix files
+        - cat run_q.s | mineos_qcorrectphv
+            Performs modal q integration on the MINEOS output file
+        - If runtable = 1 (hardwired in this first case)
+          - cat run_strip.s | mineos_strip
+              This strips off the upper 800 km and trashes the rest to save
+              disk space
+          - cat run_table.s | mineos_table
+              This restructures the output of mineos_qcorrectphv and mineos_strip
+              and saves it ?to (DATAPATH)/(cardid).[ts](minF)to(maxF).table
+
+4ai.    In write_mineos_drivers([ST], cardid)
+          - write a bunch of files to ./run/
+              - run_nohang.[st]
+                  Which looks like...
+                    ./CARDS/(cardid).card
+                    (DATAPATH)/(cardid).[ts](minF)to(maxF).asc
+                    (DATAPATH)/(cardid).[ts](minF)to(maxF).eig
+                    (MODEPATH)/[st].model(minF)_(maxF)_b(N_[ST]modes)
+              - run_q.[st]
+                  Which looks like...
+                    ./CARDS/(cardid).qmod
+                    (DATAPATH)/(cardid).[ts](minF)to(maxF).q
+                    (DATAPATH)/(cardid).[ts](minF)to(maxF).eig
+                    y
+              - run_strip.[st]
+                  Which looks like...
+                    (DATAPATH)/(cardid).[ts](minF)to(maxF).strip
+                    (DATAPATH)/(cardid).[ts](minF)to(maxF).eig
+              - run_table.[st]
+                  Which looks like...
+                    (DATAPATH)/(cardid).[ts](minF)to(maxF).table
+                    (maxN)
+                    (minF) (maxF)
+                    (minL) (maxL)
+                    (DATAPATH)/(cardid).[ts](minF)to(maxF).q
+                    (DATAPATH)/(cardid).[ts](minF)to(maxF).strip
+
+4aii.   In check_mode(LOG, num_loop, 0, [ST], cardid)
+          - check all eigenfrequencies were calculated correctly
+             - look for the escape characters 'i quit' in the log file
+               and if find them, then see what was successfully calculated
+               and potentially recalculate
+             - this is where all of the 'No eigenfrequencies calculated for l ='
+               messages come from
+
+4b.  In [frech_T, frech_S] = fmk_kernels_linear_check(icardid, runpath, ...
+          obs.Lperiods, obs.Rperiods, ...
+          data.love.mode_br_iso, data.rayl.mode_br_iso, ...
+          ispsi)
+      - For toroidal and then spherical modes...
+          - Make the branch files
+              - write_plotwk([ST], icardid)
+                  write the input file for plot_wk
+              - cat run_plotwk.[ts] | plot_wk
+                  'Plot the omega-k diagram and much much more' (!!)
+                  And, in fact, the plotting was also taken out in 1992
+                  It does something with phase velocities of various phases?
+          - Make the frechet kernels
+              - write_frechet([ST], icardid, 0, [])
+                  or, equivalently, write_frech_chk() if there were broken
+                  eigenfrequencies that have been replaced by .eig_fix files
+              - cat run_frechet.[ts] | frechet
+                  calculates the frechet kernels in velocity
+                  if ispsi set to 1, will run frechet_psi (not sure of difference)
+          - For each mode...
+              - Make CV Frechet kernels
+                  - write_frechetcv([ST], icardid, branch)
+                      write the input files for frechet_cv
+                  - cat run_frechetcv.[ts] | frechet_cv
+                      calculates the frechet kernels in phase velocity for a
+                      given mode branch
+                  - frech_[ts] = frechcv_asc([ST], icardid, branch, periods)
+                      convert phase velocity (CV) frechet kernels to ascii
+                      write to ./run/run_frechcv_asc.[ts]
+                  - sort FRECH_[TS] by period across mode branches
+      - can plot frechet kernels here
+
+
+
+4bi.    write_plotwk([ST], icardid)
+          write ./run/run_plotwk.[ts], which looks like
+              table (DATAPATH)/(icardid).[ts](minF)to(maxF).table_hdr
+              search
+              1 (minF) (maxF)
+              99 0 0
+              branch
+
+              quit
+
+4bii.   write_frechet([ST], icardid, NDISC, ZDISC) or write_frech_chk(....)
+          write ./run/run_frechet.[ts], which looks like
+              ./CARDS/(cardid).qmod
+              (DATAPATH)/(icardid).[ts](minF)to(maxF).table_hdr.branch
+              (DATAPATH)/(cardid).[ts](minF)to(maxF).frech
+              (DATAPATH)/(cardid).[ts](minF)to(maxF).eig
+              NDISC   ( number of discontinuities in the model)
+              ZDISC[1]  (depths of all of the discontinuities)
+              ZDISC[2]   (n.b. this hardwired in the call to NDISC = 0)
+              ....
+              ZDISC[NDISC]
+
+          for write_frech_chk, the same outfile except the .eig line is replaced
+          by (the same thing)_0.eig_fix \n (the same thing)_1.eig_fix \n ...
+          until all eig_fix files are listed
+
+4biii.  write_frechcv([ST], icardid, branch)
+          write ./run/run_frechcv.[ts], which looks like
+            (DATAPATH)/(cardid).[ts](minF)to(maxF).frech
+            (branch)
+            (DATAPATH)/(cardid).[ts](minF)to(maxF).fcv.(branch)
+
+4biv.   FRECH = frechcv_asc([ST], icardid, branch, periods)
+          for each period, write ./run/run_frechcv_asc.[ts], which looks like
+            (DATAPATH)/(cardid).[ts](minF)to(maxF).fcv.(branch)
+            (DATAPATH)/(cardid).[ts](minF)to(maxF).(branch).(periods(ip))
+            (periods(ip))
+          Then, run this through
+            cat run_frechcv_asc.[ts] | draw_frechet_gv
+                This tests the frechet kernels
+          Logged output of this gives info on the closest run period
+            (prints to screen 'Find closest period'...)
+          Then, open (DATAPATH)/(cardid).[ts](minF)to(maxF).(branch).(periods(ip))
+          (saved output of draw_frechet_gv?), and load in the frechet kernels
+          Save to FRECH(ip).(state variable) structure
+              For spherical, the state variables with frechet kernels are
+                  per|rad|vsv|vpv|vsh|vph|eta|rho|mode
+                    (period, radius, etc)
+              For toroidal, the state variables with frechet kernels are
+                  per|rad|vsv|vsh|rho|mode
+
+          Can plot the frechet kernels at this stage
+
+4c.  In [[TS]CPER, [TS]PHV] = calc_modephv(periods, [TS],
+            data.[love|rayl].mode_br_iso, cardid)
+        - Run for toroidal then spheroidal modes
+        - For each mode branch (unique(data.[love|rayl].mode_br_iso)),
+            - [mode, card] = read_forward_model_qfile(cardid, [TS], MODE)
+                  reads in vpv, vsv etc to card; spherical harmonics info and
+                  phase/group velocity (and phase, group velocity q) to mode(imode)
+            - Extract period and phase velocity info (mode(ibr).tq and mode(ibr).phvq)
+              for all mode branches and sort by period --> cper, phv
+            - Can plot here too
+
+
+4ci.    [mode, card] = read_forward_model_qfile(cardid, [TS], MODES)
+            - Read in (DATAPATH)/(cardid).[ts](minF)to(maxF).asc
+              and save to variable, card:
+                  card.(fname|lev|rad|rho|vpv|vph|vsv|vsh|eta|qmu|qkap)
+            - For each of MODES, read (DATAPATH)/(cardid).[ts](minF)to(maxF).q
+              and save to variable mode:
+                  mode(imode).(fname|n|l|wrad|w|t|tq|grv|q|phv|phvq)
+
+                  fname: names of the .asc file
+                  n: spherical harmonics - number of nodes in radius (i.e. mode)
+                  l: spherical harmonics - number of nodes in latitude
+                  wrad: spherical harmonics - angular frequency in rad/s
+                  w: spherical harmonics - angular frequency in mhz
+                  t: period
+                  grv: group velocity
+                  phv: phase velocity
+            - Can plot here too
+
+WRAPPER
+Save output of calc_modephv to forward (forward.[tphv|tper|sphv|sper])
+then re-read in the card (read_forward_model_qfile(cardid, 'S', [01]))
+copy the .q and .asc files from (DATAPATH) to Path_kernels_phv
+(which was ['./StartingModel_Kernels_Phv/',cardid,'/']).  Also, save
+(cardid).mat to there: 'frech_T', 'frech_S','forward','card'
+
+That's the end of all of the stuff to write to [Path_kernels_phv, cardid, '.mat']
+*** ELSE IF THE (cardid).mat FILE EXISTS ****
+Copy the *.q and *.asc files from Path_kernels_phv to (DATAPATH) and load in
+(Path_kernels_phv)/(cardid).mat.
+
+*** EITHER WAY, IF ITS THE FIRST ITERATION ***
+mestc.Lphv_pre = forward.tphv
+mestc.Rphv_pre = forward.sphv
+
+*** ELSE IF IT ISN'T THE FIRST ITERATION ***
+cardid = [icardid, num2str(iter)]
+
+5a. write_MINE_mod(bot, cvsv, cvsh, depth, cvpv, cvph, ceta, [(cardid).card])
+      Takes an input file and writes a finely sampled model card for MINEOS
+      - card = read_model_card([param.CARDID].card)
+          read in original model card
+      - Masks depths above (bot) for all parameters (rad, sv, sh, pv, ph, eta)
+          option to set hyperparameter 'dist' as the depth range of the
+          transition between perturbed values and PREM - will do a polyfit over
+          this depth range for a smooth transition.  Was set to 100 km, but now
+          set to 0 km.
+      - Pastes input values (cvsv, cvsh, etc) onto the bottom of the file, then
+        writes the new model out to [(cardid).card]
+
+5b. If is_kernelcalc set to 1 (as currently hardwired):
+      - frun_mineos_check([cardid], 1)
+          run MINEOS on the updated card
+      - [frech_T, frech_S] = fmk_kernels_linear_check(cardid, ...)
+          recalculate the kernels for the updated card
+      (This is the same as the steps for the first iteration, except we are not
+      re-doing calc_modephv, which reads in the phase velocities saved in 'forward'
+      for saving to (Path_kernels_phv)(cardid).mat)
+
+   If is_kernelcalc is set to 0, only re-runs frun_mineos_check([cardid], runtable=0).
+   The runtable business is only resaving the .asc file as a .table file for the
+   purposes of calculating Frechet kernels.
+
+
+*** END OF IF STATEMENT ***
+
+
+WRAPPER
+For toroidal then spheroidal modes...
+  - [[TS]CPER, [TS]PHV] = calc_modephv([LR]periods, [TS], [lovs|rayl].mode_br_iso, cardid)
+Save the output to forward.[tphv|tcper|sphv|sper]
+Plot this on Figure 73.
+  - [~, card] = read_forward_model_qfile(cardid, 'S', mode)
+      (i.e. read in (DATAPATH)/(cardid).[ts](minF)to(maxF).asc and save to variable, card)
+
+6. [mest, DOF] = finverse_aniso_linear_constmantlexi_reformulation(
+        obs.Lphv, obs.Lstd, obs.Rphv, obs.Rstd, forward, frech_T, frech_S,
+        obs.Lperiods, obs.Rperiods, card);
+
+        Run the inversion!  Inputs are observed [LR] phase velocities and uncertainties,
+        forward calculated phase velocities from current (i.e. starting, if iteration 1)
+        model, the frechet kernels, and card - the parameters of the current model
+
+        For the purposes of this code, [LR][phv|std|periods] are the observations;
+        [ts][phv|per] are the forward calculations.  Remember that cardid has been
+        updated to [icardid, num2str(iter)] after the first iteration.
+
+        For each period, find dC[LR] - the difference between observed [LR]phv
+        and calculated [ts]phv (that was read in) at the same period
+
+        dobs = [dCL; dCR]
+
+        Pull out vsv, vsh, vpv, vph, eta, rad  from the card for depths above (bot)
+        and calculate vp_vs (vpv./vsv) and dr (gradient(rad))
+
+        Build the G matrix - this is a n_Love_periods+n_Rayleigh_periods by
+        n_depth_points*5 (SV, SH, PV, PH, ETA) matrix.  This is filled in by
+        the frechet kernels for each period - first the vsv and vsh T frechet
+        kernels (sensitivities from Love) rows, then the vsv, (vsh set to 0), vpv,
+        vph, eta S frechet kernels (sensitivities from Rayleigh) rows:
+
+          T_Vsv_per1  T_Vsh_per1  0  0  0      0       0      0           0           0
+          T_Vsv_per2  T_Vsh_per2  0  0  0      0       0      0           0           0
+GG  =   [     0           0       0  0  0  S_Vsv_per1  0  S_Vpv_per1  S_Vph_per1  S_eta_per1 ]
+              0           0       0  0  0  S_Vsv_per2  0  S_Vpv_per2  S_Vph_per2  S_eta_per2
+              0           0       0  0  0  S_Vsv_per2  0  S_Vpv_per2  S_Vph_per2  S_eta_per2
+            where, e.g. T_Vsv_per1 is the Frechet kernel for Toroidal Vsv sensitivity
+            for the first Love period.
+            So to get a GG this size would be n_depth_points = 1, n_Love_periods = 2,
+            n_Rayleigh_periods = 3.
+            Of course, Frechet kernels are depth dependent, so each entry in the matrix
+            above (include 0) would be a row vector n_depth_points long.
+
+        (There's also quite a lot of faffing about with the water layer being stripped off
+        - perhaps can remove for simplicity for land inversions)
+
+        Model, m0 = [vsv; vsh; vpv; vph; eta] - n_depth_points*5 x 1 vector
+
+        Predictions, Dd = GG*m0  - n_Love_periods+n_Rayleigh_periods x 1 vector
+              So this is the predicted phase velocity for each period given the
+              model from (card) - Frechet kernel multiplied by velocity structure
+
+        DdCL = Dd(Lperiods) + dCL
+        DdCR = Dd(Rperiods) + dCR
+
+
+        Make the error weight matrix, We.
+        We is a diagonal matrix, with the first n_Love_periods entries = 1/Lstd(ip)
+        and the rest (n_Rayleigh_periods entries) = 1/Rstd(ip)
+
+
+        Then there's a whole bunch of weighting functions.
+        Define the radius range for various layers - currently set as
+        'bot_seds', 'top_crust', 'bot_crust', 'top_mantle'
+        For each layer, extract the indices of the frechet kernels that correspond
+        to that depth range - [ts]indrad_weight[2u|2l|man|manu_ani|manl_ani|man_iso]
+        i.e. indices in radius for t or s kernels (weight) for some layer
+        Find the lengths of all of these, e.g. L_t_cr = length(tindrad_weight2);
+        L_s_cr = length(sindrad_weight2); L_cr = L_t_cr + L_s_cr;
+
+        Apply damped least squares:  (m = (G^TG + E^2I)^-1 G^T d)
+          Solve Fm = f
+          This is really hard to follow.  But I think basically it applies the
+          parameters set up in damping_parameters to the Frechet kernel weights
+          at various depths corresponding to the different layers.
+
+          End up with a variable mest_all = Finv*f, where F is maybe a damped
+          version of GG and f is maybe a damped version of m.
+
+          Predicted phase velocities using mest (new model):
+          dLRphv_pre = (GG .* Dr) * (mest_all - m0)
+              (Dr is the gradient in radius)
+          Lphv_pre = Lphv0 + dLRphv_pre(Lperiods)
+          Rphv_pre = Rphv0 + dLRphv_pre(Rperiods)
+
+          mest.(SV|SH|PV|PH|ETA) = mest_all(relevent indices)
+
+
+        Evaluate degrees of freedom: DOF = length(f) - trace(F*Finv)
+
+        Calculate the covaiance matrix: Cov_m = Finv*Finv'
+          std_m = sqrt(diag(Cov_m))
+          mest.[SV|SH|PV|PH|ETA]_std = std_m(relevent indices)
+          mest.xi_std = sqrt(  (-2*SH^2/SV^3 * SV_std)^2  +  (2*SH/SV^2 * SH_std)^2   )
+
+
+WRAPPER
+Run
+  [Tmode, ~] = read_forward_model_qfile(cardid, 'T', data.love.mode_br_iso)
+  [Smode, card] = read_forward_model_qfile(cardid, 'S', data.love.mode_br_iso)
+  (I think that the cards for T and S are the same?  But T is more complicated
+  because of having more mode branches in the data in Josh's code)
+  Now, cardid had the velocities that went into the iteration - i.e. the starting
+  model.  So Tmode and Smode are the phase velocities for the starting model
+  of each iteration.  And the frechet kernels are calculated using this model.
+  And mestc only has the previous phase velocities (taken from forward) at this point.
+Save the results:
+  results.param = param
+  results.obs = obs
+  results.card{iter} = card
+  results.Tmode{iter} = Tmode
+  results.Smode{iter} = Smode
+  results.Tfrech{iter} = frech_T
+  results.Sfrech{iter} = frech_S
+  results.forward{iter} = forward  ** these values are pulled from Tmode and Smode
+  results.mest{iter} = mestc
+  results.DOF{iter} = DOF
+
+Now, plot a whole bunch of stuff (described at the top).
+Again, as with these results fields, the plots are all of the state of things
+BEFORE the inversion, i.e. the starting model for that iteration.
+
+NOW update all the parameters:
+cvsh = mest.SV
+cvsh = mest.SH
+cvpv = mest.PV
+cvph = mest.PH
+ceta = mest.ETA
+mestc = mest
+
+And move the output out of the way.
+ - If at the last iteration, copy all the (DATAPATH)/*.q files to
+      ./save_mat/(param.PROJ).(max_iteration).(max_pertubation)/
+ - Delete all files from (DATAPATH) to save space
+
+************** END OF ITERATION LOOP ******************
+
+In the directory: ./save_mat/(param.PROJ).(max_iteration).(max_pertubation)/
+Save results to (param.PROJ).mat
+Make copies of ./CARDS/(cardid).card; damping_parameters.m, setup_parameters.m
+(cardid corresponds to the last iteration of the model)
