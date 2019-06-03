@@ -31,7 +31,7 @@ class PipelineTest(unittest.TestCase):
     # ==========================================================
     #  Local class specific assertions
     # ==========================================================
-    def assertSurfaceWaveDispEqual(self, actual, expected):
+    def assert_PhaseVelocity_equal(self, actual, expected):
         np.testing.assert_array_almost_equal(
             actual.c, expected.c,
             decimal = 2
@@ -39,12 +39,8 @@ class PipelineTest(unittest.TestCase):
         np.testing.assert_array_equal(
             actual.period, expected.period
             )
-        np.testing.assert_array_almost_equal(
-            actual.std, expected.std,
-            decimal = 2
-            )
 
-    def assertFullVelModelEqual(self, actual, expected):
+    def assert_EarthModel_equal(self, actual, expected):
         # np.testing.assert_array_equal() accepts floats etc too
         np.testing.assert_array_almost_equal(
             actual.vs, expected.vs,
@@ -169,7 +165,7 @@ class PipelineTest(unittest.TestCase):
         full_model = define_earth_model.EarthModel(
             vs = vs, vp = vp, thickness = thickness, depth = depth, rho = rho,
         )
-        self.assertFullVelModelEqual(full_model, expected)
+        self.assert_EarthModel_equal(full_model, expected)
 
     del vs, depth, max_crustal_vs
 
@@ -177,7 +173,7 @@ class PipelineTest(unittest.TestCase):
     # ---------- Surface wave dispersion (surface_waves) ----------
 
     # Set up some starting values for surface_waves testing
-    swd_obs = surface_waves.PhaseVelocity(
+    swd_obs = surface_waves.ObsPhaseVelocity(
                 period = 1/np.arange(0.02, 0.11, 0.01),
                 c = np.array([3.9583, 3.8536, 3.6781,
                              3.4724, 3.3217, 3.2340,
@@ -197,94 +193,104 @@ class PipelineTest(unittest.TestCase):
             expected,
             decimal = 4)
 
-    # Test inputs for surface_waves._secular
-    # @parameterized.expand([
-    #         ("Moho only",
-    #             vs, depth, swd_obs,
-    #             0.9, 0, 1.2031
-    #         ),
-    #         ("Moho only",
-    #             vs, depth, swd_obs,
-    #             1.5, 3, 3.6431
-    #         ),
-            # ("Three layers",
-            #     np.array([3.2, 4.0, 4.6]),
-            #     np.array([7., 30.]),
-            #     swd_obs,
-            #     1.5, 3, 0.5127
-            # ),
-            # ("Many layers",
-            #     np.array([3.2, 3.5, 3.8, 4.2, 4.5]),
-            #     np.array([1.8, 5.6, 11., 35.]),
-            #     swd_obs,
-            #     1.9, 8, 10.5059
-            # ),
-            # ("Many slow layers",
-            #     np.array([0.7, 1.8, 2.2, 3.5]),
-            #     np.array([1.2, 7., 40.])),
-            #     swd_obs._replace(period = np.array([47])),
-            #     1.32, 0, 94.0398
-            # ),
-            # ("Exact match",
-            #     np.array([3.2, 3.5, 3.8, 4.2, 4.5]),
-            #     np.array([1.8, 5.6, 11., 35.])),
-            #     swd_obs,
-            #     2, 7, 6.33
-            # ),
-    #     ])
-    # def test_secular(self, name, vs, depth, swd_obs, c_sc, swd_i, expected):
-    #     """ Test the calculation of the secular function.
-    #
-    #     The period of the surface wave dispersion is given by swd_i, so
-    #     swd_i should be between 0 and len(swd_obs.period) - 1.
-    #
-    #     The wavenumber for the secular function is given by k_sc, which
-    #     is a multiplier for the input model Vs.  This gives the guess
-    #     at the phase velocity by c = omega/wavenumber, which is then run
-    #     through the secular function to see how small a value is output.
-    #     k_sc should vary between 0.9 and 2; when k_sc < 1, it is just used
-    #     as a straight multiplier of the minimum model velocity; when k_sc > 1,
-    #     it is used to phase velocity between the minimum and maximum velocity.
-    #
-    #     """
-    #
-    #     # Calculate the input velocity model
-    #     vp, rho, thickness = define_earth_model.calculate_vp_rho(
-    #         vs, depth, max_crustal_vs)
-    #     full_model = define_earth_model.EarthModel(
-    #         vs = vs, vp = vp, thickness = thickness, depth = depth, rho = rho,
-    #     )
-    #
-    #     # Set guessed phase velocity so it is similar to the input Vs model
-    #     # by scaling according to c_sc
-    #     if c_sc <= 1:
-    #         c = c_sc * np.min(model.vs)
-    #     else:
-    #         c = ((c_sc-1) * np.ptp(vs)) + np.min(vs))
-    #
-    #     omega = 2 * np.pi / swd_obs.period[swd_i]
-    #     mu = rho * vs**2
-    #     self.assertAlmostEqual(
-    #         pipeline._Secular(omega/c, omega, thickness, mu, rho, vp, vs),
-    #         expected, places = 4)
+    #  Test inputs for surface_waves._secular:
+    @parameterized.expand([
+            ("Moho only",
+                vs, depth, swd_obs.period,
+                0.9, 0, 1.2031,
+            ),
+            ("Moho only",
+                vs, depth, swd_obs.period,
+                1.5, 3, 3.6431,
+            ),
+            ("Three layers",
+                np.array([3.2, 4.0, 4.6]),
+                np.array([7., 30.]),
+                swd_obs.period,
+                1.5, 3, 0.5127,
+            ),
+            ("Many layers",
+                np.array([3.2, 3.5, 3.8, 4.2, 4.5]),
+                np.array([1.8, 5.7, 14.2, 35.]),
+                swd_obs.period,
+                1.9, 8, 10.5059,
+            ),
+            ("Many slow layers",
+                np.array([0.7, 1.8, 2.2, 3.5]),
+                np.array([1.2, 11., 42.5]),
+                np.array([47]),
+                1.32, 0, 94.027,
+            ),
+            ("Exact match between Vs and c",
+                np.array([3.2, 3.5, 3.8, 4.2, 4.5]),
+                np.array([1.8, 5.7, 14.2, 35.]),
+                swd_obs.period,
+                2, 7, 6.331,
+            ),
+    ])
+    def test_secular(self, name, vs, depth, periods, c_sc, swd_i, expected):
+        """ Test the calculation of the secular function.
+
+        The period of the surface wave dispersion is given by swd_i, so
+        swd_i should be between 0 and len(swd_obs.period) - 1.
+
+        The wavenumber for the secular function is given by k_sc, which
+        is a multiplier for the input model Vs.  This gives the guess
+        at the phase velocity by c = omega/wavenumber, which is then run
+        through the secular function to see how small a value is output.
+        k_sc should vary between 0.9 and 2; when k_sc < 1, it is just used
+        as a straight multiplier of the minimum model velocity; when k_sc > 1,
+        it is used to phase velocity between the minimum and maximum velocity.
+
+        """
+
+        # Calculate the input velocity model
+        vp, rho, thickness = define_earth_model.calculate_vp_rho(
+            vs, depth, 4.4)
+
+        # Set guessed phase velocity so it is similar to the input Vs model
+        # by scaling according to c_sc
+        if c_sc <= 1:
+            c = c_sc * np.min(vs)
+        else:
+            c = ((c_sc-1) * np.ptp(vs) + np.min(vs))
+
+        omega = 2 * np.pi / periods[swd_i]
+        mu = rho * vs**2
+        self.assertAlmostEqual(
+            surface_waves._secular(omega/c, omega, thickness, mu, rho, vp, vs),
+            expected, places = 3)
 
 
-    # @parameterized.expand([
-    #         ("Moho only", model, swd_obs),
-    #         ("Halfspace only", model._replace(vs = np.array([3.]),
-    #                                           idep = np.array([40])),
-    #                             swd_obs._replace(c = np.ones((9))*2.7406)),
-    #         ("Complicated model", model._replace(vs = np.array([4., 1.2, 4.3, 2.7, 3.1]),
-    #                                              idep = np.array([2, 17, 42, 58, 91])),
-    #                             swd_obs._replace(c = np.array([2.7731, 2.6669, 2.5958,
-    #                                                            2.5647, 2.5514, 2.5301,
-    #                                                            2.4498, 2.1482, 1.8616]))),
-    #         ])
-    #
-    # def test_SurfaceWaveDisp(self, name, model, swd_obs):
-    #     model = pipeline.MakeFullModel(model)
-    #     self.assertSurfaceWaveDispEqual(pipeline.SynthesiseSWD(model, swd_obs, 1e6),
-    #                                     swd_obs)
+    @parameterized.expand([
+            ("Moho only",
+                vs, depth, swd_obs,
+            ),
+            ("Halfspace only",
+                np.array([3.]),
+                np.array([10]),
+                swd_obs._replace(c = np.ones((9))*2.7406),
+            ),
+            ("Complicated model",
+            # 2, 17, 42, 58, 91
+                np.array([4., 1.2, 4.3, 2.7, 3.1]),
+                np.array([1.9, 5.9, 13.2, 34.5]),
+                swd_obs._replace(c = np.array([2.7731, 2.6669, 2.5958,
+                                               2.5647, 2.5514, 2.5301,
+                                               2.4498, 2.1482, 1.8616])),
+            ),
+    ])
+    def test_synthesise_surface_wave(self, name, vs, depth, swd_obs):
+        pass
+        vp, rho, thickness = define_earth_model.calculate_vp_rho(
+            vs, depth, 4.4)
+        full_model = define_earth_model.EarthModel(
+            vs = vs, vp = vp, thickness = thickness, depth = depth, rho = rho,
+        )
+        self.assert_PhaseVelocity_equal(
+            surface_waves.synthesise_surface_wave(full_model, swd_obs.period),
+            swd_obs,
+        )
 
 
 

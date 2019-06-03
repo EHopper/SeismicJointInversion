@@ -43,13 +43,24 @@ class PhaseVelocity(typing.NamedTuple):
     """
     period: np.array
     c: np.array
+
+class ObsPhaseVelocity(typing.NamedTuple):
+    """ Surface wave phase velocity information at a series of periods
+
+    Fields (all fields are n_periods x 1 numpy arrays):
+        - period: dominant period of dispersion measurement, seconds
+        - c: phase velocity in km/s
+        - std: standard deviation of measurement at each period
+    """
+    period: np.array
+    c: np.array
     std: np.array
 
 # =============================================================================
 #       Synthesise Surface Wave Dispersion measurements
 # =============================================================================
 
-def synthesise_surface_wave(model, swd_in) -> PhaseVelocity:
+def synthesise_surface_wave(model, periods) -> PhaseVelocity:
     """ Calculate phase velocity given a velocity model and period range.
 
     The velocity model needs thickness, vp, vs, rho.  The period range
@@ -72,13 +83,12 @@ def synthesise_surface_wave(model, swd_in) -> PhaseVelocity:
          Dissertation, Georgia Institute of Technology.
     """
 
-    freq = 1/swd_in.period
+    freq = 1/periods
 
     if model.vs.size == 1:
         cr = _Rayleigh_phase_velocity_in_half_space(model.vp[0], model.vs[0])
-        return PhaseVelocity(period = swd_in.period,
+        return PhaseVelocity(period = periods,
                              c = np.ones(freq.size)*cr,
-                             std = swd_in.std,
         )
         # No frequency dependence in homogeneous half space.
 
@@ -86,7 +96,7 @@ def synthesise_surface_wave(model, swd_in) -> PhaseVelocity:
     cr_max = np.max(model.vs)
     cr_min = 0.98 * _Rayleigh_phase_velocity_in_half_space(np.min(model.vp),
                                                  np.min(model.vs))
-    omega = 2*np.pi*freq
+    omega = 2 * np.pi * freq
     n_ksteps = 20 # assume this is finely spaced enough for our purposes
         #  Original code had 200, but this should speed things up
     cr = np.zeros(omega.size)
@@ -100,7 +110,7 @@ def synthesise_surface_wave(model, swd_in) -> PhaseVelocity:
         cr[i_om] = _min_value_secular_function(omega[i_om], k_lims[:,i_om],
               n_ksteps, model.thickness, model.rho, model.vp, model.vs, mu)
 
-    return PhaseVelocity(period = swd_in.period, c = cr, std = swd_in.std)
+    return PhaseVelocity(period = periods, c = cr)
 
 def _make_3D(x):
     """Transpose a vector into the third dimension (1 x 1 x size)"""
@@ -180,7 +190,7 @@ def _min_value_secular_function(omega, k_lims, n_ksteps,
     f2 = 1e-9
     k2 = 0
     c = 0
-    for i_k in range(-1, -wavenumbers.size-1,-1):
+    for i_k in range(-1, -(wavenumbers.size+1), -1):
         k3 = wavenumbers[i_k]
 
         f3 = _secular(k3, omega, thick, mu, rho, vp, vs)

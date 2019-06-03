@@ -25,7 +25,7 @@ def filtfilt(b, a, data):
 def mldivide(a, b):
     # This works as long as the rank is the same as the number of num vars
     #if np.linalg.matrix_rank(a) == a.shape[1]:
-    return np.linalg.lstsq(a, b)[0]
+    return np.linalg.lstsq(a, b, rcond=None)[0]
     # from https://stackoverflow.com/questions/33559946/numpy-vs-mldivide-matlab-operator
 #    else:
 #        from itertools import combinations

@@ -176,14 +176,14 @@ def convert_to_coarser_layers(
     # and return the layered model.
     if d_inds[-1] >= input_depth.size - 1:
         d_inds = np.arange(d_inds[0], input_depth.size)
-        layered_vs += [np.round(np.median(input_vs[d_inds]), 3)]
+        layered_vs += [np.median(input_vs[d_inds])]
         return layered_vs, layered_depth
 
     if np.ptp(input_vs[d_inds]) > tol_vs:
         # If dVs across depth range is above tol_vs, record the new layer.
         deepest_point = input_depth[d_inds[-1]]
         layered_depth += [deepest_point]
-        layered_vs += [np.round(np.median(input_vs[d_inds]), 3)]
+        layered_vs += [np.median(input_vs[d_inds])]
         # Reset d_inds to span new minimum thickness layer, and
         # recursively call this function.
         d_inds = np.flatnonzero(
@@ -241,7 +241,7 @@ def calculate_vp_rho(vs:np.array, depth:np.array, max_crustal_vs=4.):
         rho[mantle_inds] = Forte07_scaling(vs[mantle_inds],
                                            av_layer_depth[mantle_inds])
 
-    return np.round(vp, 5), np.round(rho, 5), thickness
+    return vp, rho, thickness
 
 def Brocher05_scaling(vs):
     """ Scale from Vs to Vp and rho - appropriate for the crust only.
