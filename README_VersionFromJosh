@@ -14,14 +14,21 @@ icardid = cardid (initial card name)
 2. In read_model_card,
   - read in CARDPATH, CARD  (i.e. param.CARDID in setup_parameters)
       - card looks like...
-          ./new_card/(cardid).card
+          ./new_card/(cardid).card  (this is just a title - <= 80 characters)
           (if_anisotropic=1) (trec=-1) (ifdeck=1)
           (n_model_layers=763) (n_inner_core_layers=63) (n_outer_core_layers=177)
           (radius=0) (rho) (vpv) (vsv) (q_kappa) (q_mu) (vph) (vsh) (eta)
           (radius=20000) etc etc
-
-      - Note that radius (i.e. distance from centre of Earth!) is in metres,
-        rho is in g.m^-3, velocities are in m/s
+     - if_anisotropic = 1 for anisotropic model, 0 for isotropic
+     - trec: reference period (s) of model for dispersion correction
+              if <= 0, no correction is made
+     - ifdeck = 1 for card deck model, 0 for polynomial model
+     - n_inner_core_layers and n_outer_core_layers are actuall the index of the
+       top of the inner core and outer core in the cards
+     - in model card, if isotropic, then VPV, VSV are specified and VPH, VSH, ETA
+       are unspecified
+     - Note that radius (i.e. distance from centre of Earth!) is in metres,
+       rho is in kg.m^-3, velocities are in m/s (i.e. everything is in SI)
   - can also plot starting model
 
 WRAPPER
@@ -88,12 +95,20 @@ subplot(2,2,4) = spheroidl Vsv frechet kernels by period
       - mode table looks like
             1.d-12  1.d-12  1.d-12 .126
             [3 (if spherical) or 2 (if toroidal)]
-            (minL) (maxL) (minF) (maxF) (N_modes)
+            (minL) (maxL) (minF) (maxF) (N_[ST]modes)
             0
+      - top line: EPS EPS1 EPS2 WGRAV   (accuracy of mode calculation)
+          where EPS controls the accuracy of the integration scheme, EPS1 controls
+          the precision with which a root is found, EPS2 is the minimum separation
+          of two roots.  WGRAV is the frequency (rad/s) above which gravitational
+          terms are neglected (much faster calculation)
+      - next line: 1 (radial modes); 2 (toroidal modes); 3 (speheroidal modes)
+                   4 (inner core toroidal modes); 0 (quit the program)
       - min/max L are angular order range
-      - min/max F are frequency range
+      - min/max F are frequency range (in mHz)
       - N_[TS]modes are number of mode branches for Love and Rayleigh
          i.e. 1 if just fundamental mode, 2 if fundamental mode & first overtone
+
 
 WRAPPER LOOP THROUGH ITERATIONS
 
@@ -115,6 +130,14 @@ doesn't exist....
             Pretty sure this is what actually runs MINEOS, so
             propagating waves through the input vel model as
             specified in run_nohang and writes to the files there
+            Inputs: .card file and mode file (1st and 4th lines of run_nohang)
+            Outputs (DATAPATH)/XXXX.asc
+              This reprints the info from the card (with all the columns in
+              a different order, but they are labelled at least!), then prints the
+              group and phase velocity, Q, omega etc for each mode branch.
+              i.e.  converts from velocity, density, depth structure (card) to
+                    surface wave observables
+                  Also (DATAPTH)/XXXX.eig, a binary file
         - check_mode(LOG, num_loop, 0, [ST], cardid)
             Checks that all eigenfrequencies were calculated, then
             goes in this big while statement to recalculate where there
@@ -394,6 +417,7 @@ GG  =   [     0           0       0  0  0  S_Vsv_per1  0  S_Vpv_per1  S_Vph_per1
 
         DdCL = Dd(Lperiods) + dCL
         DdCR = Dd(Rperiods) + dCR
+        Ddobs = [DdCL; DdCR]
 
 
         Make the error weight matrix, We.
@@ -410,14 +434,112 @@ GG  =   [     0           0       0  0  0  S_Vsv_per1  0  S_Vpv_per1  S_Vph_per1
         Find the lengths of all of these, e.g. L_t_cr = length(tindrad_weight2);
         L_s_cr = length(sindrad_weight2); L_cr = L_t_cr + L_s_cr;
 
-        Apply damped least squares:  (m = (G^TG + E^2I)^-1 G^T d)
-          Solve Fm = f
-          This is really hard to follow.  But I think basically it applies the
-          parameters set up in damping_parameters to the Frechet kernel weights
-          at various depths corresponding to the different layers.
+        Apply damped least squares:  (m = (G'G + E^2 I)^-1 G' d)
+          Solve Fm = f, the weighted damped least squares.
+          Putting everything together, can get to the weighted, damped least squares.
 
-          End up with a variable mest_all = Finv*f, where F is maybe a damped
-          version of GG and f is maybe a damped version of m.
+              m = (G' * We * G  + ε^2 * Wm )^-1  (G' * We * d + ε^2 * Wm * <m>)
+
+        This looks hella complicated, but it is actually equivalent to solving…
+              F * m_est  = f
+        			F  	=   [    sqrt(We) * G ;    εD   ]
+        			f 	=   [    sqrt(We) * d ;    εD<m>   ]
+        			Wm 	=   D' * D
+
+          D is the smoothing function, where it approximates the second derivative
+          by taking the adjacent parameters in the model space and finding the
+          approximate gradient across them (ind-1 = 1, ind = -2, ind+1 = 1
+          along the diagonal of the matrix; this is the same as finding the
+          gradient on the upward side (1*ind+1 + -1*ind) minus the gradient on
+          the downward side (1*ind + -1*ind-1)).  These are multiplied by
+          damping parameters (damp_cr_d2, damp_man_d2_shal, damp_man_d2_deep),
+          the first two of which are hardcoded to 0, i.e. no second derivative
+          smoothing is applied.
+
+          This section also defines d_lay, which (as far as I can tell) is just
+          all zeroes.  D is a (L_cr + L_man) by N matrix, where e.g. L_man is the
+          number of depth layers in the mantle that are being inverted for in
+          both the spheroidal and toroidal Frechet kernels. N is the number of
+          model parameters (number of depth points * 5 variables inverted for).
+
+          Now, there are also constraint equations calculated.
+          These are written as linearity constraints in the form H * m = h.
+          So H is equivalent to D and h is equivalent to D<m>.
+          Both H and h are multiplied by depth-dependent damping parameters, ε
+            (vary by layer, ie. crust, upper mantle etc)
+
+              H3: damp towards the starting model
+                  These basically have H = 1 along the diagonal and
+                  h = values of Vsv (for spherical indices) or Vsh (for
+                  toroidal indices) from the starting model, (card).
+
+
+              H6: damp water column towards starting model
+                  As H3, but for the water column, so ε is much higher as the
+                  velocity of water is much more constrained.
+
+              H1: enforce eta is constant
+                  These have H = 1 along the diagonal (well, in the column for
+                  eta) and h = eta in the starting model.  ε is quite high.
+
+             H2: damp Vp/Vs towards starting Vp/Vs, i.e. VP - (Vp/Vs)*VS = 0
+                  These have H = -Vp/Vs (from starting model) in the column
+                  corresponding to the VS estimate, and H = 1 in the column
+                  corresponding to the VP estimate.  h = 0.
+
+             H4: enforce isotropic (Vsh/Vsv)^2 = 1, i.e. dVsh - dVsv = Vsv - Vsh
+                  These have H = -1 in the Vsv relevant column and H = 1 in the Vsh
+                  relevant column.  h = 0.
+
+             H42: enforce specific Xi value, i.e. Vsh - Vsv * sqrt(Xi) = 0
+                  Similar to the above, but H = -sqrt(assigned Xi value) for Vsv
+                  column (still H = 1 for Vsh, and h = 0).
+                  Xi is (Vsh/Vsv)^2.  This is set in the damping_parameters rather
+                  than read in from the model card.
+
+            H7: preserve layer gradients
+                  When this is applied, don't need the smoothness constraints,
+                  hence why those damping parameters are set to 0 above.
+                  These have H = 1 and -1 for adjacent layers, with
+                  e.g. h = vsv(ilay) - vsv(ilay+1), i.e. starting gradient in
+                  that variable between those layers.  Although actually the
+                  damping parameters for these constraint equations are also
+                  set to 0.  This constraint preserves the ABSOLUTE change in
+                  velocities between depth points.
+
+            H8:  constant Xi layers is how this is labelled, but it is also
+                 preserving layer gradients, as H7
+                  This constraint preserves the RELATIVE change in velocities
+                  between depth points. I feel like this is done in a way more
+                  complicated way than it needs to be!  Currently...
+                  H = (1 - (Vsv_1 - Vsv_2)/(Vsv_1 + Vsv_2)) in layer 1
+                  H = (-1 - (Vsv_1 - Vsv_2)/(Vsv_1 + Vsv_2)) in layer 2
+                  h = 0.
+                  Here, Vsv_1 and Vsv_2 are the starting model Vsv in layers 1 and 2.
+                  So if you multiply this all out (remember that H * m = h),
+                    (1 - (Vsv_1 - Vsv_2)/(Vsv_1 + Vsv_2))*newVsv_1 + ...
+                        (-1 - (Vsv_1 - Vsv_2)/(Vsv_1 + Vsv_2))*newVsv_2 = 0
+                  Which boils down to Vsv_1/Vsv_2 = newVsv_1/newVsv2.
+
+                  So... Not sure why this cant just be
+                  H = 1/Vsv_1 in layer 1
+                  H = -1/Vsv_2 in layer 2
+                  h = 0
+                  Which would be newVsv_1/Vsv1 - newVsv_2/Vsv_2 = 0
+                    i.e. Vsv_1/Vsv_2 = newVsv_1/newVsv2
+
+            H9:  minimise the Xi jump between the crust and the mantle
+                  This is just H8 again but ONLY for the depth indices
+                  corresponding to right above and below the Moho.
+                  The damping parameter for this is set to 0, so it doesn't
+                  apply here.
+
+
+
+          End up with a variable mest_all = Finv*f, where F is the concatenation
+          of a damped version of GG and a bunch of smoothing and other a priori
+          constraints, and f is the concatenation of a damped version of the
+          data and the other solutions to the other constraint equations.
 
           Predicted phase velocities using mest (new model):
           dLRphv_pre = (GG .* Dr) * (mest_all - m0)

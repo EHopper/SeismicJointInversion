@@ -120,12 +120,12 @@ def _Rayleigh_phase_velocity_in_half_space(vp, vs):
     give answers within about 0.5% (for Vp/Vs > 1.5).
     """
 
-    vp2=vp*vp
-    vs2=vs*vs
-    nu = (0.5*vp2-vs2)/(vp2-vs2) # Poisson's ratio
+    vp2=vp * vp
+    vs2=vs * vs
+    nu = (0.5*vp2 - vs2) / (vp2-vs2) # Poisson's ratio
 
     # the estimated velocity (Achenbach, 1973)
-    estimated_phase_vel_rayleigh = vs*((0.862+1.14*nu)/(1+nu));
+    estimated_phase_vel_rayleigh = vs * ((0.862 + 1.14*nu) / (1+nu));
 
     # # # # Using Rayleigh's equation # # # #
     # # Define Coefficients of Rayleigh's Equation
@@ -232,16 +232,16 @@ def _secular(k, om, thick, mu, rho, vp, vs):
 
 
     # First, calculate some commonly used variables
-    k = k+0j # make k complex
+    k = k + 0j # make k complex
     n_layers = mu.size
     nu_s = np.sqrt(k**2 - om**2/vs**2) # 1 x n_layers
-    inds = np.imag(-1j*nu_s)>0
+    inds = np.imag(-1j * nu_s) > 0
     nu_s[inds] = -nu_s[inds]
-    gamma_s = _make_3D(nu_s/k) # 1 x 1 x n_layers
+    gamma_s = _make_3D(nu_s / k) # 1 x 1 x n_layers
     nu_p = np.sqrt(k**2 - om**2/vp**2) # 1 x n_layers
-    inds = np.imag(-1j*nu_p)>0
+    inds = np.imag(-1j * nu_p)>0
     nu_p[inds] = -nu_p[inds]
-    gamma_p = _make_3D(nu_p/k) # 1 x 1 x n_layers
+    gamma_p = _make_3D(nu_p / k) # 1 x 1 x n_layers
     chi = 2*k - (om**2/vs**2)/k  # nk x n_layers
     thick = _make_3D(thick)
 
