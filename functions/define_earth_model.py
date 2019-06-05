@@ -23,6 +23,7 @@ Functions:
 #import collections
 import typing
 import os
+import itertools
 import numpy as np
 import urllib.request as urlrequest
 import xarray as xr
@@ -92,31 +93,36 @@ def load_velocity_model(save_name, vs_fieldname, lat, lon) -> EarthModel:
         lon += 360
     i_lon = np.argmin(np.abs(ds['longitude'] - lon))
     model_vs = ds[vs_fieldname].values[:, i_lat, i_lon]
-    model_depth = ds['depth'].values
+    model_depth_orig = ds['depth'].values
+
+    # Interpolate to make sure all velocity models are evenly spaced in depth
+    model_depth = np.arange(0, model_depth_orig[-1],
+                            np.min(np.append(np.diff(model_depth_orig), 1.)))
+    model_vs = np.interp(model_depth, model_depth_orig, model_vs)
 
     # Fit the Vs profile with a smaller number of layers
     tol_vs = 0.1 # dVs (km/s) that should be noticeably different
     min_layer_thickness = 5 # (km)
+    min_layer_in = np.where(model_depth > min_layer_thickness)[0][0]
     # Find the indices for the uppermost possible layer as a flattened np array
-    d_inds = np.flatnonzero(min_layer_thickness+model_depth[0] >= model_depth)
-    layered_vs, layered_depth = convert_to_coarser_layers(
-        model_vs, model_depth, d_inds, tol_vs, min_layer_thickness)
+    split_inds = find_all_splits(model_vs, min_layer_in, tol_vs)
+    layered_depth, layered_vs = get_new_layers(
+        model_depth, model_vs, sorted(split_inds))
 
     # Convert from Vs and depth to Vp, rho, and thickness
-    vs = np.array(layered_vs)
-    depth = np.array(layered_depth)
     max_crustal_vs = 4. # Vs assumed to mark transition from crust to mantle
-    vp, rho, thickness = calculate_vp_rho(vs, depth, max_crustal_vs)
+    vp, rho, thickness = calculate_vp_rho(layered_vs, layered_depth,
+                                          max_crustal_vs)
 
     starting_model = EarthModel(
-        vs = vs,
+        vs = layered_vs,
         vp = vp,
         rho = rho,
-        depth = depth,
+        depth = layered_depth,
         thickness = thickness,
     )
 
-    return starting_model
+    return starting_model, ds[vs_fieldname].values[:, i_lat, i_lon], model_depth_orig
 
 def plot_earth_model(earth_model, fieldname):
     """ Convert from layered model into something to plot. """
@@ -132,6 +138,85 @@ def plot_earth_model(earth_model, fieldname):
     plt.ylabel('Depth (km)')
     ax = plt.gca().set_ylim(plot_depth[[-1, 0]])
     plt.show()
+
+def find_all_splits(y, min_layers_in, tol, splits=None, y_first_ind=None):
+    """ Recursively find the best places to split a vector, y, into layers.
+
+    """
+    if splits is None:
+        splits = []
+        y_first_ind = 0
+
+    split = find_best_split(y, min_layers_in, tol)
+    if not split:
+        return splits
+
+    splits += [split + y_first_ind]
+
+    if split >= min_layers_in * 2:
+        y_subset = y[:split]
+        splits = find_all_splits(y_subset, min_layers_in, tol,
+                                splits, y_first_ind)
+
+    if y.size - min_layers_in*2 >= split:
+        y_first_ind += split
+        y_subset = y[split:]
+        splits = find_all_splits(y_subset, min_layers_in, tol,
+                                splits, y_first_ind)
+
+    return splits
+
+def find_best_split(y, min_layers_in, tol):
+    """ Find the best place to split y.
+
+    """
+    if (2 * tol > np.ptp(y)) | (2 * min_layers_in > y.size):
+        return False
+
+    y_windowed = moving_window(y, min_layers_in)
+    split_window = np.argmax(
+        np.fromiter(map(np.ptp, y_windowed), dtype=np.float)
+    )
+    split = (split_window
+            + np.argmax(np.diff(y[split_window : split_window+min_layers_in]))
+            + 1)
+
+    # Make sure that split point gives large enough change in resultant layers
+    while tol > np.ptp(y[:split]):
+        split += 1
+    while tol > np.ptp(y[split:]):
+        split -= 1
+    # Make sure that split point leaves the resultant layers thick enough
+    split = max(split, min_layers_in)
+    split = min(split, y.size - (min_layers_in))
+
+    return split
+
+def moving_window(y, window_length):
+    """ Return a list of the windowed inputs.
+
+    For the array y, return windows of length window_length.  The moving
+    window shifts by 1 index between windows.  The windowed y is returned
+    as a list of tuples, where each tuple is an adjacent window.
+
+    Itertools help from https://realpython.com/python-itertools/
+    """
+    iters = []
+    for i in range(window_length):
+        iters += [iter(y[i::])]
+    return list(zip(*iters))
+
+def get_new_layers(x, y, inds):
+
+    layered_x = x[np.array(inds) - 1]
+
+    inds = [0] + inds + [x.size]
+    layers = []
+    for i in range(len(inds) - 1):
+        layers += [y[inds[i]:inds[i + 1]]]
+    layered_y = np.fromiter(map(np.median, layers), np.float)
+
+    return layered_x, layered_y
 
 def convert_to_coarser_layers(
         input_vs:np.array, input_depth:np.array, d_inds:np.array,
