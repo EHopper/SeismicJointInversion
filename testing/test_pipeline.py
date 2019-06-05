@@ -11,7 +11,7 @@ from parameterized import parameterized
 import numpy as np
 
 base_dir = pathlib.Path.home() / 'Documents/SurfaceWaves/INVERSION/'
-sys.path.insert(0, str(base_dir / 'functions'))
+sys.path.insert(0, str(base_dir / 'util'))
 import matlab
 import define_earth_model
 import surface_waves
@@ -67,7 +67,12 @@ class PipelineTest(unittest.TestCase):
 
 
     # Test simplification of velocity model to layers
-
+    # @parameterized.expand([
+    #     ("Model at 35N, 115W",
+    #         np.array([3.297, 3.513, 3.664, 3.939, 4.411, 4.232])),
+    #         np.array([5., 19.5, 25., 30.5, 40.])
+    # ])
+    #
 
     # Test full model generation (Vp, rho scaling)
     vs = np.array([4., 4.5, 4.7, 5.])
