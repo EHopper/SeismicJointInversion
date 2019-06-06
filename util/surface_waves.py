@@ -27,7 +27,7 @@ import typing
 import numpy as np
 
 import matlab
-#import earth_model
+import define_earth_model
 
 # =============================================================================
 # Set up classes for commonly used variables
@@ -57,10 +57,11 @@ class ObsPhaseVelocity(typing.NamedTuple):
     std: np.array
 
 # =============================================================================
-#       Synthesise Surface Wave Dispersion measurements
+#       Synthesise Surface Wave Dispersion measurements - Rix & Lai, 2003
 # =============================================================================
 
-def synthesise_surface_wave(model, periods) -> PhaseVelocity:
+def synthesise_surface_wave(model:define_earth_model.EarthModel,
+                            periods:np.array) -> PhaseVelocity:
     """ Calculate phase velocity given a velocity model and period range.
 
     The velocity model needs thickness, vp, vs, rho.  The period range
@@ -81,6 +82,18 @@ def synthesise_surface_wave(model, periods) -> PhaseVelocity:
             Lai, C.G., (1998). "Simultaneous Inversion of Rayleigh Phase
         Velocity and Attenuation for Near-Surface Site Characterization," Ph.D.
          Dissertation, Georgia Institute of Technology.
+
+    Arguments
+        - model (define_earth_model.EarthModel):
+            Input velocity and density model.
+        - periods (np.array):
+            Periods of interest (s).
+
+    Returns:
+        - calculated phase velocity:
+            .period: same as input periods
+            .cr: caluclated phase velocity (km/s)
+
     """
 
     freq = 1/periods
@@ -128,6 +141,16 @@ def _Rayleigh_phase_velocity_in_half_space(vp, vs):
     one that is closest to the estimated velocity).  However, it is
     5x faster to just use the estimated phase velocity, and it seems to
     give answers within about 0.5% (for Vp/Vs > 1.5).
+
+    Arguments
+        - vp (float):
+            Vp in the half space (km/s)
+        - vs (float):
+            Vs in the half space (km/s)
+
+    Returns
+        - estimated_phase_vel_rayleigh (float):
+            Estimated Rayleigh phase velocity, c, in the half space (km/s)
     """
 
     vp2=vp * vp
@@ -173,6 +196,33 @@ def _min_value_secular_function(omega, k_lims, n_ksteps,
     value less than the assigned tolerance, tol_s.  If no phase velocity is
     calculated, this function will recursively call itself with a more finely
     sampled search range (increased n_ksteps), i.e. decreased learning rate.
+
+    Arguments
+        - omega (float):
+            Angular frequency (Hz), omega = 2 * pi * frequency.
+        - k_lims (2 x 1 np.array):
+            Search range for wavenumber (1 / km) - i.e. phase velocity guesses.
+            The search range is from the maximum Vs in the input model to the
+            calculated phase velocity in a half space of the minimum Vs in the
+            input model (converted to k by k = omega/phase velocity).
+        - n_ksteps (int):
+            Granularity with which to search between k_lims - if no suitable
+            k is found with input n_ksteps, the search is restarted with
+            higher n_ksteps.
+        - thick (np.array):
+            Vector of layer thicknesses (km), length n_layers.
+        - rho (np.array):
+            Vector of density (g / cm^3), length n_layers.
+        - vp (np.array):
+            Vector of Vp (km/s), length n_layers.
+        - vs (np.array):
+            Vector of Vs (km/s), length n_layers.
+
+    Returns
+        - c (float):
+            Best guess at the phase velocity (km/s), calculated as omega/kmin,
+            where kmin corresponds to the k that returned the lowest value of
+            the secular function.
     """
 
     # Cycle through wavenumbers (i.e. velocity)
@@ -222,7 +272,8 @@ def _min_value_secular_function(omega, k_lims, n_ksteps,
     return c
 
 
-def _secular(k, om, thick, mu, rho, vp, vs):
+def _secular(k:float, om:float, thick:np.array, mu:np.array,
+             rho:np.array, vp:np.array, vs:np.array) -> float:
     """ Calculate the secular function.
 
     The smaller the returned value, the closer the wavenumber is to the
@@ -230,6 +281,29 @@ def _secular(k, om, thick, mu, rho, vp, vs):
 
     The Green's function is based on modified generalised reflection
     and transmission coefficients (see Hisada, 1994, BSSA; Appendix A)
+
+    Arguments:
+        - k (float):
+            Trial wavenumber (effectively phase velocity, given fixed angular
+            frequency; increasing k decreases phase velocity).
+            Wavenumber = 2 * pi / wavelength
+        - om (float):
+            Fixed angular frequency, omega = 2 * pi * frequency
+        - thick (np.array):
+            Vector of layer thicknesses from velocity model, length n_layers.
+        - mu (np.array):
+            Vector of mu = rho * vs**2, length n_layers.
+        - rho (np.array):
+            Vector of density, length n_layers.
+        - vp (np.array):
+            Vector of Vp, length n_layers.
+        - vs (np.array):
+            Vector of Vs, length n_layers.
+
+    Returns:
+        - d (float):
+            The absolute value of the secular function.  The smaller this
+            value, the closer the guessed wavenumber to the real phase velocity.
     """
 
     # Check to see if the trial phase velocity is equal to the shear wave

@@ -385,12 +385,12 @@ def calculate_vp_rho(vs:np.array, depth:np.array,
 
     Returns:
         - vp (np.array):
-            Vector of vp, same size as vs, calculated from Vs and depth
+            Vector of vp, same size as vs, calculated from Vs and depth.
         - rho (np.array):
-            Vector of density, same size as vs, calculated from Vs and depth
+            Vector of density, same size as vs, calculated from Vs and depth.
         - thickness (np.array):
-            Vector of layer thicknesses, same size as depth (doesn't include
-            the half space)
+            Vector of layer thicknesses, same size as vs, including some
+            arbitrary half_space_thickness appended onto the end.
     """
 
     # Initialise Vp, rho
