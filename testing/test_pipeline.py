@@ -165,7 +165,7 @@ class PipelineTest(unittest.TestCase):
              ),
     ])
     def test_MakeFullVelModel(self, name, vs, depth, max_crustal_vs, expected):
-        vp, rho, thickness = define_earth_model.calculate_vp_rho(
+        vp, rho, thickness = define_earth_model._calculate_vp_rho(
             vs, depth, max_crustal_vs)
         full_model = define_earth_model.EarthModel(
             vs = vs, vp = vp, thickness = thickness, depth = depth, rho = rho,
@@ -191,7 +191,7 @@ class PipelineTest(unittest.TestCase):
     @parameterized.expand([("Moho only", vs[[0]], 3.1099)])
     def test_homogeneous(self, name, vs, expected):
         """ Test Rayleigh phase velocity calculation in a half space """
-        vp, rho, thickness = define_earth_model.calculate_vp_rho(
+        vp, rho, thickness = define_earth_model._calculate_vp_rho(
             vs, np.array([])) # Use only the first values as half space
         np.testing.assert_array_almost_equal(
             surface_waves._Rayleigh_phase_velocity_in_half_space(vp, vs),
@@ -250,7 +250,7 @@ class PipelineTest(unittest.TestCase):
         """
 
         # Calculate the input velocity model
-        vp, rho, thickness = define_earth_model.calculate_vp_rho(
+        vp, rho, thickness = define_earth_model._calculate_vp_rho(
             vs, depth, 4.4)
 
         # Set guessed phase velocity so it is similar to the input Vs model
@@ -287,7 +287,7 @@ class PipelineTest(unittest.TestCase):
     ])
     def test_synthesise_surface_wave(self, name, vs, depth, swd_obs):
         pass
-        vp, rho, thickness = define_earth_model.calculate_vp_rho(
+        vp, rho, thickness = define_earth_model._calculate_vp_rho(
             vs, depth, 4.4)
         full_model = define_earth_model.EarthModel(
             vs = vs, vp = vp, thickness = thickness, depth = depth, rho = rho,
