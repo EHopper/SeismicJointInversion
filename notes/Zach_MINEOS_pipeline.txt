@@ -1,0 +1,226 @@
+This is from his GitHub repo:
+https://github.com/eilonzach/matlab_to_mineos
+
+Note that he has a standard input Q model in safekeeping/qmod.
+
+He includes an example in example/example.m
+
+swperiods (vector): periods (s)
+model (str): name of card file
+
+par_mineos (struct): various commonly changed parameters, e.g.
+  .R_or_L (str): 'R' or 'L' for Rayleigh or Love
+  .phV_or_grV (str): 'ph' or 'gr' for phase or group velocity
+  .ID (str): unique ID for that run
+
+*********** CALLS ***************
+[phV_R1,grV_R1,eigfiles] = run_mineos(model,swperiods,par_mineos,0,1,1);
+
+(last three arguments are calls on whether to delete files, plot, be verbose)
+
+1. Set up some parameters
+parm (struct): various parameters for MINEOS
+  .R_or_L (str): 'R' or 'L' for Rayleigh or Love
+  .phV_or_grV (str): 'ph' or 'gr' for phase or group velocity
+  .lmin (int)=0: minimum angular order
+  .lmax (int)=3500: expected max angular order
+  .fmin (float)= 0.05: min frequency (mHz)
+  .fmax (float)=200.05: max frequency (mHz) - reset by min period
+  .l_increment_standard (int)=2:  ???
+  .l_increment_failed (int)=5: ???
+  .maxrunN (int)=5e2: ???
+  .qmodpath (str)='[...]/safekeeping/qmod'
+
+Update parm with the values input via par_mineos, including
+  .fmax = 1000./ min(swperiods) + 1 (go to slightly higher freq than min period)
+
+ID (str): [parm.ID, 'R' (or 'L')]
+cardfile (str): [parm.ID, '.model']
+modetype (str) = 'S' (if .R_or_L == 'R') or 'T' (if == 'L'): spherical/toroidal
+MINEOSDIR (str): directory to base all paths from (directory containing the
+                  run_mineos.m file)
+
+2. Deal with the velocity model card
+If model is a string and points to a file in the working directory, set
+cardfile = model; delcard = false;
+
+Otherwise, if have model as a structure, can write everything out:
+2a. VsvVsh_from_VsXi(model.VS, xi), where xi = 1 + model.Sanis/100
+https://github.com/eilonzach/seis_tools/
+      %[ Vsv,Vsh ] = VsvVsh_from_VsXi( Vs,Xi )
+      %   Function to calculate Vsv and Vsh from the voigt average velocity (Vs)
+      %   and the value of xi, which describes the radial anisotropy, where
+      %
+      %   Vs^2 = (Vsh^2 + 2Vsv^2)/3
+      %   xi = Vsh^2/Vsv^2 (=N/L)
+      Vsv = Vs .* sqrt(3./(xi+2));
+      Vsh = Vs .* sqrt(3.*xi./(xi + 2));
+2b. VpvVph_from_VpPhi(model.VP, phi), where phi = 1 + model.Panis/100
+https://github.com/eilonzach/seis_tools/
+      % [ Vpv,Vph ] = VpvVph_from_VpPhi( Vp,phi )
+      %   Function to calculate Vpv and Vph from the voigt average velocity (Vp)
+      %   and the value of phi, which describes the radial anisotropy, where
+      %
+      %   Vp^2 = (4Vph^2 + Vpv^2)/5
+      %   xi = Vpv^2/Vph2 (=C/A)
+      Vph = Vp .* sqrt(5./(phi+4));
+      Vpv = Vp .* sqrt(5.*phi./(phi + 4));
+2c. write_cardfile(cardfile, model.z, vpv, vsv, model.rho, [], [], vph, vsh)
+https://github.com/eilonzach/seis_tools/
+  This stitches your input model onto PREM, but I'm not entirely sure
+  where he has PREM saved.  Future Emily problem...!
+
+2d. [model_info] = read_cardfile(cardfile)
+https://github.com/eilonzach/seis_tools/
+    End up with model.R (in km), model.rho, model.Vpv, model.Vsv, model.Vph,
+    model.Vsh, model.Qk, model.Qm, model.eta, model.Z (6371 - model.R)
+
+    Also calculate the voight average to get model.Vs, model.Vp
+    And save model.details - information from cardfile header
+    And save model.nlay, model.discz - parse discontinuity info from header.
+
+
+skiplines = model_info.nlay + 5 (skip this many lines from .asc output file)
+
+3. Run MINEOS!
+lrun = 0
+execfile = [ID '_' lrun '.run_mineos']
+ascfile = [ID '_' lrun '.asc']
+eigfile = [ID '_' lrun '.eig']
+modefile = [ID '_' lrun '.mode']
+
+3a. writeMIENOSmodefile(modefile, modetype, parm.lmin, parm.lmax, parm.fmix, parm.fmax)
+    This writes the equivalent of Josh's MODE/TABLES/MODE.in
+    1.d-12  1.d-12  1.d-12 .126
+    [3 (if spherical) or 2 (if toroidal)]
+    (minL) (maxL) (minF) (maxF) 1
+    0
+3b. writeMIENOSexecfile(execfile, cardfile, modefile, eigfile, ascfile, [ID '.log'])
+    This writes the equivalent of Josh's ./run/mineos_nohang
+    (cardfile)
+    (ascfile)
+    (eigfile)
+    (modefile)
+
+    and wraps it in something that just lets you run it with MINEOS
+3c. timeout 100 (execfile) (run this as a system command)
+    run the mineos_nohang equivalent file
+
+delete execfile and modefile
+
+4.  Read output
+4a. [~, llast, lfirst, Tmin] = readMINEOS_ascfile(ascfile, 0, skiplines)
+    For each of the ascfiles (there will be multiple strings appended in
+    loop for fixing the broken stuff later)...
+      open the ascfile and scan until get to a line beginning with 'MODE'
+      then save this to a structure, modes_done
+      Remember the .asc file has the columns:
+        n: spherical harmonics - number of nodes in radius (i.e. mode)
+        type: S or T (or R)
+        l: spherical harmonics - number of nodes in latitude
+        wrad: spherical harmonics - angular frequency in rad/s
+        w: spherical harmonics - angular frequency in mhz
+        t: period
+        grv: group velocity
+        Q: shear attenuation
+        Qkappa: bulk attenuation
+    Return the maximum and minimum l from the .asc file and the minimum T (max f)
+
+ascfiles = {ascfile}
+eigfiles = {eigfile}
+llasts = llast; lrunstrs = num2str(lrun)
+
+5. If missing higher modes, restart
+while Tmin > min(swperiods)
+  lrun = lrun + 1; lmin = llast + parm.l_increment_standard
+  if lrun > parm.maxrunN: return an error
+
+  Rename execfile, ascfile, eigfile, modefile with new lrun number
+  Rerun writeMINEOSmodefile, writeMINEOSexecfile with new file names and new lmin
+  Rerun the executable
+  Redelete execfile and modefile
+  Rerun readMINEOS_ascfile
+    if isempty(llast) (i.e. that run produced nothing)
+      llast = lmin + parm.l_increment_failed
+      continue
+    otherwise, append the new ascfile, eigfile, llast, lrunstr to the old ones
+end of while block
+
+6. Fix the eig files
+eigfiles_fix = eigfiles
+for ief = 1:length(eigfiles) - 1:
+  execfile = [ID '_' lrunstr{ief} '.eig_recover']
+6a. writeMINEOSeig_recover(execfile, eigfiles{ief}, llasts(ief))
+    This writes an execfile to call eig_recover, given eigfile and l_last.
+  Run the execfile
+  eigfiles_fix{ief} = [eigfiles{ief} '_fix']
+  delete the execfile
+
+7. Do the Q-correction
+qexecfile = [ID '.run_mineosq']
+7a. writeMINEOS_Qexecfile(qexecfile, eigfiles_fix, qmod, [ID '.q'], [ID '.log'])
+    This writes the equivalent of Josh's run_q.[st], to run with mineos_q
+        qmod
+        qfile
+        [eigfiles listed on individual rows]
+run the qexecfile
+delete the qexecfile
+
+8. Read phase and group velocities
+8a. [phV, grV] = readMINEOS_qfile([ID '.q'], swperiods)
+    Read in phV and grV from [ID '.q'] - which has columns
+        n: spherical harmonics - number of nodes in radius (i.e. mode)
+        l: spherical harmonics - number of nodes in latitude
+        wrad: spherical harmonics - angular frequency in rad/s
+        w: spherical harmonics - angular frequency in mhz
+        T: period
+        phV: phase velocity
+        grv: group velocity
+        Q: shear attenuation
+        Qkappa: bulk attenuation
+
+    Interpolate from given phV, T to desired swperiods
+
+check for NaN in phV and grV
+Optionally delete all .asc, .q, .eig, .eig_fix, .log files
+Optionally plot the calculated phV, grV
+
+
+
+******* CALLS ********
+[K_R1] = run_kernels(swperiods,par_mineos,eigfiles,ifdelete,ifplot,ifverbose);
+
+Set same parameters as above.
+ph_gr = [True, False] (depending on parm.phV_or_grV)
+ID = [parm.ID, parm.R_or_L]
+logfile = [ID '.log']
+execfile_k = [ID '.run_kernels']
+stripfile = [ID '.strip']
+tabfile = [ID '.table']
+qfile = [ID '.q']
+kernelfile = [ID '.frechet']
+
+1. Calculate and read in perturbation kernels
+1a. ikernelfiles = writeKERNELCALCexecfile(swperiods, parm.R_or_L, ph_gr,
+        execfile_k,stripfile,eigfiles,qmod,tabfile,qfile,kernelfile,ID,logfile)
+    This writes the file that runs mineos_strip and then mineos_table and then
+    plot_wk and then frechet_cv (phase velocity) and then frechet (group
+    velocity prep) and then frechet_gv (not run by Josh) and then
+    draw_frechet_gv (for phase and group velocities)
+    i.e. Josh's run_strip.[st] and run_table.[st] and run_plotwk.[ts] and
+    run_frechetcv.[ts] and run_frechet.[ts]
+
+
+Execute execfile_k
+
+2. Read in kernels
+for iv = 1:length(find(ph_gr)) % for phase and group velocity
+for ip = 1:length(ikernelfiles) % for each period
+2a.    SW_V_kernels{ip,iv} = readMINEOS_kernelfile(ikernelfiles{ip,vees(iv)},parm.R_or_L,phgropt(vees(iv)));
+          Read in Vsv, Vpv, Vsh, Vph, eta, rho from kernel file
+    SW_V_kernels{ip,iv}.period = swperiods(ip);
+end
+end
+
+Optionally plot.
+Optionally delete files.
