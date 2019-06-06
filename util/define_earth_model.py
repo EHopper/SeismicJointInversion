@@ -364,7 +364,7 @@ def get_new_layers(x:np.array, y:np.array, inds:list) -> (np.array, np.array):
     return layered_x, layered_y
 
 def calculate_vp_rho(vs:np.array, depth:np.array,
-                     max_crustal_vs=4.:int) -> :
+                     max_crustal_vs:int=4) -> (np.array, np.array, np.array):
     """ Convert from Vs and depth to Vp, rho, and thickness.
 
     Different scalings are required for the crust and the mantle, so
