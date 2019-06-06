@@ -1,22 +1,34 @@
-""" Generate synthetic surface waves.
-
-This is an all-Python code to calculate surface wave phase velocities
-from a given starting velocity model.  Ultimately, this should perhaps
-be replaced with MINEOS.
+""" Generate Earth models to work with surface_waves
 
 Classes:
-    PhaseVelocity - period, phase velocity, and error for surface waves
+    EarthModel - Vs, Vp, density, layer thickness, boundary depths
 
 Functions:
-    synthesise_surface_wave(model, swd_in) -> PhaseVelocity:
-        - calculate surface wave phase velocities given model and period
-    _Rayleigh_phase_velocity_in_half_space(vp, vs) -> float:
-        - given Vp and Vs of a half space, calculate phase velocity
-    _min_value_secular_function(omega, k_lims, n_ksteps,
-                                thick, rho, vp, vs, mu) -> float:
-        - search over k_lims to find the minimum value of _secular()
-    _secular(k, om, thick, mu, rho, vp, vs) -> float:
-        - calculate Green's function for velocity structure
+    download_velocity_model(save_name:str, server_name:str) -> str:
+        - Download an IRIS EMC hosted velocity model as a .nc file
+    load_velocity_model(save_name:str, vs_fieldname:str,
+                        lat:float, lon:float) -> EarthModel:
+        - Starting from a .nc file, calculate a full model (inc. Vp, rho)
+    _find_all_splits(y:np.array, min_layers_in:int, tol:float,
+                        splits=None, y_first_ind=None) -> list:
+        - Find the best points to split input y (Vs) based on largest jumps
+    _find_best_split(y:np.array, min_layers_in:int, tol:float) -> int:
+        - Find the single best point to split input y (Vs) based on largest jump
+    _moving_window(y:np.array, window_length:int) -> list:
+        - Define moving windows (offset by 1 element) for y
+    _get_new_layers(x:np.array, y:np.array, inds:list) -> (np.array, np.array):
+        - Convert x and y to downsampled model, with new layers defined by inds
+    _calculate_vp_rho(vs:np.array, depth:np.array,
+                      max_crustal_vs:int=4) -> (np.array, np.array, np.array):
+        - Calculate Vp and density from Vs and depth
+    _Brocher05_scaling(vs: np.array) -> (np.array, np.array):
+        - Scale from Vs to Vp, rho for crustal rocks.
+    _Forte07_scaling(vs:np.array, depth:np.array) -> np.array:
+        - Scale from Vs & depth to rho for mantle rocks.
+    plot_earth_model(earth_model:EarthModel, fieldname:str):
+        - plot EarthModel field (i.e. 'vs', 'vp', 'rho')
+
+
 """
 
 
@@ -38,13 +50,13 @@ import matlab
 class EarthModel(typing.NamedTuple):
     """ Layered Earth model (Vs, Vp, rho, layer thickness, boundary depths)
 
-    Vs, Vp, and rho include values for the underlying half space.
+    Vs, Vp, rho, and thickness include values for the underlying half space.
 
     Fields:
         - vs: layer shear velocity (km/s)
         - vp: phase velocity (km/s)
         - rho: density (Mg/m^3)
-        - thickness: layer thickness (km), half space not included
+        - thickness: layer thickness (km)
         - depth: depth of base of layer (km), half space not included
     """
     vs: np.array
@@ -99,8 +111,8 @@ def load_velocity_model(save_name:str, vs_fieldname:str,
     This function opens the .nc file, finds the closest point in latitude
     and longitude to the input location (lat, lon arguments), and pulls out
     the Vs structure there.  It then converts the depth/Vs model into a
-    model with coarser layers (using find_all_splits()), and calculates
-    the expected Vp and density structure  (using calculate_vp_rho()).
+    model with coarser layers (using _find_all_splits()), and calculates
+    the expected Vp and density structure  (using _calculate_vp_rho()).
 
     Arguments:
         - save_name (str):
@@ -118,8 +130,8 @@ def load_velocity_model(save_name:str, vs_fieldname:str,
     Returns:
         - starting_model (EarthModel):
             The EarthModel is returned as a coarse layers version of the input
-            Vs model (using find_all_splits()), and further calculates the
-            fields vp, rho, thickness (using calculate_vp_rho())
+            Vs model (using _find_all_splits()), and further calculates the
+            fields vp, rho, thickness (using _calculate_vp_rho())
 
     """
 
@@ -145,13 +157,13 @@ def load_velocity_model(save_name:str, vs_fieldname:str,
     min_layer_thickness = 5 # (km)
     min_layers_in = np.where(model_depth > min_layer_thickness)[0][0]
     # Find the indices for the uppermost possible layer as a flattened np array
-    split_inds = find_all_splits(model_vs, min_layers_in, tol_vs)
-    layered_depth, layered_vs = get_new_layers(
+    split_inds = _find_all_splits(model_vs, min_layers_in, tol_vs)
+    layered_depth, layered_vs = _get_new_layers(
         model_depth, model_vs, sorted(split_inds))
 
     # Convert from Vs and depth to Vp, rho, and thickness
     max_crustal_vs = 4. # Vs assumed to mark transition from crust to mantle
-    vp, rho, thickness = calculate_vp_rho(layered_vs, layered_depth,
+    vp, rho, thickness = _calculate_vp_rho(layered_vs, layered_depth,
                                           max_crustal_vs)
 
     starting_model = EarthModel(
@@ -179,7 +191,7 @@ def plot_earth_model(earth_model:EarthModel, fieldname:str):
     ax = plt.gca().set_ylim(plot_depth[[-1, 0]])
     plt.show()
 
-def find_all_splits(y:np.array, min_layers_in:int, tol:float,
+def _find_all_splits(y:np.array, min_layers_in:int, tol:float,
                     splits=None, y_first_ind=None) -> list:
     """ Recursively find the best places to split a vector, y, into layers.
 
@@ -231,7 +243,7 @@ def find_all_splits(y:np.array, min_layers_in:int, tol:float,
         splits = []
         y_first_ind = 0
 
-    split = find_best_split(y, min_layers_in, tol)
+    split = _find_best_split(y, min_layers_in, tol)
     if not split:
         # No splits were found for this y given the search thresholds
         return splits
@@ -243,18 +255,18 @@ def find_all_splits(y:np.array, min_layers_in:int, tol:float,
     if split >= min_layers_in * 2:
         # If there are possible splits earlier in y than the identified split
         y_subset = y[:split]
-        splits = find_all_splits(y_subset, min_layers_in, tol,
+        splits = _find_all_splits(y_subset, min_layers_in, tol,
                                 splits, y_first_ind)
     if y.size - min_layers_in*2 >= split:
         # If there are possible splits later in y than the identified split
         y_first_ind += split
         y_subset = y[split:]
-        splits = find_all_splits(y_subset, min_layers_in, tol,
+        splits = _find_all_splits(y_subset, min_layers_in, tol,
                                 splits, y_first_ind)
 
     return splits
 
-def find_best_split(y:np.array, min_layers_in:int, tol:float) -> int:
+def _find_best_split(y:np.array, min_layers_in:int, tol:float) -> int:
     """ Find the best place to split y.
 
     This is a slightly more complicated version of just finding the maximum
@@ -286,7 +298,7 @@ def find_best_split(y:np.array, min_layers_in:int, tol:float) -> int:
     if (2 * tol > np.ptp(y)) | (2 * min_layers_in > y.size):
         return False
 
-    y_windowed = moving_window(y, min_layers_in)
+    y_windowed = _moving_window(y, min_layers_in)
     split_window = np.argmax(
         np.fromiter(map(np.ptp, y_windowed), dtype=np.float)
     )
@@ -305,7 +317,7 @@ def find_best_split(y:np.array, min_layers_in:int, tol:float) -> int:
 
     return split
 
-def moving_window(y:np.array, window_length:int) -> list:
+def _moving_window(y:np.array, window_length:int) -> list:
     """ Return a list of the windowed inputs.
 
     For the array y, return windows of length window_length.  The moving
@@ -331,7 +343,7 @@ def moving_window(y:np.array, window_length:int) -> list:
         iters += [iter(y[i::])]
     return list(zip(*iters))
 
-def get_new_layers(x:np.array, y:np.array, inds:list) -> (np.array, np.array):
+def _get_new_layers(x:np.array, y:np.array, inds:list) -> (np.array, np.array):
     """ Convert x, y arrays to downsampled arrays (coarser layers).
 
     Arguments:
@@ -363,7 +375,7 @@ def get_new_layers(x:np.array, y:np.array, inds:list) -> (np.array, np.array):
 
     return layered_x, layered_y
 
-def calculate_vp_rho(vs:np.array, depth:np.array,
+def _calculate_vp_rho(vs:np.array, depth:np.array,
                      max_crustal_vs:int=4) -> (np.array, np.array, np.array):
     """ Convert from Vs and depth to Vp, rho, and thickness.
 
@@ -416,17 +428,17 @@ def calculate_vp_rho(vs:np.array, depth:np.array,
     crust_inds = np.arange(Moho_ind)
 
     # Scale from Vs to Vp and rho in the crust
-    vp[crust_inds], rho[crust_inds] = Brocher05_scaling(vs[crust_inds])
+    vp[crust_inds], rho[crust_inds] = _Brocher05_scaling(vs[crust_inds])
 
     # Any deeper values (sub-Moho) are mantle, so have different scaling.
     if mantle_inds.size:
         vp[mantle_inds] = vs[mantle_inds] * 1.75 # Fix mantle Vp/Vs ratio
-        rho[mantle_inds] = Forte07_scaling(vs[mantle_inds],
+        rho[mantle_inds] = _Forte07_scaling(vs[mantle_inds],
                                            av_layer_depth[mantle_inds])
 
     return vp, rho, thickness
 
-def Brocher05_scaling(vs: np.array) -> (np.array, np.array):
+def _Brocher05_scaling(vs: np.array) -> (np.array, np.array):
     """ Scale from Vs to Vp and rho - appropriate for the crust only.
 
     These equations are from Brocher et al., 2005, BSSA
@@ -456,7 +468,7 @@ def Brocher05_scaling(vs: np.array) -> (np.array, np.array):
 
     return vp, rho
 
-def Forte07_scaling(vs:np.array, depth:np.array) -> np.array:
+def _Forte07_scaling(vs:np.array, depth:np.array) -> np.array:
     """ Scale from Vs to rho - appropriate for the mantle only.
 
     These equations are from Forte et al., 2007, GRL

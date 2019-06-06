@@ -5,7 +5,8 @@ from a given starting velocity model.  Ultimately, this should perhaps
 be replaced with MINEOS.
 
 Classes:
-    PhaseVelocity - period, phase velocity, and error for surface waves
+    PhaseVelocity, with fields period and phase velocity
+    ObsPhaseVelocity, with fields period, phase velocity, and error
 
 Functions:
     synthesise_surface_wave(model, swd_in) -> PhaseVelocity:
