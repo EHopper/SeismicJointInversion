@@ -57,11 +57,25 @@ class EarthModel(typing.NamedTuple):
 #       Initialise and update Earth Model.
 # =============================================================================
 
-def download_velocity_model(save_name, server_name):
-    """ Import an IRIS hosted Earth model and extract model for a lat/lon point
+def download_velocity_model(save_name:str, server_name:str) -> str:
+    """ Download an IRIS hosted Earth model (.nc file).
 
     This is based on fetch_velo_models.py from the VBR package (Holtzman
     and Havlin, 2019), written by Chris Havlin.
+
+    Arguments:
+        - save_name (str):
+            Name for saving the model (in ./data/earth_models/)
+        - server_name (str):
+            Name that model is saved as on the IRIS EMC
+
+    Returns:
+        - filename (str):
+            Saved location of downloaded file.
+
+    Saves:
+        - ./data/earth_models/[save_name].nc:
+            File from IRIS server
     """
 
     # EMC website
@@ -78,8 +92,34 @@ def download_velocity_model(save_name, server_name):
 
     return filename
 
-def load_velocity_model(save_name, vs_fieldname, lat, lon) -> EarthModel:
-    """ Load in relevant parts of .nc files
+def load_velocity_model(save_name:str, vs_fieldname:str,
+                        lat:float, lon:float) -> EarthModel:
+    """ Load in velocity model (from .nc file) for a given (lat, lon).
+
+    This function opens the .nc file, finds the closest point in latitude
+    and longitude to the input location (lat, lon arguments), and pulls out
+    the Vs structure there.  It then converts the depth/Vs model into a
+    model with coarser layers (using find_all_splits()), and calculates
+    the expected Vp and density structure  (using calculate_vp_rho()).
+
+    Arguments:
+        - save_name (str):
+            Name of .nc file (inc. path from working dir)
+        - vs_fieldname (str):
+            This is 'vs' if input model is isotropic, 'vsv' if anisotropic.
+            Need to check on the IRIS EMC website to make sure of the name
+            so will load in the correct field from the .nc file.
+        - lat (float):
+            Latitude of interest (+ve is north, -ve is south)
+        - lon (float):
+            Longitude of interest (+ve is east, can optionally use -ve as west)
+            Note that the convention for the IRIS EMC seems to be all positive.
+
+    Returns:
+        - starting_model (EarthModel):
+            The EarthModel is returned as a coarse layers version of the input
+            Vs model (using find_all_splits()), and further calculates the
+            fields vp, rho, thickness (using calculate_vp_rho())
 
     """
 
@@ -103,9 +143,9 @@ def load_velocity_model(save_name, vs_fieldname, lat, lon) -> EarthModel:
     # Fit the Vs profile with a smaller number of layers
     tol_vs = 0.1 # dVs (km/s) that should be noticeably different
     min_layer_thickness = 5 # (km)
-    min_layer_in = np.where(model_depth > min_layer_thickness)[0][0]
+    min_layers_in = np.where(model_depth > min_layer_thickness)[0][0]
     # Find the indices for the uppermost possible layer as a flattened np array
-    split_inds = find_all_splits(model_vs, min_layer_in, tol_vs)
+    split_inds = find_all_splits(model_vs, min_layers_in, tol_vs)
     layered_depth, layered_vs = get_new_layers(
         model_depth, model_vs, sorted(split_inds))
 
@@ -124,7 +164,7 @@ def load_velocity_model(save_name, vs_fieldname, lat, lon) -> EarthModel:
 
     return starting_model, ds[vs_fieldname].values[:, i_lat, i_lon], model_depth_orig
 
-def plot_earth_model(earth_model, fieldname):
+def plot_earth_model(earth_model:EarthModel, fieldname:str):
     """ Convert from layered model into something to plot. """
     field = getattr(earth_model, fieldname)
     depth = earth_model.depth
@@ -139,26 +179,74 @@ def plot_earth_model(earth_model, fieldname):
     ax = plt.gca().set_ylim(plot_depth[[-1, 0]])
     plt.show()
 
-def find_all_splits(y, min_layers_in, tol, splits=None, y_first_ind=None):
+def find_all_splits(y:np.array, min_layers_in:int, tol:float,
+                    splits=None, y_first_ind=None) -> list:
     """ Recursively find the best places to split a vector, y, into layers.
 
+    Find all splits in the input, 'y', that result in coarser layers that are
+    made up of at least 'min_layers_in' original layers.  The coarser layers
+    must also have contrasts between them of at least 'tol'.  For the initial
+    call, set splits and y_first_ind to be empty.
+
+    This function searches first for the largest contrasts in y and puts splits
+    in there, then works down to smaller and smaller contrasts in y until the
+    threshold values (min_layers_in, tol) are met.
+
+    Arguments:
+        - y (np.array):
+            Array to be divided into coarser layers.
+        - min_layers_in (int):
+            When downsampling the original array, y, this is the minimum number
+            of original layers that are to be included in each layer.  Note that
+            this is number of layers, not some variable with units!
+        - tol (float):
+            This is the minimum contrast in y that is acceptable within each
+            layer.  If y varies less than 2 * tol, no new splits will be made.
+        - splits (list):
+            When the function is called recursively, this is the list of split
+            points on which it has identified the biggest changes.
+        - y_first_ind (int):
+            When the function is called recursively, this is the index in y
+            that the first point in the subset of y being searched over
+            corresponds to such that the output splits correspond to indices
+            in the original y.
+
+    Returns:
+        - splits (list):
+            List of the indices of the major jumps in y, for use in making
+            a coarse version of y.  Note that this list is unsorted - instead,
+            the first index corresponds to the first identified (largest) jump.
+            Note that the order does not strictly correspond to the size of the
+            change in y identified, as the code will search for earlier changes
+            before it searches for later changes.
+
     """
+
+    # This is the recommended way of starting with an empty argument, as
+    # default values are not re-evaluated on multiple calls of the function,
+    # so if define it as something mutable (e.g. []), then future calls to
+    # the function use the default values with any subsequent changes applied:
+    # https://docs.python.org/3/reference/compound_stmts.html#function-definitions
     if splits is None:
         splits = []
         y_first_ind = 0
 
     split = find_best_split(y, min_layers_in, tol)
     if not split:
+        # No splits were found for this y given the search thresholds
         return splits
 
     splits += [split + y_first_ind]
 
+    # Find additional splits by looking at the subsets of y before and after
+    # the identified best split.
     if split >= min_layers_in * 2:
+        # If there are possible splits earlier in y than the identified split
         y_subset = y[:split]
         splits = find_all_splits(y_subset, min_layers_in, tol,
                                 splits, y_first_ind)
-
     if y.size - min_layers_in*2 >= split:
+        # If there are possible splits later in y than the identified split
         y_first_ind += split
         y_subset = y[split:]
         splits = find_all_splits(y_subset, min_layers_in, tol,
@@ -166,9 +254,34 @@ def find_all_splits(y, min_layers_in, tol, splits=None, y_first_ind=None):
 
     return splits
 
-def find_best_split(y, min_layers_in, tol):
+def find_best_split(y:np.array, min_layers_in:int, tol:float) -> int:
     """ Find the best place to split y.
 
+    This is a slightly more complicated version of just finding the maximum
+    difference in y.  It first identifies the window (min_layers_in large) that
+    has the largest change in y, as this should be more significant than a
+    single, slightly larger change in y surrounded by relatively constant y.
+    It then finds the index of the largest change in y within that window.
+
+    It further checks that this best split location conforms to the threshold
+    requirements (min_layers_in and tol).  No splits are returned if the
+    resulting layers would not conform.  If the identified split would not
+    conform to these requirements, the split is adjusted until it does fit.
+
+    Arguments:
+        - y (np.array):
+            Array to be divided into coarser layers.
+        - min_layers_in (int):
+            When downsampling the original array, y, this is the minimum number
+            of original layers that are to be included in each layer.  Note that
+            this is number of layers, not some variable with units!
+        - tol (float):
+            This is the minimum contrast in y that is acceptable within each
+            layer.  If y varies less than 2 * tol, no new splits will be made.
+
+    Returns:
+        - split (int):
+            Best index in y for capturing large changes in y.
     """
     if (2 * tol > np.ptp(y)) | (2 * min_layers_in > y.size):
         return False
@@ -192,7 +305,7 @@ def find_best_split(y, min_layers_in, tol):
 
     return split
 
-def moving_window(y, window_length):
+def moving_window(y:np.array, window_length:int) -> list:
     """ Return a list of the windowed inputs.
 
     For the array y, return windows of length window_length.  The moving
@@ -200,13 +313,45 @@ def moving_window(y, window_length):
     as a list of tuples, where each tuple is an adjacent window.
 
     Itertools help from https://realpython.com/python-itertools/
+
+    Arguments:
+        - y (np.array):
+            Array to be divided into windows.
+        - window_length (int):
+            Number of elements in each window
+
+    Returns:
+        - List of tuples, where each tuple contains the values of y that are
+          in each window.  The list therefore has (y.size - window_length)
+          elements in it.
+
     """
     iters = []
     for i in range(window_length):
         iters += [iter(y[i::])]
     return list(zip(*iters))
 
-def get_new_layers(x, y, inds):
+def get_new_layers(x:np.array, y:np.array, inds:list) -> (np.array, np.array):
+    """ Convert x, y arrays to downsampled arrays (coarser layers).
+
+    Arguments:
+        - x (np.array):
+            Vector assumed to be monotonically increasing.
+        - y (np.array):
+            Vector of the same size as x.
+        - inds (list):
+            List of indices in the x vector to be used for downsampling.  Each
+            index is of the shallowest point in the new layer, but the first
+            index is not included.
+
+    Returns:
+        - layered_x (np.array):
+            Maximum x in each new layer, of the same length as inds.
+        - layered_y (np.array):
+            Median y in each new layer, including for the half-space (layer
+            starting at inds[-1] assumed to extend to infinity).  Layered_y
+            will therefore have one more element than layered_x.
+    """
 
     layered_x = x[np.array(inds) - 1]
 
@@ -218,81 +363,34 @@ def get_new_layers(x, y, inds):
 
     return layered_x, layered_y
 
-def convert_to_coarser_layers(
-        input_vs:np.array, input_depth:np.array, d_inds:np.array,
-        tol_vs=0.1, min_layer_thickness=5,
-        layered_vs=None, layered_depth=None) -> (list, list):
-    """ Redefine the velocity model in terms of layers.
-
-    The surface wave forward model runs slower and slower the more layers
-    there are, so simplify the velocity model to speed things up.
-
-    The new layered model requires layers to be at least min_layer_thickness km
-    thick (5 km default).  It allows thicker layers than this, as long as the
-    Vs change within the layer stays within tol_vs (0.1 km/s default).
-
-    The function works by guessing a depth range of a possible layer (d_inds).
-    If this layer has more than tol_s velocity contrast in it, the guessed layer
-    is appended to the output layered_vs, layered_depth.  The function is then
-    called again guessing the adjacent deeper layer depth range.
-    If there is less velocity contrast than tol_s, the guessed depth range is
-    increased, and the function is called again using this expanded d_inds.
-    If d_inds reaches the maximum input depth, the median velocity of the
-    half-space is appended to layered_vs, and layered_vs and layered_depth are
-    returned.
-
-    Note that layered_vs will be 1 longer than layered_depth, as it includes
-    a velocity value for the half-space.  These are both lists.
-
-    args section here!
-    returns section afterwards!
-    """
-
-    # This is the recommended way of starting with an empty argument, as
-    # default values are not re-evaluated on multiple calls of the function,
-    # so if define it as something mutable (e.g. []), then future calls to
-    # the function use the default values with any subsequent changes applied:
-    # https://docs.python.org/3/reference/compound_stmts.html#function-definitions
-    if layered_vs is None:
-        layered_vs = []
-        layered_depth = []
-
-    # If it has reached the bottom of the input model, add on the half space
-    # and return the layered model.
-    if d_inds[-1] >= input_depth.size - 1:
-        d_inds = np.arange(d_inds[0], input_depth.size)
-        layered_vs += [np.median(input_vs[d_inds])]
-        return layered_vs, layered_depth
-
-    if np.ptp(input_vs[d_inds]) > tol_vs:
-        # If dVs across depth range is above tol_vs, record the new layer.
-        deepest_point = input_depth[d_inds[-1]]
-        layered_depth += [deepest_point]
-        layered_vs += [np.median(input_vs[d_inds])]
-        # Reset d_inds to span new minimum thickness layer, and
-        # recursively call this function.
-        d_inds = np.flatnonzero(
-            (min_layer_thickness >= input_depth-deepest_point)
-            & (input_depth > deepest_point)
-        )
-        return convert_to_coarser_layers(
-            input_vs, input_depth, d_inds, tol_vs, min_layer_thickness,
-            layered_vs, layered_depth)
-
-    else:
-        # If dVs across depth range is below tol_vs, increase the depth range
-        # and try re-calling the function.
-        d_inds = np.append(d_inds, d_inds[-1] + 1)
-        return convert_to_coarser_layers(
-            input_vs, input_depth, d_inds, tol_vs, min_layer_thickness,
-            layered_vs, layered_depth)
-
-def calculate_vp_rho(vs:np.array, depth:np.array, max_crustal_vs=4.):
+def calculate_vp_rho(vs:np.array, depth:np.array,
+                     max_crustal_vs=4.:int) -> :
     """ Convert from Vs and depth to Vp, rho, and thickness.
 
     Different scalings are required for the crust and the mantle, so
     need to define the Moho - here, as where Vs goes above max_crustal_vs
     (default 4 km/s).
+
+    Arguments:
+        - vs (np.array):
+            Vector of Vs
+        - depth (np.array):
+            Vector of depth, one element shorter than vs.
+            Note that this is the depth at the base of the layer (not including
+            the half space).
+        - max_crustal_vs (int):
+            Scaling for Vp and rho is different for crust and mantle -
+            define the cutoff between crust and mantle as when input Vs gets
+            above this value.
+
+    Returns:
+        - vp (np.array):
+            Vector of vp, same size as vs, calculated from Vs and depth
+        - rho (np.array):
+            Vector of density, same size as vs, calculated from Vs and depth
+        - thickness (np.array):
+            Vector of layer thicknesses, same size as depth (doesn't include
+            the half space)
     """
 
     # Initialise Vp, rho
@@ -328,11 +426,21 @@ def calculate_vp_rho(vs:np.array, depth:np.array, max_crustal_vs=4.):
 
     return vp, rho, thickness
 
-def Brocher05_scaling(vs):
+def Brocher05_scaling(vs: np.array) -> (np.array, np.array):
     """ Scale from Vs to Vp and rho - appropriate for the crust only.
 
     These equations are from Brocher et al., 2005, BSSA
     (doi: 10.1785/0120050077).
+
+    Arguments:
+        - vs (np.array):
+            Vector of Vs
+
+    Returns:
+        - vp (np.array):
+            Vector of calculated Vp, same size as vs.
+        - rho (np.array):
+            Vector of calculated density, same size as vs.
     """
 
     vp = (0.9409
@@ -348,7 +456,7 @@ def Brocher05_scaling(vs):
 
     return vp, rho
 
-def Forte07_scaling(vs, depth):
+def Forte07_scaling(vs:np.array, depth:np.array) -> np.array:
     """ Scale from Vs to rho - appropriate for the mantle only.
 
     These equations are from Forte et al., 2007, GRL
@@ -361,6 +469,19 @@ def Forte07_scaling(vs, depth):
     although they give a different scaling for shields if necessary.
 
     Note that depth here is the depth to the MIDDLE of the layer, not the base.
+
+    Arguments:
+        - vs (np.array):
+            Vector of Vs
+        - depth (np.array):
+            Vector of depth, same size as vs.  Note that this is the depth at
+            which the conversion calculation is done, so should be the average
+            depth of a layer
+
+    Returns:
+        - rho (np.array):
+            Vector of calculated density, same size as vs.
+
     """
 
     rho_scaling = np.zeros(vs.size)
