@@ -9,16 +9,20 @@ Classes:
     ObsPhaseVelocity, with fields period, phase velocity, and error
 
 Functions:
-    synthesise_surface_wave(model, swd_in) -> PhaseVelocity:
+    synthesise_surface_wave(model:define_earth_model.EarthModel,
+                            periods:np.array) -> PhaseVelocity:
         - calculate surface wave phase velocities given model and period
-    _Rayleigh_phase_velocity_in_half_space(vp, vs) -> float:
+    _Rayleigh_phase_velocity_in_half_space(vp:float, vs:float) -> float:
         - given Vp and Vs of a half space, calculate phase velocity
-    _min_value_secular_function(omega, k_lims, n_ksteps,
-                                thick, rho, vp, vs, mu) -> float:
-        - search over k_lims to find the minimum value of _secular()
-    _secular(k, om, thick, mu, rho, vp, vs) -> float:
+    _min_value_secular_function(omega:float, k_lims:np.array, n_ksteps:int,
+                                    thick:np.array, rho:np.array, vp:np.array,
+                                    vs:np.array, mu:np.array) -> float:
+        - search over k_lims to find the minimum value of _secular() and return
+          the corresponding phase velocity
+    _secular(k:float, om:float, thick:np.array, mu:np.array,
+                 rho:np.array, vp:np.array, vs:np.array) -> float:
         - calculate Green's function for velocity structure
-    _make_3D(x):
+    _make_3D(x:np.array) -> np.array:
         - transpose vector into third dimension (1 x 1 x size)
 """
 
@@ -38,9 +42,8 @@ class PhaseVelocity(typing.NamedTuple):
     """ Surface wave phase velocity information at a series of periods
 
     Fields (all fields are n_periods x 1 numpy arrays):
-        - period: dominant period of dispersion measurement, seconds
-        - c: phase velocity in km/s
-        - std: standard deviation of measurement at each period
+        - period: dominant period of dispersion measurement (s)
+        - c: phase velocity (km/s)
     """
     period: np.array
     c: np.array
@@ -49,9 +52,9 @@ class ObsPhaseVelocity(typing.NamedTuple):
     """ Surface wave phase velocity information at a series of periods
 
     Fields (all fields are n_periods x 1 numpy arrays):
-        - period: dominant period of dispersion measurement, seconds
-        - c: phase velocity in km/s
-        - std: standard deviation of measurement at each period
+        - period: dominant period of dispersion measurement (s)
+        - c: phase velocity (km/s)
+        - std: standard deviation of measurement at each period (km/s)
     """
     period: np.array
     c: np.array
@@ -92,7 +95,7 @@ def synthesise_surface_wave(model:define_earth_model.EarthModel,
 
     Returns:
         - calculated phase velocity:
-            .period: same as input periods
+            .period: same as input periods (s)
             .cr: caluclated phase velocity (km/s)
 
     """
@@ -126,12 +129,12 @@ def synthesise_surface_wave(model:define_earth_model.EarthModel,
 
     return PhaseVelocity(period = periods, c = cr)
 
-def _make_3D(x):
+def _make_3D(x:np.array) -> np.array:
     """Transpose a vector into the third dimension (1 x 1 x size)"""
 
     return np.reshape(x,(1,1,x.size))
 
-def _Rayleigh_phase_velocity_in_half_space(vp, vs):
+def _Rayleigh_phase_velocity_in_half_space(vp:float, vs:float) -> float:
     """ Calculate the (frequency independent) phase velocity in a half space.
 
     Phase velocity can be estimated from the Vp and Vs of the half space
@@ -179,8 +182,9 @@ def _Rayleigh_phase_velocity_in_half_space(vp, vs):
 
     return estimated_phase_vel_rayleigh
 
-def _min_value_secular_function(omega, k_lims, n_ksteps,
-                                thick, rho, vp, vs, mu):
+def _min_value_secular_function(omega:float, k_lims:np.array, n_ksteps:int,
+                                thick:np.array, rho:np.array, vp:np.array,
+                                vs:np.array, mu:np.array) -> float:
     """Return the phase velocity for this period (omega).
 
     The secular function takes wavenumber, angular frequency (omega), and a
@@ -200,9 +204,9 @@ def _min_value_secular_function(omega, k_lims, n_ksteps,
 
     Arguments
         - omega (float):
-            Angular frequency (Hz), omega = 2 * pi * frequency.
+            Angular frequency (rad/s), omega = 2 * pi * frequency.
         - k_lims (2 x 1 np.array):
-            Search range for wavenumber (1 / km) - i.e. phase velocity guesses.
+            Search range for wavenumber (rad/km) - i.e. phase velocity guesses.
             The search range is from the maximum Vs in the input model to the
             calculated phase velocity in a half space of the minimum Vs in the
             input model (converted to k by k = omega/phase velocity).
@@ -285,21 +289,21 @@ def _secular(k:float, om:float, thick:np.array, mu:np.array,
 
     Arguments:
         - k (float):
-            Trial wavenumber (effectively phase velocity, given fixed angular
-            frequency; increasing k decreases phase velocity).
+            Trial wavenumber (rad/km) - effectively phase velocity, given fixed
+            angular frequency; increasing k decreases phase velocity.
             Wavenumber = 2 * pi / wavelength
         - om (float):
-            Fixed angular frequency, omega = 2 * pi * frequency
+            Fixed angular frequency (rad/s), omega = 2 * pi * frequency
         - thick (np.array):
-            Vector of layer thicknesses from velocity model, length n_layers.
+            Vector of layer thicknesses (km) from velocity model, length n_layers.
         - mu (np.array):
-            Vector of mu = rho * vs**2, length n_layers.
+            Vector of mu = rho * vs**2 (Gg / km.s^2), length n_layers.
         - rho (np.array):
-            Vector of density, length n_layers.
+            Vector of density (g.cm^-3), length n_layers.
         - vp (np.array):
-            Vector of Vp, length n_layers.
+            Vector of Vp (km/s), length n_layers.
         - vs (np.array):
-            Vector of Vs, length n_layers.
+            Vector of Vs (km/s), length n_layers.
 
     Returns:
         - d (float):

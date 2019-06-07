@@ -69,6 +69,22 @@ class EarthModel(typing.NamedTuple):
 #       Initialise and update Earth Model.
 # =============================================================================
 
+
+def plot_earth_model(earth_model:EarthModel, fieldname:str):
+    """ Convert from layered model into something to plot. """
+    field = getattr(earth_model, fieldname)
+    depth = earth_model.depth
+
+    plot_field = np.tile(field, (2, 1)).T.reshape(2 * field.size)
+    plot_depth = np.append(0., np.tile(depth, (2, 1)).T.reshape(2 * depth.size))
+    plot_depth = np.append(plot_depth, depth[-1] + earth_model.thickness[-1])
+
+    plt.plot(plot_field, plot_depth)
+    plt.xlabel(fieldname)
+    plt.ylabel('Depth (km)')
+    ax = plt.gca().set_ylim(plot_depth[[-1, 0]])
+    plt.show()
+
 def download_velocity_model(save_name:str, server_name:str) -> str:
     """ Download an IRIS hosted Earth model (.nc file).
 
@@ -111,8 +127,7 @@ def load_velocity_model(save_name:str, vs_fieldname:str,
     This function opens the .nc file, finds the closest point in latitude
     and longitude to the input location (lat, lon arguments), and pulls out
     the Vs structure there.  It then converts the depth/Vs model into a
-    model with coarser layers (using _find_all_splits()), and calculates
-    the expected Vp and density structure  (using _calculate_vp_rho()).
+    model with coarser layers (using _make_layered_model).
 
     Arguments:
         - save_name (str):
@@ -130,8 +145,7 @@ def load_velocity_model(save_name:str, vs_fieldname:str,
     Returns:
         - starting_model (EarthModel):
             The EarthModel is returned as a coarse layers version of the input
-            Vs model (using _find_all_splits()), and further calculates the
-            fields vp, rho, thickness (using _calculate_vp_rho())
+            Vs model (using _make_layered_model).
 
     """
 
@@ -155,14 +169,39 @@ def load_velocity_model(save_name:str, vs_fieldname:str,
     # Fit the Vs profile with a smaller number of layers
     tol_vs = 0.1 # dVs (km/s) that should be noticeably different
     min_layer_thickness = 5 # (km)
-    min_layers_in = np.where(model_depth > min_layer_thickness)[0][0]
+    max_crustal_vs = 4. # Vs assumed to mark transition from crust to mantle
+    starting_model = _make_layered_model(model_depth, model_vs,
+                                         tol_vs, min_layer_thickness,
+                                         max_crustal_vs)
+
+    return starting_model
+
+def _make_layered_model(depth:np.array, vs:np.array, tol_vs:float=0.1,
+                        min_layer_thickness:int=5,
+                        max_crustal_vs:float=4.) -> EarthModel:
+    """ Generate a coarser Earth Model from input depth and Vs.
+
+    From a Vs, depth profile, this simplifies the model into fewer
+    coarse layers (using_find_all_splits()), and then calculates
+    the expected Vp and density structure (using _calculate_vp_rho()).
+
+    Arguments:
+        - depth (np.array):
+            Depth (km) of model to be divided into coarser layers.
+        - vs (np.array):
+            Vs profile (km/s) to be divided into coarser layers.
+        - tol_vs (float):
+            The maximum contrast in Vs (km/s) acceptable within each layer.
+        - min_layer_thickness (int):
+            The minimum thickness (km) of each output layer.
+    """
+
+    min_layers_in = np.where(depth > min_layer_thickness)[0][0]
     # Find the indices for the uppermost possible layer as a flattened np array
-    split_inds = _find_all_splits(model_vs, min_layers_in, tol_vs)
-    layered_depth, layered_vs = _get_new_layers(
-        model_depth, model_vs, sorted(split_inds))
+    split_inds = _find_all_splits(vs, min_layers_in, tol_vs)
+    layered_depth, layered_vs = _get_new_layers(depth, vs, sorted(split_inds))
 
     # Convert from Vs and depth to Vp, rho, and thickness
-    max_crustal_vs = 4. # Vs assumed to mark transition from crust to mantle
     vp, rho, thickness = _calculate_vp_rho(layered_vs, layered_depth,
                                           max_crustal_vs)
 
@@ -174,22 +213,6 @@ def load_velocity_model(save_name:str, vs_fieldname:str,
         thickness = thickness,
     )
 
-    return starting_model, ds[vs_fieldname].values[:, i_lat, i_lon], model_depth_orig
-
-def plot_earth_model(earth_model:EarthModel, fieldname:str):
-    """ Convert from layered model into something to plot. """
-    field = getattr(earth_model, fieldname)
-    depth = earth_model.depth
-
-    plot_field = np.tile(field, (2, 1)).T.reshape(2 * field.size)
-    plot_depth = np.append(0., np.tile(depth, (2, 1)).T.reshape(2 * depth.size))
-    plot_depth = np.append(plot_depth, depth[-1] + earth_model.thickness[-1])
-
-    plt.plot(plot_field, plot_depth)
-    plt.xlabel(fieldname)
-    plt.ylabel('Depth (km)')
-    ax = plt.gca().set_ylim(plot_depth[[-1, 0]])
-    plt.show()
 
 def _find_all_splits(y:np.array, min_layers_in:int, tol:float,
                     splits=None, y_first_ind=None) -> list:
@@ -385,23 +408,23 @@ def _calculate_vp_rho(vs:np.array, depth:np.array,
 
     Arguments:
         - vs (np.array):
-            Vector of Vs
+            Vector of Vs (km/s)
         - depth (np.array):
-            Vector of depth, one element shorter than vs.
+            Vector of depth (km), one element shorter than vs.
             Note that this is the depth at the base of the layer (not including
             the half space).
         - max_crustal_vs (int):
             Scaling for Vp and rho is different for crust and mantle -
             define the cutoff between crust and mantle as when input Vs gets
-            above this value.
+            above this value (km/s).
 
     Returns:
         - vp (np.array):
-            Vector of vp, same size as vs, calculated from Vs and depth.
+            Vector of vp (km/s), same size as vs, calculated from Vs and depth.
         - rho (np.array):
-            Vector of density, same size as vs, calculated from Vs and depth.
+            Vector of density (g.cm^-3), same size as vs, from Vs and depth.
         - thickness (np.array):
-            Vector of layer thicknesses, same size as vs, including some
+            Vector of layer thicknesses (km), same size as vs, including some
             arbitrary half_space_thickness appended onto the end.
     """
 
@@ -446,13 +469,13 @@ def _Brocher05_scaling(vs: np.array) -> (np.array, np.array):
 
     Arguments:
         - vs (np.array):
-            Vector of Vs
+            Vector of Vs (km/s)
 
     Returns:
         - vp (np.array):
-            Vector of calculated Vp, same size as vs.
+            Vector of calculated Vp (km/s), same size as vs.
         - rho (np.array):
-            Vector of calculated density, same size as vs.
+            Vector of calculated density (g.cm^-3), same size as vs.
     """
 
     vp = (0.9409
@@ -484,15 +507,15 @@ def _Forte07_scaling(vs:np.array, depth:np.array) -> np.array:
 
     Arguments:
         - vs (np.array):
-            Vector of Vs
+            Vector of Vs (km/s)
         - depth (np.array):
-            Vector of depth, same size as vs.  Note that this is the depth at
-            which the conversion calculation is done, so should be the average
-            depth of a layer
+            Vector of depth (km), same size as vs.  Note that this is the depth
+            at which the conversion calculation is done, so should be the
+            average depth of a layer.
 
     Returns:
         - rho (np.array):
-            Vector of calculated density, same size as vs.
+            Vector of calculated density (g.cm^-3), same size as vs.
 
     """
 
