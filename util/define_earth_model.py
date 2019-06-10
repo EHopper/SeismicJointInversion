@@ -80,19 +80,30 @@ class EarthModel(typing.NamedTuple):
 
 
 def plot_earth_model(earth_model:EarthModel, fieldname:str):
-    """ Convert from layered model into something to plot. """
-    field = getattr(earth_model, fieldname)
-    depth = earth_model.depth
+    """ Convert from layered model into something to plot, then plot. """
 
-    plot_field = np.tile(field, (2, 1)).T.reshape(2 * field.size)
-    plot_depth = np.append(0., np.tile(depth, (2, 1)).T.reshape(2 * depth.size))
-    plot_depth = np.append(plot_depth, depth[-1] + earth_model.thickness[-1])
+    plot_depth, plot_field = _convert_earth_model(earth_model, fieldname)
 
     plt.plot(plot_field, plot_depth)
     plt.xlabel(fieldname)
     plt.ylabel('Depth (km)')
     ax = plt.gca().set_ylim(plot_depth[[-1, 0]])
     plt.show()
+
+def _convert_earth_model(earth_model:EarthModel, fieldname:str) -> (np.array,
+                                                                   np.array):
+    """ Go from layers to something easier to work with. """
+    field_orig = getattr(earth_model, fieldname)
+    depth_orig = earth_model.depth
+
+    field = np.tile(field_orig, (2, 1)).T.reshape(2 * field_orig.size)
+    depth = (np.append(0., np.tile(depth_orig, (2, 1))
+                .T.reshape(2 * depth_orig.size)))
+    depth = np.append(depth, depth_orig[-1] + earth_model.thickness[-1])
+
+    return depth, field
+
+
 
 def download_velocity_model(save_name:str, server_name:str) -> str:
     """ Download an IRIS hosted Earth model (.nc file).
@@ -168,7 +179,6 @@ def load_velocity_model(save_name:str, vs_fieldname:str,
         lon += 360
     i_lon = np.argmin(np.abs(ds['longitude'] - lon))
     model_vs = ds[vs_fieldname].values[:, i_lat, i_lon]
-    print(i_lat, i_lon)
     model_depth_orig = ds['depth'].values
 
     # Interpolate to make sure all velocity models are evenly spaced in depth
@@ -252,7 +262,6 @@ def _make_layered_param_model(depth:np.array, param:np.array, tol:float,
     """
 
     min_layers_in = np.where(depth >= min_layer_thickness)[0][0]
-    print(min_layer_thickness, min_layers_in)
     # Find the indices for the uppermost possible layer as a flattened np array
     split_inds = _find_all_splits(param, min_layers_in, tol)
     return _get_new_layers(depth, param, sorted(split_inds))
