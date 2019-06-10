@@ -394,12 +394,13 @@ Plot this on Figure 73.
         kernels (sensitivities from Love) rows, then the vsv, (vsh set to 0), vpv,
         vph, eta S frechet kernels (sensitivities from Rayleigh) rows:
 
-          T_Vsv_per1  T_Vsh_per1  0  0  0      0       0      0           0           0
-          T_Vsv_per2  T_Vsh_per2  0  0  0      0       0      0           0           0
-GG  =   [     0           0       0  0  0  S_Vsv_per1  0  S_Vpv_per1  S_Vph_per1  S_eta_per1 ]
-              0           0       0  0  0  S_Vsv_per2  0  S_Vpv_per2  S_Vph_per2  S_eta_per2
-              0           0       0  0  0  S_Vsv_per2  0  S_Vpv_per2  S_Vph_per2  S_eta_per2
-            where, e.g. T_Vsv_per1 is the Frechet kernel for Toroidal Vsv sensitivity
+              T_Vsv_p1  T_Vsh_p1      0         0         0
+              T_Vsv_p2  T_Vsh_p2      0         0         0
+      GG = [  S_Vsv_p1     0      S_Vpv_p1  S_Vph_p1  S_eta_p1   ]
+              S_Vsv_p2     0      S_Vpv_p2  S_Vph_p2  S_eta_p2
+              S_Vsv_p2     0      S_Vpv_p2  S_Vph_p2  S_eta_p2
+              
+            where, e.g. T_Vsv_p1 is the Frechet kernel for Toroidal Vsv sensitivity
             for the first Love period.
             So to get a GG this size would be n_depth_points = 1, n_Love_periods = 2,
             n_Rayleigh_periods = 3.

@@ -31,8 +31,8 @@ Functions:
 import typing
 import numpy as np
 
-import matlab
-import define_earth_model
+from util import matlab
+from util import define_earth_model
 
 # =============================================================================
 # Set up classes for commonly used variables
