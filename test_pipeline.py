@@ -10,11 +10,9 @@ import unittest
 from parameterized import parameterized
 import numpy as np
 
-base_dir = pathlib.Path.home() / 'Documents/SurfaceWaves/INVERSION/'
-sys.path.insert(0, str(base_dir / 'util'))
-import matlab
-import define_earth_model
-import surface_waves
+from util import matlab
+from util import define_earth_model
+from util import surface_waves
 
 
 class PipelineTest(unittest.TestCase):

@@ -9,9 +9,17 @@ Functions:
     load_velocity_model(save_name:str, vs_fieldname:str,
                         lat:float, lon:float) -> EarthModel:
         - Starting from a .nc file, calculate a full model (inc. Vp, rho)
+    _make_layered_earth_model(depth:np.array, vs:np.array, tol_vs:float=0.1,
+                              min_layer_thickness:int=2,
+                              max_crustal_vs:float=4.) -> EarthModel:
+        - Starting from Vs and Depth, make a layered EarthModel
+    _make_layered_param_model(depth:np.array, param:np.array, tol:float,
+                              min_layer_thickness:int) -> (np.array, np.array):
+        - Starting from any parameter and depth, return arrays of layered depth
+          and the median value of that parameter for each layer
     _find_all_splits(y:np.array, min_layers_in:int, tol:float,
                         splits=None, y_first_ind=None) -> list:
-        - Find the best points to split input y (Vs) based on largest jumps
+        - Find the best points to split input y (i.e. Vs) based on largest jumps
     _find_best_split(y:np.array, min_layers_in:int, tol:float) -> int:
         - Find the single best point to split input y (Vs) based on largest jump
     _moving_window(y:np.array, window_length:int) -> list:
@@ -19,13 +27,14 @@ Functions:
     _get_new_layers(x:np.array, y:np.array, inds:list) -> (np.array, np.array):
         - Convert x and y to downsampled model, with new layers defined by inds
     _calculate_vp_rho(vs:np.array, depth:np.array,
-                      max_crustal_vs:int=4) -> (np.array, np.array, np.array):
+                      max_crustal_vs:float=4.) -> (np.array, np.array,
+                                                   np.array):
         - Calculate Vp and density from Vs and depth
     _Brocher05_scaling(vs: np.array) -> (np.array, np.array):
         - Scale from Vs to Vp, rho for crustal rocks.
     _Forte07_scaling(vs:np.array, depth:np.array) -> np.array:
         - Scale from Vs & depth to rho for mantle rocks.
-    plot_earth_model(earth_model:EarthModel, fieldname:str):
+    _model(earth_model:EarthModel, fieldname:str):
         - plot EarthModel field (i.e. 'vs', 'vp', 'rho')
 
 
@@ -41,7 +50,7 @@ import urllib.request as urlrequest
 import xarray as xr
 import matplotlib.pyplot as plt
 
-import matlab
+from util import matlab
 
 # =============================================================================
 # Set up classes for commonly used variables
@@ -159,6 +168,7 @@ def load_velocity_model(save_name:str, vs_fieldname:str,
         lon += 360
     i_lon = np.argmin(np.abs(ds['longitude'] - lon))
     model_vs = ds[vs_fieldname].values[:, i_lat, i_lon]
+    print(i_lat, i_lon)
     model_depth_orig = ds['depth'].values
 
     # Interpolate to make sure all velocity models are evenly spaced in depth
@@ -168,17 +178,17 @@ def load_velocity_model(save_name:str, vs_fieldname:str,
 
     # Fit the Vs profile with a smaller number of layers
     tol_vs = 0.1 # dVs (km/s) that should be noticeably different
-    min_layer_thickness = 5 # (km)
+    min_layer_thickness = 2 # (km)
     max_crustal_vs = 4. # Vs assumed to mark transition from crust to mantle
-    starting_model = _make_layered_model(model_depth, model_vs,
-                                         tol_vs, min_layer_thickness,
-                                         max_crustal_vs)
+    starting_model = _make_layered_earth_model(model_depth, model_vs,
+                                               tol_vs, min_layer_thickness,
+                                               max_crustal_vs)
 
     return starting_model
 
-def _make_layered_model(depth:np.array, vs:np.array, tol_vs:float=0.1,
-                        min_layer_thickness:int=5,
-                        max_crustal_vs:float=4.) -> EarthModel:
+def _make_layered_earth_model(depth:np.array, vs:np.array, tol_vs:float=0.1,
+                              min_layer_thickness:int=2,
+                              max_crustal_vs:float=4.) -> EarthModel:
     """ Generate a coarser Earth Model from input depth and Vs.
 
     From a Vs, depth profile, this simplifies the model into fewer
@@ -194,12 +204,13 @@ def _make_layered_model(depth:np.array, vs:np.array, tol_vs:float=0.1,
             The maximum contrast in Vs (km/s) acceptable within each layer.
         - min_layer_thickness (int):
             The minimum thickness (km) of each output layer.
-    """
 
-    min_layers_in = np.where(depth > min_layer_thickness)[0][0]
-    # Find the indices for the uppermost possible layer as a flattened np array
-    split_inds = _find_all_splits(vs, min_layers_in, tol_vs)
-    layered_depth, layered_vs = _get_new_layers(depth, vs, sorted(split_inds))
+    Returns:
+        - starting_model (EarthModel):
+            Layered model, including Vs, Vp, and density.
+    """
+    layered_depth, layered_vs = _make_layered_param_model(
+        depth, vs, tol_vs, min_layer_thickness)
 
     # Convert from Vs and depth to Vp, rho, and thickness
     vp, rho, thickness = _calculate_vp_rho(layered_vs, layered_depth,
@@ -213,6 +224,38 @@ def _make_layered_model(depth:np.array, vs:np.array, tol_vs:float=0.1,
         thickness = thickness,
     )
 
+    return starting_model
+
+def _make_layered_param_model(depth:np.array, param:np.array, tol:float,
+                              min_layer_thickness:int) -> (np.array, np.array):
+    """ Generate a coarser Earth Model from input depth and Vs.
+
+    From a Vs, depth profile, this simplifies the model into fewer
+    coarse layers (using_find_all_splits()), and then calculates
+    the expected Vp and density structure (using _calculate_vp_rho()).
+
+    Arguments:
+        - depth (np.array):
+            Depth (km) of model to be divided into coarser layers.
+            Assumed to be uniformly sampled!
+        - param (np.array):
+            Parameter of model to be divided into coarser layers.
+        - tol (float):
+            The maximum contrast in the parameter acceptable within each layer.
+        - min_layer_thickness (int):
+            The minimum thickness (km) of each output layer.
+
+    Returns:
+        layered_depth, layered_param (np.arrays):
+            The new maximum depth and median value of param for each layer
+            (output of _get_new_layers()).
+    """
+
+    min_layers_in = np.where(depth >= min_layer_thickness)[0][0]
+    print(min_layer_thickness, min_layers_in)
+    # Find the indices for the uppermost possible layer as a flattened np array
+    split_inds = _find_all_splits(param, min_layers_in, tol)
+    return _get_new_layers(depth, param, sorted(split_inds))
 
 def _find_all_splits(y:np.array, min_layers_in:int, tol:float,
                     splits=None, y_first_ind=None) -> list:
@@ -399,7 +442,7 @@ def _get_new_layers(x:np.array, y:np.array, inds:list) -> (np.array, np.array):
     return layered_x, layered_y
 
 def _calculate_vp_rho(vs:np.array, depth:np.array,
-                     max_crustal_vs:int=4) -> (np.array, np.array, np.array):
+                     max_crustal_vs:float=4.) -> (np.array, np.array, np.array):
     """ Convert from Vs and depth to Vp, rho, and thickness.
 
     Different scalings are required for the crust and the mantle, so
@@ -544,3 +587,14 @@ def _Forte07_scaling(vs:np.array, depth:np.array) -> np.array:
                * ref_rho)
 
     return ref_rho + del_rho
+
+
+def _fill_with_PREM():
+    """ If need to fill in the gaps, then do so with PREM.
+
+    prem = pd.read_csv('mineos_inputs/PREM500.csv')
+        columns of prem are: radius,density,Vpv,Vsv,Q-kappa,Q-mu,Vph,Vsh,eta
+
+    http://ds.iris.edu/ds/products/emc-prem/
+    """
+    pass
