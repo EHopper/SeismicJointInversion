@@ -28,20 +28,35 @@ class DampingParameters(typing.NamedTuple):
 
     """
 
-    #phase_or_group_velocity: str = 'ph'
-    #l_min: int = 0
+    upper_crust: np.array
+    lower_crust: np.array
+    lithospheric_mantle: np.array
+    asthenospheric_mantle: np.array
 
 
 class ModelLayerIndices(typing.NamedTuple):
     """ Parameters used for smoothing.
 
     Fields:
-        -
+        - upper_crust: indices for upper crust
+        - lower_crust: indices for lower crust
+        - lithospheric_mantle: indices for lithospheric mantle
+        - asthenospheric_mantle: indices for asthenospheric mantle
+        - depth: depth vector for the whole model space
+        - midcrust: index of the boundary between upper and lower crust
+        - Moho: index of the Moho
+        - LAB: index of the lithosphere-asthenosphere boundary
 
     """
 
-    #phase_or_group_velocity: str = 'ph'
-    #l_min: int = 0
+    upper_crust: np.array
+    lower_crust: np.array
+    lithospheric_mantle: np.array
+    asthenospheric_mantle: np.array
+    depth: np.array
+    midcrust: int
+    Moho: int
+    LAB: int
 
 class LoveKernels(typing.NamedTuple):
     """ Frechet kernels for Love (toroidal) waves.
@@ -98,11 +113,11 @@ def run_inversion(model:define_earth_model.EarthModel,
 
 
     for i in range(n_iterations):
-        model = _inversion_iteration(model, data, layer_indices)
+        model = _inversion_iteration(model, data)
 
     return model
 
-def _inversion_iteration(model, data, layer_indices):
+def _inversion_iteration(model, data):
     """ Run a single iteration of the least squares
     """
 
@@ -267,10 +282,22 @@ def _build_partial_derivatives_matrix(rayleigh, love):
     return G_Rayleigh #np.vstack((G_Love, G_Rayleigh))
 
 
-def _hstack_frechet_kernels(kernel, period):
-    """
+def _hstack_frechet_kernels(kernel, period:float):
+    """ Append all of the relevent Frechet kernels into a row of the G matrix.
 
+    Different parameters are of interest for Rayleigh (Vsv, Vpv, Vph, Eta)
+    and Love (Vsv, Vsh) waves.
 
+    Arguments:
+        - kernel (RayleighKernels or LoveKernels):
+            Frechet kernels across all periods
+        - period (float):
+            Period of interest (s).  Should match a period in the kernel.
+
+    Returns:
+        Row vector containing the Vsv, Vsh, Vpv, Vph, Eta kernels for the
+        requested period.  Note that some of these are filled with zeros,
+        depending on if the kernel is a Love or Rayleigh kernel.
     """
 
     vsv = kernel.vsv[kernel.period == period] * 1e3
@@ -348,12 +375,75 @@ def _build_data_misfit_matrix(data, model, m0, G):
 def _build_weighting_matrices(data, model_vector, layer_indices):
     """ Build all of the weighting matrices.
     """
+    # Data weights
     data_errors = _build_error_weighting_matrix(data)
-    roughness_matrix, roughness = _build_smoothing_matrix(
-        model_vector, layer_indices)
+
+    # Model weights
+    model_order = {'vsv': 0, 'vsh': 1, 'vpv': 2, 'vph': 3, 'eta': 4}
+    layers = ModelLayerIndices()
+
+    damping = DampingParameters()
+    roughness_matrix, roughness = _build_smoothing_constraints(
+        model_vector, layers, model_order)
     a_priori_constraints = _build_constraint_eq_matrix(model_vector)
 
     return data_errors, roughness_matrix, roughness, a_priori_constraints
+
+def _build_model_weighting_matrices(function_name, layers, damping,
+                                     model_order, model_params, m0):
+    n_model_points = m0.size
+
+    for param in model_params:
+        H, h = function_name(param, layers, damping, m0)
+        H, h = _damp_and_pad_constraints(H, h, layers, damping, model_order,
+                                         param, n_model_points)
+        if model_order[param] == 0:
+            H_all = H
+            h_all = h
+        else:
+            H_all = np.vstack((H_all, H))
+            h_all = np.vstack((h_all, h))
+
+    return H_all, h_all
+
+
+def _damp_and_pad_constraints(H, h, layers, damping, model_order, model_param,
+                              n_model_points):
+    """ Apply layer specific damping to H and h.
+
+    This is done one model parameter at a time, and constraints are
+    assumed to be calculated across all depth points.  As such, matrix
+    shapes are H = (n_depth_points x n_depth_points), h = (n_depth_points x 1).
+    H is then padded with zeros to account for all other model parameters in the
+    matrix multiplication with m0, so H_pad = (n_depth_points x n_model_points)
+
+    """
+
+    n_depth_points = layers.depth.size
+
+    # Upper crust
+    H[layers.upper_crust, layers.upper_crust] *= damping.upper_crust
+    h[layers.upper_crust] *= damping.upper_crust
+
+    # Lower crust
+    H[layers.lower_crust, layers.lower_crust] *= damping.lower_crust
+    h[layers.lower_crust] *= damping.lower_crust
+
+    # Lithospheric mantle
+    H[layers.lithospheric_mantle, layers.lithospheric_mantle] *= (
+            damping.lithospheric_mantle)
+    h[layers.lithospheric_mantle] *= damping.lithospheric_mantle
+
+    # Asthenospheric mantle
+    H[layers.asthenospheric_mantle, layers.asthenospheric_mantle] *= (
+            damping.asthenospheric_mantle)
+    h[layers.asthenospheric_mantle] *= damping.asthenospheric_mantle
+
+    H_pad = np.zeros((n_depth_points, n_model_points))
+    start_ind = n_depth_points * model_order[model_parameter]
+    H_pad[:, start_ind:start_ind+n_depth_points] = H
+
+    return H_pad, h
 
 def _build_error_weighting_matrix(data):
     """ Build the error weighting matrix from data standard deviation.
@@ -382,14 +472,15 @@ def _build_error_weighting_matrix(data):
 
     return np.diag(1 / obs_std)
 
-def _build_smoothing_matrices(m0):
+def _build_smoothing_constraints(param, layers, damping, m0):
     """ Build the matrices needed to minimise second derivative of the model.
 
     Note that Josh says this can be better captured by a linear constraint
     preserving layer gradients (and therefore stopping the model from getting
     any rougher).  So perhaps this can just be removed.
 
-    The smoothing parameters will be different for crust vs. upper mantle etc
+    The smoothing parameters will be different for crust vs. upper mantle etc,
+    and we want to allow larger jumps between layers.
 
     Returns:
         - roughness_matrix (np.array):
@@ -412,9 +503,43 @@ def _build_smoothing_matrices(m0):
 
     """
 
-    ######## FILL THIS IN #############
+    discontinuities = [layers.midcrust, layers.Moho, layers.LAB]
 
-    return roughness_matrix, roughness
+    # Vsv smoothing constraints
+    roughness_mat, roughness_vec = (
+        _make_roughness_matrix(n_depth_points, n_model_points, 'vsv', model_order,
+                               discontinuities, layers, damping)
+    )
+
+    return roughness_matrix, roughness_vector
+
+def _make_roughness_matrix(n_depth_points:int, n_model_points:int,
+                           model_parameter:str, model_order:dict,
+                           discontinuities:list, layers:ModelLayerIndices,
+                           damping: DampingParameters) -> (np.array, np.array):
+    """ Roughness matrix is the second-derivative smoothing.
+
+    That is, for each layer, we want to minimise the second derivative
+    (i.e. ([layer+1 val] - [layer val]) - ([layer val] - [layer-1 val]) )
+    except for where we expect there to be discontinuties.  At expected
+    discontinuities, set the roughness matrix to zero.
+
+    We also need to slot the banded matrix into the columns appropriate for
+    that model parameter, given that m0 is [Vsv, Vsh, Vpv, Vph, Eta]
+
+    """
+
+    # Make and edit the banded matrix (roughness equations)
+    banded_matrix = _make_banded_matrix(n_depth_points, (1, -2, 1))
+    # At all discontinuities (and the first and last layers of the model),
+    # set the roughness_matrix to zero
+    for d in [0] + discontinuities + [-1]:
+        banded_matrix[d,:] *= 0
+
+    roughness_vector = np.zeros(n_depth_points)
+
+    return roughness_matrix, roughness_vector
+
 
 def _make_banded_matrix(matrix_size, central_values):
     """ Make a banded matrix with central_values along the diagonal band.
@@ -446,11 +571,62 @@ def _build_constraint_eq_matrix(m0):
 
     e.g. damp towards the starting model, damp towards a Vp/Vs value
     The damping will also probably be different for crust vs. upper mantle etc
+
+    As the smoothing, this is an n_constraints x n_model_points matrix and a
+    corresponding n_constraints x 1 vector with the solution to those constraint
+    equations that we will be damping towards.
+
+    This might be the tricky bit!!!
     """
+
+    damp_to_starting_model_matrix, damp_to_starting_model_vector = (
+        _build_constraint_damp_to_starting_model()
+    )
+
+
+
+    constraints_matrix = np.vstack((
+        damp_to_starting_model_matrix,
+
+    ))
+
+    constraints_matrix = np.vstack((
+        damp_to_starting_model_vector,
+
+    ))
 
     ######## FILL THIS IN #############
 
-    return constraints
+    return constraints_matrix, constraints
+
+def _build_constraint_damp_to_starting_model(m0, layers, damping, model_order):
+    """ Damp towards starting model.
+
+    H * m = h:
+        H: diagonal matrix of ones
+        h: model parameters
+
+    As Vp is not well constrained in the starting model, only want to
+    apply this for Vsv, Vsh, Eta.
+    """
+
+    # Vsv
+    model_param = 'vsv'
+
+
+    return H, h
+
+def _make_damp_to_starting_model_matrices(layers, damping, model_order,
+                                         model_param, m0):
+
+
+    start_ind = model_order[model_param] * n_depth_points
+    H = np.diag(np.ones(n_depth_points))
+    h = m0[start_ind : start_ind+n_depth_points]
+
+    return H, h
+
+
 
 def _damped_least_squares(m0, G, d, W, D, H):
     """ Calculate the damped least squares, after Menke (2012).
@@ -466,15 +642,24 @@ def _damped_least_squares(m0, G, d, W, D, H):
 
     Damped least squares in the Menke (2012; eq. 345) notation:
     m = (G' * We * G  + ε^2 * Wm )^-1  (G' * We * d + ε^2 * Wm * <m>)
-        - m:    new model (n_model_params*n_depth_points x 1)
+        - m:    new model
+                    (n_model_points x 1) == (n_model_params*n_depth_points x 1)
         - G:    partial derivatives matrix
+                    (n_data_points x n_model_points)
         - We:   data error weighting matrix (our input W)
+                    (n_data_points x n_data_points)
         - ε:    damping parameters
         - Wm:   smoothing matrix (in terms of our input: D' * D)
-        - d:    data
+                    (n_model_points x n_model_points)
+        - d:    data (e.g. phase velocity at each period)
+                    (n_data_points x 1)
         - <m>:  old (a priori) model
+                    (n_model_points x 1)
+    Where
+        - D:    roughness matrix
+                    (n_smoothing_equations x n_model_points)
 
-    This is formulated in the Menke (2012; eq. 3.46) as
+    This is formulated in Menke (2012; eq. 3.46) as
         F * m_est  = f
         F  	=   [    sqrt(We) * G ;    εD   ]
         f 	=   [    sqrt(We) * d ;    εD<m>   ]
@@ -484,7 +669,7 @@ def _damped_least_squares(m0, G, d, W, D, H):
                      * [(G' * We * d) + (ε^2 * D' * D * <m>) ]
 
     Then add in any a priori constraints, formulated by Menke (2012; eq. 3.55)
-    as linear constrain equations:
+    as linear constraint equations:
         H * m = h
 
     e.g. to damp to the starting model, H would be a diagonal matrix of ones,
