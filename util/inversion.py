@@ -20,54 +20,115 @@ from util import surface_waves
 # Set up classes for commonly used variables
 # =============================================================================
 
-class DampingParameters(typing.NamedTuple):
-    """ Parameters used for smoothing.
-
-    Fields:
-        -
-
-    """
-
-    upper_crust: np.array
-    lower_crust: np.array
-    lithospheric_mantle: np.array
-    asthenospheric_mantle: np.array
-
-
 class ModelLayerIndices(typing.NamedTuple):
     """ Parameters used for smoothing.
 
     Fields:
-        - upper_crust: indices for upper crust
-        - lower_crust: indices for lower crust
-        - lithospheric_mantle: indices for lithospheric mantle
-        - asthenospheric_mantle: indices for asthenospheric mantle
-        - depth: depth vector for the whole model space
-        - midcrust: index of the boundary between upper and lower crust
-        - Moho: index of the Moho
-        - LAB: index of the lithosphere-asthenosphere boundary
+        upper_crust:
+            - (n_depth_points_in_this_layer, ) np.array
+            - Depth indices for upper crust.
+        lower_crust:
+            - (n_depth_points_in_this_layer, ) np.array
+            - Depth indices for lower crust.
+        lithospheric_mantle:
+            - (n_depth_points_in_this_layer, ) np.array
+            - Depth indices for lithospheric mantle.
+        asthenosphere:
+            - (n_depth_points_in_this_layer, ) np.array
+            - Depth indices for asthenosphere.
+
+        midcrust:
+            - int
+            - Depth index of the boundary between upper and lower crust.
+        Moho:
+            - int
+            - Depth index of the Moho.
+        LAB:
+            - int
+            - Depth index of the lithosphere-asthenosphere boundary.
+
+        depth:
+            - (n_depth_points, ) np.array
+            - Units: kilometres
+            - Depth vector for the whole model space.
+        layer_names:
+            - list
+            - All layer names in order of increasing depth.
 
     """
 
     upper_crust: np.array
     lower_crust: np.array
     lithospheric_mantle: np.array
-    asthenospheric_mantle: np.array
-    depth: np.array
+    asthenosphere: np.array
     midcrust: int
     Moho: int
     LAB: int
+    depth: np.array
+    layer_names: list = ['upper_crust', 'lower_crust',
+                         'lithospheric_mantle', 'asthenosphere']
+
+class ModelLayerValues(typing.NamedTuple):
+    """ Values that are layer-specific.
+
+    All fields should be an (n_values_in_layer x n_unique_vals_by_model_param)
+    array, where
+        n_values_in_layer:
+            Can be 1 or ModelLayerIndices.[field_name].size.
+                i.e. constant within a layer, or specified for each depth point
+                     in that layer.
+        n_vals_by_model_param:
+            Can be 1 or the number of model parameters (5).
+                i.e. single value across all model parameters, or the value
+                     is dependent on which model parameter it is being
+                     applied to.
+
+
+    Fields:
+        upper_crust:
+            - (n_values_in_layer, n_vals_by_model_param) np.array
+        lower_crust:
+            - (n_values_in_layer, n_vals_by_model_param) np.array
+        lithospheric_mantle:
+            - (n_values_in_layer, n_vals_by_model_param) np.array
+        asthenosphere:
+            - (n_values_in_layer, n_vals_by_model_param) np.array
+
+    """
+
+    upper_crust: np.array
+    lower_crust: np.array
+    lithospheric_mantle: np.array
+    asthenosphere: np.array
+
 
 class LoveKernels(typing.NamedTuple):
     """ Frechet kernels for Love (toroidal) waves.
 
-    Kernels for different periods are stacked on top of each other.
+    Kernels for different periods are appended to each other.
 
     Fields:
-        - period: period (s) of Love wave of interest
-        - depth: depth (km) vector for kernel
-        - vsv: vertically polarised S wave kernel
-        - vsh: horizontally polarised S wave kernel
+        period:
+            - (n_love_periods * n_depth_points, ) np.array
+            - Units: seconds
+            - Period of Love wave of interest.
+        depth:
+            - (n_depth_points, ) np.array
+            - Units: kilometres
+            - Depth vector for kernel.
+        vsv:
+            - (n_depth_points * n_love_periods, ) np.array
+            - Units: dimensionless
+            - Vertically polarised S wave kernel.
+        vsh:
+            - (n_depth_points * n_love_periods, ) np.array
+            - Units: dimensionless
+            - Horizontally polarised S wave kernel.
+        type: str = 'love'
+            - Default shouldn't be changed
+            - This is because was having issues with isinstance() for locally
+              defined classes.
+
 
     """
 
@@ -83,12 +144,35 @@ class RayleighKernels(typing.NamedTuple):
     Kernels for different periods are stacked on top of each other.
 
     Fields:
-        - period: period (s) of Rayleigh wave of interest
-        - depth: depth (km) vector for kernel
-        - vsv: vertically polarised S wave kernel
-        - vpv: vertically polarised P wave kernel
-        - vph: horizontally polarised P wave kernel
-        - eta: anellipticity (eta = F/(A-2L)) kernel
+        period:
+            - (n_love_periods * n_depth_points, ) np.array
+            - Units: seconds
+            - Period of Rayleigh wave of interest.
+        depth:
+            - (n_depth_points, ) np.array
+            - Units: kilometres
+            - Depth vector for kernel.
+        vsv:
+            - (n_love_periods * n_depth_points, ) np.array
+            - Units: dimensionless
+            - Vertically polarised S wave kernel.
+        vpv:
+            - (n_love_periods * n_depth_points, ) np.array
+            - Units: dimensionless
+            - Vertically polarised P wave kernel.
+        vph:
+            - (n_love_periods * n_depth_points, ) np.array
+            - Units: dimensionless
+            - Horizontally polarised P wave kernel.
+        eta:
+            - (n_love_periods * n_depth_points, ) np.array
+            - Units: dimensionless
+            - Anellipticity (eta = F/(A-2L)) kernel.
+        type: str = 'rayleigh'
+            - Default shouldn't be changed.
+            - This is because was having issues with isinstance() for locally
+              defined classes.
+
     """
 
     period: np.array
@@ -128,11 +212,12 @@ def _inversion_iteration(model, data):
     d = _build_data_misfit_matrix(data, model, m0, G)
 
     # Build all of the weighting functions for damped least squares
+    W = _build_error_weighting_matrix(data)
     layer_indices = _set_layer_indices(m0)
-    W, D, H = _build_weighting_matrices(data, layer_indices)
+    D_mat, d_vec, H_mat, h_vec = _build_weighting_matrices(data, layer_indices)
 
     # Perform inversion
-    model_new = _damped_least_squares(m0, G, d, W, D, H)
+    model_new = _damped_least_squares(m0, G, d, W, D_mat, d_vec, H_mat, h_vec)
 
     return _build_earth_model_from_vector(model_new)
 
@@ -148,18 +233,24 @@ def _calculate_Frechet_kernels(model:define_earth_model.EarthModel,
     metres to kilometres.
 
     Arguments
-        - model:
-            This will ultimately be used to make a card for MINEOS.  Now it's
-            a placeholder for when I do things properly.
-        - max_depth (float):
-            Depth (km) below which to crop off the Frechet kernels (i.e. do
-            not invert for Earth structure below this depth)
+        model:
+            - This will ultimately be used to make a card for MINEOS.  Now it's
+              a placeholder for when I do things properly.
+        max_depth:
+            - float
+            - Units: kilometres
+            - Depth below which to crop off the Frechet kernels
+            - i.e. do not invert for Earth structure below this depth.
 
     Returns
-        - rayleigh_kernels, love_kernels:
-            Rayleigh wave (spherical) kernels and Love wave (toroidal) kernels.
-        - depth:
-            Vector of depth (km) that is the same as in the loaded kernels.
+        rayleigh_kernels:
+            - RayleighKernels
+        love_kernels: LoveKernels
+            - LoveKernels
+        depth:
+            - (n_depth_points, ) np.array
+            - Units: kilometres
+            - Vector of depth (km) that is the same as in the loaded kernels.
     """
 
     if max_depth is None:
@@ -203,16 +294,20 @@ def _build_model_vector(model:define_earth_model.EarthModel,
     """ Make model into column vector n_depth_points*n_model_parameters x 1.
 
     Arguments:
-        - model (define_earth_model.EarthModel):
-            Input Vs, Vp model (km/s)
-        - kernels (RayleighKernels, LoveKernels):
-            This is a non-MINEOS workaround to make sure the depth vectors are
-            the same
+        model:
+            - define_earth_model.EarthModel
+            - Input Vs, Vp model (km/s)
+        depth:
+            - (n_depth_points, ) np.array
+            - This is a non-MINEOS workaround to make sure the depth vectors
+              are the same
 
     Returns:
-        - m0 (np.array):
-            Vsv, Vsh, Vpv, Vph, eta model stacked on top of each other
-            in SI units (i.e. m/s for velocities).
+        m0:
+            - (n_model_points, 1) np.array
+            - Units: SI, so m/s for velocities, dimensionless for eta
+            - Vsv, Vsh, Vpv, Vph, eta model stacked on top of each other
+            - N.B. n_model_points = n_depth_points * n_model_parameters
     """
 
     # Find depth vector from kernels and interpolate model over it
@@ -233,15 +328,37 @@ def _make_2D(x:np.array) -> np.array:
 
 def _interpolate_earth_model_parameter(new_depth:np.array,
                                        model:define_earth_model.EarthModel,
-                                       old_field:str) -> np.array:
+                                       field_str:str) -> np.array:
     """ Convert from EarthModel layout and interpolate.
+
+    Arguments:
+        new_depth:
+            - (n_depth_points, 1) np.array
+            - Units: kilometres
+            - Depth vector over which to interpolate EarthModel parameter.
+            - Shape of this vector, i.e. a column, is very important!
+              np.interp will generate vectors of the same shape.
+        model:
+            - define_earth_model.EarthModel
+            - Input EarthModel.
+        field_str:
+            - str
+            - Name of the parameter (field in model) to be interpolated.
+
+    Returns:
+        new_field:
+            - (n_depth_points, 1) np.array
+            - Units: as units of field in input model.
+            - Vector of model parameter interpolated onto new_depth and ready
+              to be vertically stacked into m0.
+
 
     """
 
-    depth, field = define_earth_model._convert_earth_model(model, old_field)
-    field = np.interp(new_depth, depth, field)
+    depth, field = define_earth_model._convert_earth_model(model, field_str)
+    new_field = np.interp(new_depth, depth, field)
 
-    return field
+    return new_field
 
 
 def _build_partial_derivatives_matrix(rayleigh, love):
@@ -264,6 +381,22 @@ def _build_partial_derivatives_matrix(rayleigh, love):
     for the first (Love) period. Frechet kernels are depth dependent, so each
     entry in the matrix above (including the 0) is actually a row vector
     n_depth_points long.
+
+    Arguments:
+        rayleigh:
+            - RayleighKernels
+        love:
+            - LoveKernels
+
+    Returns:
+        G:
+            - (n_Love_periods + n_Rayleigh_periods, n_model_points) np.array
+            - Units: dimensionless
+            - Partial derivative matrix is of the format described earlier in
+              the docstring, stacking the Love and Rayleigh kernels vertically
+              on top of each other with rows corresponding to different periods.
+            - For now, I have set this to onlt the Rayleigh wave kernels -
+              part of the non-MINEOS workaround.
 
     """
 
@@ -289,15 +422,23 @@ def _hstack_frechet_kernels(kernel, period:float):
     and Love (Vsv, Vsh) waves.
 
     Arguments:
-        - kernel (RayleighKernels or LoveKernels):
-            Frechet kernels across all periods
-        - period (float):
-            Period of interest (s).  Should match a period in the kernel.
+        kernel:
+            - RayleighKernels or LoveKernels
+            - Frechet kernels across all periods
+        period:
+            - float
+            - Units: seconds
+            - Period of interest.
+            - Should match a period in kernel.period.
 
     Returns:
-        Row vector containing the Vsv, Vsh, Vpv, Vph, Eta kernels for the
-        requested period.  Note that some of these are filled with zeros,
-        depending on if the kernel is a Love or Rayleigh kernel.
+        Row vector:
+            - (n_model_points, ) np.array
+            - Units: dimensionless
+            - Vector contains the Vsv, Vsh, Vpv, Vph, Eta kernels for the
+              requested period.
+            - Note that some of these are filled with zeros, depending on if
+              the kernel is a Love or Rayleigh kernel.
     """
 
     vsv = kernel.vsv[kernel.period == period] * 1e3
@@ -342,25 +483,31 @@ def _build_data_misfit_matrix(data, model, m0, G):
     See Russell et al., 2019 (10.1029/2018JB016598), eq. 7 to 8.
 
     Arguments:
-        data (surface_waves.ObsPhaseVelocity):
-            - observed phase velocity data (data.c is shape (n_periods,))
-        model (define_earth_model.EarthModel):
-            - Earth model used to predict the phase velocity data
-        m0 (np.array):
+        data:
+            - surface_waves.ObsPhaseVelocity
+            - Observed phase velocity data
+            - data.c is (n_periods, ) np.array
+        model:
+            - define_earth_model.EarthModel
+            - Units: seismology units, i.e. km/s for velocities
+            - Earth model used to predict the phase velocity data.
+        m0:
+            - (n_model_points, 1) np.array
+            - Units: SI units, i.e. m/s for velocities
             - Earth model ([Vsv; Vsh; Vpv; Vph; Eta]) in format for
               calculating the forward problem, G * m0.
-              This is the same as 'model', though reformatted into a
-              5 * n_depth_points x 1 array.
-        G (np.array):
+        G:
+            - (n_periods, n_model_points) np.array
+            - Units: dimensionless
             - Matrix of partial derivatives of phase velocity wrt the
-              Earth model (i.e. stacked Frechet kernels).  This is a
-              n_periods x 5 * n_depth_points array.
+              Earth model (i.e. stacked Frechet kernels).
 
     Returns:
-        data_misfit (np.array):
+        data_misfit:
+            - (n_periods, ) np.array
+            - Units: ***** Think this is currently a mixture of m/s and km/s!!!
             - The misfit of the data to the predictions, altered to account
               for the inclusion of G * m0.
-              This is a flattened (n_periods,) array.
 
 
     """
@@ -372,32 +519,109 @@ def _build_data_misfit_matrix(data, model, m0, G):
 
     return data_misfit
 
-def _build_weighting_matrices(data, model_vector, layer_indices):
+def _build_weighting_matrices(data:ObsPhaseVelocity, m0:np.array,
+                              layers:ModelLayerIndices):
     """ Build all of the weighting matrices.
+
+    Arguments:
+        data:
+            - surface_waves.ObsPhaseVelocity
+            - Observed phase velocity data
+            - data.c is (n_periods, ) np.array
+        m0:
+            - (n_model_points, 1) np.array
+            - Units: SI units, i.e. m/s for velocities
+            - Earth model ([Vsv; Vsh; Vpv; Vph; Eta]) in format for
+              calculating the forward problem, G * m0.
+        layers:
+            - ModelLayerIndices
+
+    Returns:
+        data_errors:
+            - (n_periods, n_periods) np.array
+            - Units: km/s
+        roughness_mat:
+            - (n_depth_points, n_model_points) np.array
+        roughness_vec:
+            - (n_depth_points, 1) np.array
+        a_priori_mat:
+            - (n_constraint_equations, n_model_points) np.array
+        a_priori_vec:
+            - (n_constraint_equations, 1) np.array
+
+
     """
-    # Data weights
-    data_errors = _build_error_weighting_matrix(data)
 
-    # Model weights
     model_order = {'vsv': 0, 'vsh': 1, 'vpv': 2, 'vph': 3, 'eta': 4}
-    layers = ModelLayerIndices()
 
-    damping = DampingParameters()
-    roughness_matrix, roughness = _build_smoothing_constraints(
-        model_vector, layers, model_order)
-    a_priori_constraints = _build_constraint_eq_matrix(model_vector)
 
-    return data_errors, roughness_matrix, roughness, a_priori_constraints
+    # Minimise second derivative within layers
+    damping = ModelLayerValues()
+    roughness_mat, roughness_vec = _build_model_weighting_matrices(
+        _build_smoothing_constraints, (layers), ['vsv', 'vsh'],
+        model_order, layers, damping,
+    )
 
-def _build_model_weighting_matrices(function_name, layers, damping,
-                                     model_order, model_params, m0):
-    n_model_points = m0.size
+    # Linear constraint equations
+    # Damp towards starting model
+    damping = ModelLayerValues()
+    damp_to_m0_mat, damp_to_m0_vec = _build_model_weighting_matrices(
+        _build_constraint_damp_to_m0, (n_depth_points, start_ind, m0),
+        ['vsv', 'vsh', 'eta'], model_order, layers, damping,
+    )
+    damping = ModelLayerValues()
+    damp_vpvs_mat, damp_vpvs_vec = _build_constraint_damp_vpvs(
+        layers, damping, model_order, m0,
+    )
+    damping = ModelLayerValues()
+    damp_isotropic_mat, damp_isotropic_vec = _build_constraint_damp_anisotropy(
+        layers, damping, model_order, xi_vals,
+    )
+
+
+    return data_errors, roughness_mat, roughness_vec, a_priori_mat, a_priori_vec
+
+def _build_layer_value_vector(values, layers):
+    """
+
+    Note: This assumes that the arrays in ModelLayerValues are a single column.
+          That is, we are not inputting different values corresponding to
+          different model parameters, but either a constant value for the layer
+          or values that vary as a function of depth.
+
+    Returns a column vector.
+    """
+
+    value_vec = np.zeros((layers.depth.size, 1))
+
+    for layer_name in layers.layer_names:
+        value_vec[getattr(layers, layer_name)] = getattr(values, layer_name)
+
+    return value_vec
+
+def _build_model_weighting_matrices(function_name, function_arguments,
+                                    model_params, model_order,
+                                    layers, damping):
+    """ Helper function for constraints that are applied to one parameter.
+
+    This function will run through the list of model_params that is input,
+    calculate H and h using the function_name function, and then assemble
+    these into a two H_all and h_all matrices of the correct shape.
+    """
+
+    n_depth_points = layers.depth.size
+    n_model_points = n_depth_points * (max(model_order.values()) + 1)
+
+    H_all = None
 
     for param in model_params:
-        H, h = function_name(param, layers, damping, m0)
-        H, h = _damp_and_pad_constraints(H, h, layers, damping, model_order,
-                                         param, n_model_points)
-        if model_order[param] == 0:
+        param_ind = model_order[param]
+        start_ind = n_depth_points * param_ind
+        H, h = function_name(function_arguments)
+        H, h = _damp_constraints(H, h, layers, damping, param_ind)
+        H = _pad_constraints(H, n_depth_points, n_model_points, start_ind)
+
+        if not H_all:
             H_all = H
             h_all = h
         else:
@@ -407,43 +631,34 @@ def _build_model_weighting_matrices(function_name, layers, damping,
     return H_all, h_all
 
 
-def _damp_and_pad_constraints(H, h, layers, damping, model_order, model_param,
-                              n_model_points):
+def _damp_constraints(H, h, layers, damping, param_ind:int=0):
     """ Apply layer specific damping to H and h.
 
-    This is done one model parameter at a time, and constraints are
-    assumed to be calculated across all depth points.  As such, matrix
-    shapes are H = (n_depth_points x n_depth_points), h = (n_depth_points x 1).
-    H is then padded with zeros to account for all other model parameters in the
-    matrix multiplication with m0, so H_pad = (n_depth_points x n_model_points)
+    This is done one model parameter at a time - i.e. assumes that H is only
+    (n_constraints x n_depth_points), NOT n_model_points wide!
+
+    It also requires that h is a COLUMN vector (n_constraints x 1)!
+
+    Damping parameters are set for individual layers.
 
     """
 
-    n_depth_points = layers.depth.size
+    # Loop through all layers
+    for layer_name in layers.layer_names:
+        layer_inds = getattr(layers, layer_name)
+        layer_damping = getattr(damping, layer_name)
 
-    # Upper crust
-    H[layers.upper_crust, layers.upper_crust] *= damping.upper_crust
-    h[layers.upper_crust] *= damping.upper_crust
+        H[:, layer_inds] *= layer_damping[:, param_ind]
+        h[layer_inds] *= layer_damping[:, param_ind]
 
-    # Lower crust
-    H[layers.lower_crust, layers.lower_crust] *= damping.lower_crust
-    h[layers.lower_crust] *= damping.lower_crust
+    return H, h
 
-    # Lithospheric mantle
-    H[layers.lithospheric_mantle, layers.lithospheric_mantle] *= (
-            damping.lithospheric_mantle)
-    h[layers.lithospheric_mantle] *= damping.lithospheric_mantle
-
-    # Asthenospheric mantle
-    H[layers.asthenospheric_mantle, layers.asthenospheric_mantle] *= (
-            damping.asthenospheric_mantle)
-    h[layers.asthenospheric_mantle] *= damping.asthenospheric_mantle
+def _pad_constraints(H, n_depth_points, n_model_points, start_ind):
 
     H_pad = np.zeros((n_depth_points, n_model_points))
-    start_ind = n_depth_points * model_order[model_parameter]
     H_pad[:, start_ind:start_ind+n_depth_points] = H
 
-    return H_pad, h
+    return H_pad
 
 def _build_error_weighting_matrix(data):
     """ Build the error weighting matrix from data standard deviation.
@@ -459,10 +674,9 @@ def _build_error_weighting_matrix(data):
 
     Returns:
         error weighting matrix (We in the syntax of Menke (2012) and docstring
-        for _damped_least_squares()) (np.array):
+        for _damped_least_squares()) (n_periods x n_periods np.array):
             - Diagonal matrix of 1 / standard deviation, i.e. measurements
               with smaller standard deviations will be weighted more strongly.
-              This is an n_periods x n_periods array.
     """
 
     # If standard deviation of data is missing (= 0), fill in with guess
@@ -472,8 +686,13 @@ def _build_error_weighting_matrix(data):
 
     return np.diag(1 / obs_std)
 
-def _build_smoothing_constraints(param, layers, damping, m0):
+def _build_smoothing_constraints(arguments:tuple) -> (np.array, np.array):
     """ Build the matrices needed to minimise second derivative of the model.
+
+    That is, for each layer, we want to minimise the second derivative
+    (i.e. ([layer+1 val] - [layer val]) - ([layer val] - [layer-1 val]) )
+    except for where we expect there to be discontinuties.  At expected
+    discontinuities, set the roughness matrix to zero.
 
     Note that Josh says this can be better captured by a linear constraint
     preserving layer gradients (and therefore stopping the model from getting
@@ -487,9 +706,11 @@ def _build_smoothing_constraints(param, layers, damping, m0):
             This is the matrix that we multiply by the model to find the
             roughness of the model (i.e. the second derivative of the model).
             In Menke (2012)'s notation, this is D and Wm is D^T * D.
-            This will be a n_smoothing_equations x n_model_points array, where
-            n_model_points is 5 * n_depth_points (i.e. Vsv, Vsh, Vpv, Vph, Eta
-            for all depths).
+            This will be a n_depth_points x n_depth_points array.
+            (In general n_smoothing_constraints x n_model_points, but this
+            returns the matrices for one model parameter at a time, and to
+            play nicely with the other functions, it is assumed that there
+            is a smoothing constraint put on every layer).
         - roughness (np.array):
             This is the permitted roughness of the model.  Actual roughness
             is calculated as roughness_matrix * model, and by setting this
@@ -499,35 +720,14 @@ def _build_smoothing_constraints(param, layers, damping, m0):
                 roughness_matrix * model = roughness
             Because we want as smooth a model as possible, permitted roughness
             is always set to zero.
-            This is a n_smoothing_equations x 1 array.
+            This is a n_depth_points x 1 array.
 
     """
+    layers, = arguments
+
+    n_depth_points = layers.depth.size
 
     discontinuities = [layers.midcrust, layers.Moho, layers.LAB]
-
-    # Vsv smoothing constraints
-    roughness_mat, roughness_vec = (
-        _make_roughness_matrix(n_depth_points, n_model_points, 'vsv', model_order,
-                               discontinuities, layers, damping)
-    )
-
-    return roughness_matrix, roughness_vector
-
-def _make_roughness_matrix(n_depth_points:int, n_model_points:int,
-                           model_parameter:str, model_order:dict,
-                           discontinuities:list, layers:ModelLayerIndices,
-                           damping: DampingParameters) -> (np.array, np.array):
-    """ Roughness matrix is the second-derivative smoothing.
-
-    That is, for each layer, we want to minimise the second derivative
-    (i.e. ([layer+1 val] - [layer val]) - ([layer val] - [layer-1 val]) )
-    except for where we expect there to be discontinuties.  At expected
-    discontinuities, set the roughness matrix to zero.
-
-    We also need to slot the banded matrix into the columns appropriate for
-    that model parameter, given that m0 is [Vsv, Vsh, Vpv, Vph, Eta]
-
-    """
 
     # Make and edit the banded matrix (roughness equations)
     banded_matrix = _make_banded_matrix(n_depth_points, (1, -2, 1))
@@ -536,7 +736,7 @@ def _make_roughness_matrix(n_depth_points:int, n_model_points:int,
     for d in [0] + discontinuities + [-1]:
         banded_matrix[d,:] *= 0
 
-    roughness_vector = np.zeros(n_depth_points)
+    roughness_vector = np.zeros((n_depth_points, 1))
 
     return roughness_matrix, roughness_vector
 
@@ -566,63 +766,122 @@ def _make_banded_matrix(matrix_size, central_values):
 
     return diag_matrix
 
-def _build_constraint_eq_matrix(m0):
-    """ Build the matrix of constraint equations.
 
-    e.g. damp towards the starting model, damp towards a Vp/Vs value
-    The damping will also probably be different for crust vs. upper mantle etc
-
-    As the smoothing, this is an n_constraints x n_model_points matrix and a
-    corresponding n_constraints x 1 vector with the solution to those constraint
-    equations that we will be damping towards.
-
-    This might be the tricky bit!!!
-    """
-
-    damp_to_starting_model_matrix, damp_to_starting_model_vector = (
-        _build_constraint_damp_to_starting_model()
-    )
-
-
-
-    constraints_matrix = np.vstack((
-        damp_to_starting_model_matrix,
-
-    ))
-
-    constraints_matrix = np.vstack((
-        damp_to_starting_model_vector,
-
-    ))
-
-    ######## FILL THIS IN #############
-
-    return constraints_matrix, constraints
-
-def _build_constraint_damp_to_starting_model(m0, layers, damping, model_order):
+def _build_constraint_damp_to_m0(arguments:tuple) -> (np.array, np.array):
     """ Damp towards starting model.
 
     H * m = h:
         H: diagonal matrix of ones
         h: model parameters
-
-    As Vp is not well constrained in the starting model, only want to
-    apply this for Vsv, Vsh, Eta.
     """
 
-    # Vsv
-    model_param = 'vsv'
+    n_depth_points, start_ind, m0 = arguments
+
+    H = np.diag(np.ones(n_depth_points))
+    # m0 is already a column vector, so can just pull relevant indices from it
+    h = m0[start_ind : start_ind+n_depth_points]
 
 
     return H, h
 
-def _make_damp_to_starting_model_matrices(layers, damping, model_order,
-                                         model_param, m0):
+def _build_constraint_damp_vpvs(layers:ModelLayerIndices,
+                                damping:ModelLayerValues, model_order:dict,
+                                m0:np.array) -> (np.array, np.array):
+    """ Damp Vp/Vs towards starting model.
+
+    To fit with the matrix multiplation setup, this is done as
+        Vp - ((Vp/Vs) * Vs) = 0
+
+    H * m = h:
+        H:  set to -vp/vs in the Vs relevant column, set to 1 in the Vp column
+        h:  zeros
+
+    """
+    n_depth_points = layers.depth.size
+
+    # Vsv and Vpv
+    H_v, h_v = _make_damp_vpvs_matrix('v', model_order, m0, layers, damping)
+    # Vsh and Vph
+    H_h, h_h = _make_damp_vpvs_matrix('h', model_order, m0, layers, damping)
+
+    return np.vstack((H_v, H_h)), np.vstack((h_v, h_h))
+
+def _make_damp_vpvs_matrix(polarity:str, model_order:dict, m0:np.array,
+                           layers:ModelLayerIndices, damping:ModelLayerValues
+                           ) -> (np.array, np.array):
+
+    n_depth_points = layers.depth.size
+    n_model_points = n_depth_points * (max(model_order.values()) + 1)
+
+    # Find correct indices and values for Vp/Vs polarity
+    vs_start_ind = model_order['vs' + polarity] * n_depth_points
+    vp_start_ind = model_order['vp' + polarity] * n_depth_points
+    vs_inds = np.arange(vs_start_ind, vs_start_ind + n_depth_points)
+    vp_inds = np.arange(vp_start_ind, vp_start_ind + n_depth_points)
+    vp_vs_diag = np.diag(m0[vp_inds] / m0[vs_inds])
+    ones_diag = np.diag(np.ones(n_depth_points))
+
+    # Construct H matrix (with padding)
+    H = np.zeros(n_depth_points, n_model_points)
+    H[:, vs_inds] = vp_vs_diag
+    H[:, vp_inds] = ones_diag
+
+    h = np.zeros((n_depth_points, 1))
+
+    # Apply damping to H and h - need to do this one model parameter at a time
+    # Apply to Vs columns
+    H[:, vs_inds], h = _damp_constraints(H[:, vs_inds], h, layers, damping)
+    # Apply to Vp columns
+    H[:, vp_inds], h = _damp_constraints(H[:, vp_inds], h, layers, damping)
 
 
-    start_ind = model_order[model_param] * n_depth_points
-    H = np.diag(np.ones(n_depth_points))
-    h = m0[start_ind : start_ind+n_depth_points]
+    return H, h
+
+def _build_constraint_damp_anisotropy(layers:ModelLayerIndices,
+                                      damping:ModelLayerValues,
+                                      xi_vals:ModelLayerValues,
+                                      model_order:dict,
+                                      ) -> (np.array, np.array):
+    """ Damp (Vsh/Vsv)^2 towards set value of Xi
+
+    (Vsh/Vsv)^2, or xi, is the radial anisotropy parameter (squiggly e).
+    Xi = 1 means the rock is radially anisotropic.
+
+    To fit with the matrix multiplation setup, this is done as
+        Vsh - sqrt(xi) * Vsv = 0
+            (Via...  (Vsh/Vsv)^2 = Xi; Vsh = sqrt(Xi) * Vsv)
+
+    H * m = h:
+        H:  set to -sqrt(xi) in the Vsv relevant column,
+            set to 1 in the Vsh column
+        h:  zeros
+
+    """
+    n_depth_points = layers.depth.size
+    n_model_points = n_depth_points * (max(model_order.values()) + 1)
+
+    # Find correct indices for Vsh and Vsv
+    vsv_start_ind = model_order['vsv'] * n_depth_points
+    vsh_start_ind = model_order['vsh'] * n_depth_points
+    vsv_inds = np.arange(vsv_start_ind, vsv_start_ind + n_depth_points)
+    vsh_inds = np.arange(vsh_start_ind, vsh_start_ind + n_depth_points)
+
+    # Build Xi vector across the whole model space
+    xi = _build_layer_value_vector(xi_vals, layers)
+
+    # Construct H matrix (with padding)
+    H = np.zeros(n_depth_points, n_model_points)
+    ones_diag = np.diag(np.ones(n_depth_points))
+    H[:, vsv_inds] = -ones_diag * np.sqrt(xi)
+    H[:, vsh_inds] = ones_diag
+
+    h = np.zeros((n_depth_points, 1))
+
+    # Apply damping to H and h - need to do this one model parameter at a time
+    # Apply to Vs columns
+    H[:, vsv_inds], h = _damp_constraints(H[:, vsv_inds], h, layers, damping)
+    # Apply to Vp columns
+    H[:, vsh_inds], h = _damp_constraints(H[:, vsh_inds], h, layers, damping)
 
     return H, h
 

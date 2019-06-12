@@ -399,7 +399,7 @@ Plot this on Figure 73.
       GG = [  S_Vsv_p1     0      S_Vpv_p1  S_Vph_p1  S_eta_p1   ]
               S_Vsv_p2     0      S_Vpv_p2  S_Vph_p2  S_eta_p2
               S_Vsv_p2     0      S_Vpv_p2  S_Vph_p2  S_eta_p2
-              
+
             where, e.g. T_Vsv_p1 is the Frechet kernel for Toroidal Vsv sensitivity
             for the first Love period.
             So to get a GG this size would be n_depth_points = 1, n_Love_periods = 2,
@@ -473,11 +473,25 @@ Plot this on Figure 73.
                   These basically have H = 1 along the diagonal and
                   h = values of Vsv (for spherical indices) or Vsh (for
                   toroidal indices) from the starting model, (card).
+                  Note that the order for these equations is confusing...
+                  m0 in Josh's model goes [vsv; vsh; vpv; vph; eta], where
+                  for each model parameter, the first index in the deepest
+                  (i.e. parameters are in terms of increasing radius)
+                  So if H is a horizontal stack of the equations for each
+                  parameter next to each other, within each of those blocks,
+                  the values are being multiplied by the DEEPER values the
+                  earlier column that they are in.
+                  However, he works down through the constraint equations as
+                  crust_vsv, crust_vsh, mantle_vsv, mantle_vsh (etc)
+                  so although these are just diagonal matrices, they are all
+                  offset such that the multiplication works out.
 
 
               H6: damp water column towards starting model
                   As H3, but for the water column, so ε is much higher as the
-                  velocity of water is much more constrained.
+                  velocity of water is much more constrained.  Also damp
+                  Vpv and Vph for the water column explicitly here (rather than
+                  via Vp/Vs as is done for the solid earth).
 
               H1: enforce eta is constant
                   These have H = 1 along the diagonal (well, in the column for
@@ -495,8 +509,8 @@ Plot this on Figure 73.
              H42: enforce specific Xi value, i.e. Vsh - Vsv * sqrt(Xi) = 0
                   Similar to the above, but H = -sqrt(assigned Xi value) for Vsv
                   column (still H = 1 for Vsh, and h = 0).
-                  Xi is (Vsh/Vsv)^2.  This is set in the damping_parameters rather
-                  than read in from the model card.
+                  Xi is (Vsh/Vsv)^2.  This is set in the damping_parameters as
+                  a constant for each layer.
 
             H7: preserve layer gradients
                   When this is applied, don't need the smoothness constraints,
