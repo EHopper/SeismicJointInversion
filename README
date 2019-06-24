@@ -5,7 +5,7 @@ urllib.request
 xarray
 random
 unittest
-parametrized.parameterized
+parameterized.parameterized
 
 
 Plan for inversion:
