@@ -6,6 +6,13 @@ xarray
 random
 unittest
 parameterized.parameterized
+pandas
+pathlib
+xarray
+os
+itertools
+spectrum
+scipy
 
 
 Plan for inversion:

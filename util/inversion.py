@@ -45,7 +45,7 @@ class ModelLayerIndices(typing.NamedTuple):
 
         depth:
             - (n_depth_points, ) np.array
-            - Units: kilometres
+            - Units:    kilometres
             - Depth vector for the whole model space.
         layer_names:
             - list
@@ -104,19 +104,19 @@ class LoveKernels(typing.NamedTuple):
     Fields:
         period:
             - (n_love_periods * n_depth_points, ) np.array
-            - Units: seconds
+            - Units:    seconds
             - Period of Love wave of interest.
         depth:
             - (n_depth_points, ) np.array
-            - Units: kilometres
+            - Units:    kilometres
             - Depth vector for kernel.
         vsv:
             - (n_depth_points * n_love_periods, ) np.array
-            - Units: dimensionless
+            - Units:    assumes velocities in km/s
             - Vertically polarised S wave kernel.
         vsh:
             - (n_depth_points * n_love_periods, ) np.array
-            - Units: dimensionless
+            - Units:    assumes velocities in km/s
             - Horizontally polarised S wave kernel.
         type: str = 'love'
             - Default shouldn't be changed
@@ -140,27 +140,27 @@ class RayleighKernels(typing.NamedTuple):
     Fields:
         period:
             - (n_love_periods * n_depth_points, ) np.array
-            - Units: seconds
+            - Units:    seconds
             - Period of Rayleigh wave of interest.
         depth:
             - (n_depth_points, ) np.array
-            - Units: kilometres
+            - Units:    kilometres
             - Depth vector for kernel.
         vsv:
             - (n_love_periods * n_depth_points, ) np.array
-            - Units: dimensionless
+            - Units:    assumes velocities in km/s
             - Vertically polarised S wave kernel.
         vpv:
             - (n_love_periods * n_depth_points, ) np.array
-            - Units: dimensionless
+            - Units:    assumes velocities in km/s
             - Vertically polarised P wave kernel.
         vph:
             - (n_love_periods * n_depth_points, ) np.array
-            - Units: dimensionless
+            - Units:    assumes velocities in km/s
             - Horizontally polarised P wave kernel.
         eta:
             - (n_love_periods * n_depth_points, ) np.array
-            - Units: dimensionless
+            - Units:    assumes velocities in km/s
             - Anellipticity (eta = F/(A-2L)) kernel.
         type: str = 'rayleigh'
             - Default shouldn't be changed.
@@ -232,7 +232,7 @@ def _calculate_Frechet_kernels(model:define_earth_model.EarthModel,
               a placeholder for when I do things properly.
         max_depth:
             - float
-            - Units: kilometres
+            - Units:    kilometres
             - Depth below which to crop off the Frechet kernels
             - i.e. do not invert for Earth structure below this depth.
 
@@ -243,7 +243,7 @@ def _calculate_Frechet_kernels(model:define_earth_model.EarthModel,
             - LoveKernels
         depth:
             - (n_depth_points, ) np.array
-            - Units: kilometres
+            - Units:    kilometres
             - Vector of depth (km) that is the same as in the loaded kernels.
     """
 
@@ -290,27 +290,30 @@ def _build_model_vector(model:define_earth_model.EarthModel,
     Arguments:
         model:
             - define_earth_model.EarthModel
-            - Input Vs, Vp model (km/s)
+            - Units:    seismological, so km/s for velocities
+            - Input Vs, Vp model.
         depth:
             - (n_depth_points, ) np.array
+            - Units:    kilometres
             - This is a non-MINEOS workaround to make sure the depth vectors
               are the same
 
     Returns:
         m0:
             - (n_model_points, 1) np.array
-            - Units: SI, so m/s for velocities, dimensionless for eta
-            - Vsv, Vsh, Vpv, Vph, eta model stacked on top of each other
+            - Units:    seismological, so km/s for velocities,
+                        dimensionless for eta
+            - Vsv, Vsh, Vpv, Vph, eta model stacked on top of each other.
             - N.B. n_model_points = n_depth_points * n_model_parameters
     """
 
     # Find depth vector from kernels and interpolate model over it
     depth = _make_2D(depth)
 
-    vsv = _interpolate_earth_model_parameter(depth, model, 'vs') * 1e3
-    vsh = _interpolate_earth_model_parameter(depth, model, 'vs') * 1e3
-    vpv = _interpolate_earth_model_parameter(depth, model, 'vp') * 1e3
-    vph = _interpolate_earth_model_parameter(depth, model, 'vp') * 1e3
+    vsv = _interpolate_earth_model_parameter(depth, model, 'vs')
+    vsh = _interpolate_earth_model_parameter(depth, model, 'vs')
+    vpv = _interpolate_earth_model_parameter(depth, model, 'vp')
+    vph = _interpolate_earth_model_parameter(depth, model, 'vp')
     eta = np.ones_like(depth)
 
     return np.vstack((vsv, vsh, vpv, vph, eta))
@@ -328,12 +331,13 @@ def _interpolate_earth_model_parameter(new_depth:np.array,
     Arguments:
         new_depth:
             - (n_depth_points, 1) np.array
-            - Units: kilometres
+            - Units:    kilometres
             - Depth vector over which to interpolate EarthModel parameter.
             - Shape of this vector, i.e. a column, is very important!
               np.interp will generate vectors of the same shape.
         model:
             - define_earth_model.EarthModel
+            - Units:    seismological (e.g. km not m)
             - Input EarthModel.
         field_str:
             - str
@@ -342,7 +346,7 @@ def _interpolate_earth_model_parameter(new_depth:np.array,
     Returns:
         new_field:
             - (n_depth_points, 1) np.array
-            - Units: as units of field in input model.
+            - Units:    as units of field in input model.
             - Vector of model parameter interpolated onto new_depth and ready
               to be vertically stacked into m0.
 
@@ -385,7 +389,7 @@ def _build_partial_derivatives_matrix(rayleigh, love):
     Returns:
         G:
             - (n_Love_periods + n_Rayleigh_periods, n_model_points) np.array
-            - Units: dimensionless
+            - Units:    assumes velocities in km/s
             - Partial derivative matrix is of the format described earlier in
               the docstring, stacking the Love and Rayleigh kernels vertically
               on top of each other with rows corresponding to different periods.
@@ -421,30 +425,33 @@ def _hstack_frechet_kernels(kernel, period:float):
             - Frechet kernels across all periods
         period:
             - float
-            - Units: seconds
+            - Units:    seconds
             - Period of interest.
             - Should match a period in kernel.period.
 
     Returns:
         Row vector:
             - (n_model_points, ) np.array
-            - Units: dimensionless
+            - Units:     assumes velocities in km/s
             - Vector contains the Vsv, Vsh, Vpv, Vph, Eta kernels for the
               requested period.
             - Note that some of these are filled with zeros, depending on if
               the kernel is a Love or Rayleigh kernel.
     """
 
-    vsv = kernel.vsv[kernel.period == period] * 1e3
+    # Note: if want to have kernels scaled for changes in velocity in SI
+    #       units (i.e. m/s not km/s), multiply all kernels (including eta)
+    #       by 1e3.
+    vsv = kernel.vsv[kernel.period == period]
 
     if kernel.type == 'rayleigh':#isinstance(kernel, RayleighKernels):
         vsh = np.zeros_like(vsv)
-        vpv = kernel.vpv[kernel.period == period] * 1e3
-        vph = kernel.vph[kernel.period == period] * 1e3
-        eta = kernel.eta[kernel.period == period] * 1e3
+        vpv = kernel.vpv[kernel.period == period]
+        vph = kernel.vph[kernel.period == period]
+        eta = kernel.eta[kernel.period == period]
 
     if kernel.type == 'love':#isinstance(kernel, LoveKernels):
-        vsh = kernel.vsh[kernel.period == period] * 1e3
+        vsh = kernel.vsh[kernel.period == period]
         vpv = np.zeros_like(vsv)
         vph = np.zeros_like(vsv)
         eta = np.zeros_like(vsv)
@@ -478,28 +485,28 @@ def _build_data_misfit_matrix(data, model, m0, G):
 
     Arguments:
         data:
-            - surface_waves.ObsPhaseVelocity
+            - surface_waves.ObsPhaseVelocity, data.c is (n_periods, ) np.array
+            - Units:    data.c is in km/s
             - Observed phase velocity data
-            - data.c is (n_periods, ) np.array
         model:
             - define_earth_model.EarthModel
-            - Units: seismology units, i.e. km/s for velocities
+            - Units:    seismology units, i.e. km/s for velocities
             - Earth model used to predict the phase velocity data.
         m0:
             - (n_model_points, 1) np.array
-            - Units: SI units, i.e. m/s for velocities
+            - Units:    seismology units, i.e. km/s for velocities
             - Earth model ([Vsv; Vsh; Vpv; Vph; Eta]) in format for
               calculating the forward problem, G * m0.
         G:
             - (n_periods, n_model_points) np.array
-            - Units: dimensionless
+            - Units:    assumes velocities in km/s
             - Matrix of partial derivatives of phase velocity wrt the
               Earth model (i.e. stacked Frechet kernels).
 
     Returns:
         data_misfit:
             - (n_periods, ) np.array
-            - Units: ***** Think this is currently a mixture of m/s and km/s!!!
+            - Units:    km/s
             - The misfit of the data to the predictions, altered to account
               for the inclusion of G * m0.
 
@@ -533,7 +540,7 @@ def _build_weighting_matrices(data:ObsPhaseVelocity, m0:np.array,
     Returns:
         data_errors:
             - (n_periods, n_periods) np.array
-            - Units: km/s
+            - Units:    km/s
         roughness_mat:
             - (n_depth_points, n_model_points) np.array
         roughness_vec:
@@ -744,15 +751,52 @@ def _damp_constraints(H, h, layers, damping, param_ind:int=0):
             h:
                 - (n_constraint_equations, 1) np.array
                 - Damped constraints vector in H * m = h.
-
     """
+
+    # A note on multiplication in numpy:
+    #   numpy does everything element-wise unless you explicitly tell it not
+    #   to, e.g. by using np.matmul() to do matrix multiplication.
+    #   This means that it will broadcast arrays by repeating rows or columns
+    #   so they are the same shape as the matrix they are being multiplied by.
+    #   This broadcasting is ONLY done for matrices where one of the dimensions
+    #   is equal to 1 (i.e. row (1, n) or column (n, 1) vectors) OR for 1D
+    #   numpy arrays (i.e. (n,) arrays), which are treated as row vectors.
+    #   If the arrays cannot be broadcast to the same shape, the * operator
+    #   will return an error. Note that this element-wise behaviour means all
+    #   numpy * operations are commutative!
+    #   As such, for any c = a * b...
+    #       a.shape | b.shape | d.shape      | Result
+    # ______________|_________|______________|____________________________
+    #       (n,)    | (m,)    | (n==m,)      |  [a_1*b_1, ..., a_n*b_m]
+    #       (1, n)  | (m,)*   | (n==m, 1)    |  [[a_1*b_1, ..., a_n*b_m]]
+    #       (n, 1)  | (m,)*   | (n, m)       |  [[a_1*b_1, ..., a_1*b_m],
+    #               |         |              |   [a_n*b_1, ..., a_n*b_m]]
+    #       (n,)* **| (m, 1)  | (n, m)       |  [[a_1*b_1, ..., a_n*b_1],
+    #               |         |              |   [a_1*b_m, ..., a_n*b_m]]
+    #       (n, m)  | (p,)*   | (n, m==p)    |  [[a_11*b_1, ..., a_1m*b_p],
+    #               |         |              |   [a_n1*b_1, ..., a_nm*b_p]]
+    #       (n, m)  | (p, 1)  | (n==p, m)    |  [[a_11*b_1, ..., a_1m*b_1],
+    #               |         |              |   [a_n1*b_n, ..., a_nm*b_p]]
+    #       (n, m)  | (p, q)  | (n==p, m==q) |  [[a_11*b_11, ..., a_1m*b_1p],
+    #               |         |              |   [a_n1*b_p1, ..., a_nm*b_pq]]
+    #
+    #       * Same result for array.shape = (1, len) as (len,)
+    #               i.e. row vector acts the same as 1D array
+    #       ** This is to show commutative behaviour with example in row above.
+
 
     # Loop through all layers
     for layer_name in layers.layer_names:
         layer_inds = getattr(layers, layer_name)
         layer_damping = getattr(damping, layer_name)
 
-        H[:, layer_inds] *= layer_damping[:, param_ind]
+        # (n_constraint_equations, n_depth_points_in_layer) slice of H
+        #   * (n_depth_points_in_layer, 1) slice of layer_damping
+        # As depth increases by column in H, need to transpose the slice of
+        # layer_damping for the broadcasting to work properly.
+        # For h, depth increases by row, so layer_damping slice is the
+        # correct orientation.
+        H[:, layer_inds] *= layer_damping[:, param_ind].T
         h[layer_inds] *= layer_damping[:, param_ind]
 
     return H, h
@@ -1212,7 +1256,10 @@ def _build_constraint_damp_original_gradient(
 
     H = np.zeros((n_depth_points, n_depth_points))
     for i_d in range(n_depth_point - 1):
-        H[i_d, i_d : i_d+2] = 1 / m0[start_ind+i_d : start_ind+i_d+2]
+        # Need to transpose slice of m0 (2, 1) to fit in H (1, 2) gap,
+        # because in H, depth increases with column not row.
+        H[i_d, [i_d, i_d+1]] = m0[[start_ind+i_d+1, start_ind+i_d]].T
+
 
     # Remove constraints around discontinuities between layers.
     for d in layers.discontinuities:
@@ -1287,7 +1334,8 @@ def _damped_least_squares(m0, G, d, W, D_mat, d_vec, H_mat, h_vec):
     f = np.vstack((np.matmul(np.sqrt(W), d), h))
 
     Finv_denominator = np.matmul(F.T, F)
-    Finv = matlab.mldivide(Finv_denominator, F.T)
+    # x = np.linalg.lstsq(a, b) solves for x: ax = b, i.e. x = a \ b in MATLAB
+    Finv = np.linalg.lstsq(Finv_denominator, F.T, rcond=None)[0]
 
     new_model = np.matmul(Finv, f)
     #
