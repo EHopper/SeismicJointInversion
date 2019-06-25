@@ -178,6 +178,7 @@ class RayleighKernels(typing.NamedTuple):
     type: str = 'rayleigh'
 
 
+
 # =============================================================================
 #       Run the Damped Least Squares Inversion
 # =============================================================================
@@ -387,14 +388,10 @@ def _build_partial_derivatives_matrix(rayleigh, love):
             - LoveKernels
 
     Returns:
-        G:
-            - (n_Love_periods + n_Rayleigh_periods, n_model_points) np.array
-            - Units:    assumes velocities in km/s
-            - Partial derivative matrix is of the format described earlier in
-              the docstring, stacking the Love and Rayleigh kernels vertically
-              on top of each other with rows corresponding to different periods.
-            - For now, I have set this to onlt the Rayleigh wave kernels -
-              part of the non-MINEOS workaround.
+        G_inversion_model:
+            - (, ) np.array
+            - Units:
+            -
 
     """
 
@@ -409,8 +406,13 @@ def _build_partial_derivatives_matrix(rayleigh, love):
                             _hstack_frechet_kernels(love, periods[i_p])))
 
     # surface_waves code only calculates Rayleigh phv
+    G_MINEOS = G_Rayleigh #np.vstack((G_Love, G_Rayleigh))
 
-    return G_Rayleigh #np.vstack((G_Love, G_Rayleigh))
+    # Convert to kernels for the model parameters we are inverting for
+    G_inversion_model = _convert_to_model_kernels(G_MINEOS, rayleigh.depth,
+                                                  model)
+
+    return G_inversion_model
 
 
 def _hstack_frechet_kernels(kernel, period:float):
@@ -457,6 +459,205 @@ def _hstack_frechet_kernels(kernel, period:float):
         eta = np.zeros_like(vsv)
 
     return np.hstack((vsv, vsh, vpv, vph, eta))
+
+def _convert_to_model_kernels(G_MINEOS):
+    """ Convert from Frechet kernels as function of v(z) to function of m0.
+
+    The Frechet kernels from MINEOS are given at the same depths as those in
+    the MINEOS model card, as a function of the model card v(z).  However, we
+    want to invert for a model in a different format, so we need to adjust
+    the kernels accordingly.
+
+    Let   m:    old model, as a function of depth, from MINEOS card
+                multiple parameters - [vsv, vsh, vpv, vph, eta]
+          p:    new model
+                multiple parameters - [s, t]
+          c:    observed phase velocities, Love stacked on top of Rayleigh
+
+    The MINEOS kernels are a matrix of dc/dm
+        i.e.   dc_0/dvsv_0, ..., dc_0/dvsv_M, dc_0/dvsh_0, ..., dc_0/deta_M
+            [       :     ,  : ,      :     ,      :     ,  : ,      :      ]
+                dc_N/dvsv_0, ..., dc_N/dvsv_M, dc_N/dvsh_0, ..., dcN_deta_M
+
+    We want a matrix of dc/dp
+        i.e.   dc_0/ds_0, ..., dc_0/ds_P, dc_0/dt_0, ..., dc_0/dt_D
+            [       :   ,  : ,    :     ,    :     ,  : ,    :      ]
+               dc_N/ds_0, ..., dc_N/ds_P, dc_N/dt_0, ..., dc_N/dt_D
+
+
+    As dx/dy = dx/da * da/dy, we need to find the matrix dm/dp
+        i.e.   dvsv_0/ds_0, ..., dvsv_0/ds_P, dvsv_0/dt_0, ..., dvsv_0/dt_D
+                    :     ,  : ,    :       ,    :       ,  : ,    :
+            [  dvsv_M/ds_0, ..., dvsv_M/ds_P, dvsv_M/dt_0, ..., dvsv_M/dt_D  ]
+               dvsh_0/ds_0, ..., dvsh_0/ds_P, dvsh_0/dt_0, ..., dvsh_0/dt_D
+                    :     ,  : ,    :       ,    :       ,  : ,    :
+               deta_M/ds_0, ..., deta_M/ds_P, deta_M/dt_0, ..., deta_M/dt_D
+
+    By matrix multiplication, this works out as dc_0/ds_0 = sum(dvsv_a/ds_0),
+    where the sum is from a = 0 to a = N.
+
+    A lot of these partial derivatives will be zero, i.e. for values of vsv,
+    vsh, vpv, vph that are far from the value of s or t that is being varied;
+    eta is held constant and never dependent on our model parameters [s, t].
+
+    Given that s is just Vsv defined at a number of points in depth, we find
+    the partial derivatives of the other velocities (vsh, vpv, vph) by
+    scaling between them.
+
+    Arguments:
+        G_MINEOS:
+            - (n_Love_periods + n_Rayleigh_periods, n_card_depths) np.array
+            - Units:    assumes velocities in km/s
+            - Partial derivative matrix is of the format described earlier in
+              the docstring, stacking the Love and Rayleigh kernels vertically
+              on top of each other with rows corresponding to different periods.
+            - For now, I have set this to only the Rayleigh wave kernels -
+              part of the non-MINEOS workaround.
+        depth:
+            - (n_card_depths, ) np.array
+            - Units:    kilometres
+            - Depth vector for MINEOS kernel.
+        model:
+
+    Returns:
+        G_inversion_model:
+
+
+    """
+
+    # Build dm/dp matrix up column by column
+    n_layers = model.s.size - 1 # last value of s is pinned (not inverted for)
+    dm_ds_mat = np.zeros((depth.size, n_layers))
+    dm_dt_mat = np.zeros((depth.size, model.t.size))
+
+    # First, do dc/ds column by column
+    # Build first column, dc/ds_0 - only affect layers deeper
+    dm_ds_mat = _convert_kernels_d_deeperm_by_d_s(model, 0, depth, dm_ds_mat)
+    # Build other columns, dc/ds_i
+    for i in range(1, n_layers):
+        dm_ds_mat = _convert_kernels_d_shallowerm_by_d_s(
+            model, i, depth, dm_ds_mat
+        )
+        dm_ds_mat = _convert_kernels_d_shallowerm_by_d_s(
+            model, i, depth, dm_ds_mat
+        )
+
+    # Now, do dc/dt column by column
+    for i in range(model.t.size):
+        dm_dt_mat = _convert_kernels_d_shallowerthanboundm_by_d_t(
+            model, i, depth, dm_dt_mat
+        )
+        dm_dt_mat = _convert_kernels_d_boundarym_by_d_t(
+            model, i, depth, dm_dt_mat
+        )
+        dm_dt_mat = _convert_kernels_d_deeperthanboundm_by_d_t(
+            model, i, depth, dm_dt_mat
+        )
+
+def _convert_kernels_d_shallowerthanboundm_by_d_t(model, i, depth, dm_dt_mat):
+    # s_i is the velocity at the top of the boundary, model.boundary_inds[i]
+    # s_i_minus_1 is the velocity at the top of the model layer above this
+
+    # model.thickness[i_b - 1] is the thickness of the layer above the boundary
+    # i.e. what we are inverting for; model.thickness[i_b] is the thickness
+    # of the boundary layer itself
+    i_b = model.boundary_inds[i]
+
+    depth_to_s_i_minus_1 = np.sum(model.thickness[:i_b-1])
+    depth_to_s_i = np.sum(model.thickness[:i_b])
+
+    d_inds, = np.where(np.logical_and(depth_to_s_i_minus_1 < depth,
+                                      depth <= depth_to_s_i))
+
+    for i_d in d_inds:
+        dm_dt_mat[i_d, i + (model.s.size - 1)] = -(
+            (
+                (model.s[i_b] - model.s[i_b - 1])
+                * (depth[i_d] - depth_to_s_i_minus_1)
+            )
+            * model.thickness[i_b - 1]^-2
+        )
+
+    return dm_dt_mat
+
+def _convert_kernels_d_boundarym_by_d_t(model, i, depth, dm_dt_mat):
+    # s_i is the velocity at the top of the boundary, model.boundary_inds[i]
+    # s_i_plus_1 is the velocity at the bottom of the boundary
+    i_b = model.boundary_inds[i]
+
+    depth_to_s_i = np.sum(model.thickness[:i_b])
+    depth_to_s_i_plus_1 = np.sum(model.thickness[:i_b+1])
+
+    d_inds, = np.where(np.logical_and(depth_to_s_i <= depth,
+                                      depth < depth_to_s_i_plus_1))
+
+    for i_d in d_inds:
+        dm_dt_mat[i_d, i + (model.s.size - 1)] = -(
+            (model.s[i_b + 1] - model.s[i_b])
+            * model.thickness[i_b]^-2
+        )
+
+    return dm_dt_mat
+
+def _convert_kernels_d_deeperthanboundm_by_d_t(model, i, depth, dm_dt_mat):
+    # ************ NEED TO WORK OUT HOW THICKNESS LINES UP WITH S ******
+    # s_i_minus_1 is the velocity at the top of the model layer above this
+    # s_i is the velocity at the top of the boundary, model.boundary_inds[i]
+    # s_i_plus_1 is the velocity at the bottom of the boundary
+    # s_i_plus_2 is the velocity at the bottom of the layer below the boundary
+    i_b = model.boundary_inds[i]
+
+    depth_to_s_i_minus_1 = np.sum(model.thickness[:i_b-2])
+    depth_to_s_i = np.sum(model.thickness[:i_b-1])
+    depth_to_s_i_plus_1 = np.sum(model.thickness[:i_b])
+    depth_to_s_i_plus_2 = np.sum(model.thickness[:i_b+1])
+
+    d_inds, = np.where(np.logical_and(depth_to_s_i_plus_1 <= depth,
+                                      depth < depth_to_s_i_plus_2))
+
+    for i_d in d_inds:
+        dm_dt_mat[i_d, i + (model.s.size - 1)] = -(
+            (
+                (model.s[i_b + 1] - model.s[i_b])
+                * (depth[i_d] - depth_to_s_i_plus_2)
+            )
+            * (model.thickness[i_b + 2]^-2
+        )
+
+    return dm_dt_mat
+
+
+def _convert_kernels_d_shallowerm_by_d_s(model, i, depth, dm_ds_mat):
+
+    # Find h, the number of layers in card depth deeper than defined s point
+    # that will be affected by varying that s
+    depth_to_s_i_minus_1 = np.sum(model.thickness[:i-1])
+    depth_to_s_i = np.sum(model.thickness[:i])
+
+    d_inds, = np.where(np.logical_and(depth_to_s_minus_i < depth,
+                                      depth <= depth_to_s_i))
+
+    for i_d in d_inds:
+        dm_ds_mat[i_d, i] = ((depth[i_d] - depth_to_s_i_minus_1)
+                             /model.thickness[i-1])
+
+    return dm_ds_mat
+
+def _convert_kernels_d_deeperm_by_d_s(model, i, depth, dm_ds_mat):
+
+    # Find h, the number of layers in card depth deeper than defined s point
+    # that will be affected by varying that s
+    depth_to_s_i = np.sum(model.thickness[:i])
+    depth_to_s_i_plus_1 = np.sum(model.thickness[:i+1])
+
+    d_inds, = np.where(np.logical_and(depth_to_s_i <= depth,
+                                      depth < depth_to_s_i_plus_1))
+
+    for i_d in d_inds:
+        dm_ds_mat[i_d, i] = 1 - ((depth[i_d] - depth_to_s_i)
+                                 /model.thickness[i])
+
+    return dm_ds_mat
 
 
 def _build_data_misfit_matrix(data, model, m0, G):
