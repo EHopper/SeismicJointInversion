@@ -1,8 +1,12 @@
 """ Wrapper for using Fortran MINEOS codes.
 
-This is a Python wrapper to calculate surface wave phase velocities
+This WILL BE a Python wrapper to calculate surface wave phase velocities
 from a given starting velocity model using MINEOS.  Basically a translation
 of Zach Eilon's MATLAB wrapper - https://github.com/eilonzach/matlab_to_mineos.
+
+For now, try and get everything running with some kind of arbitrary kernels
+calculated in MATLAB that we aren't going to update, and the surface wave
+code that is already working.
 
 Classes:
     RunParameters, with fields
@@ -46,8 +50,8 @@ class RunParameters(typing.NamedTuple):
 
     """
 
-    Rayleigh_or_Love: str
-    phase_or_group_velocity: str
+    Rayleigh_or_Love: str = 'R'
+    phase_or_group_velocity: str = 'ph'
     l_min: int = 0
     l_max: int = 3500
     freq_min: float = 0.05
@@ -63,5 +67,44 @@ class RunParameters(typing.NamedTuple):
 #       Run MINEOS - calculate phase velocity, group velocity, kernels
 # =============================================================================
 
-def synthesise_phase_or_group_velocity():
+def run_mineos(parameters:RunParameters, periods:np.array,
+               earth_model_name:str) -> np.array:
+    """
+    Given an earth_model_name (MINEOS card saved as a text file), run MINEOS.
+    """
+
+    _run_mineos_until_not_broken()
+
+    _fix_eigfiles()
+
+    _do_Q_correction()
+
+    pass
+
+
+def _run_mineos_until_not_broken(min_desired_period):
+    min_calculated_period = 1e10
+    while min_calculated_period > min_desired_period:
+        min_calculated_period = _run_mineos()
+
+
+    pass
+
+
+def _run_mineos():
+
+    _write_modefile()
+    _write_execfile()
+    _run_execfile()
+    Tmin = _check_output()
+
+    return Tmin
+
+def _write_modefile():
+    pass
+
+def _write_execfile():
+    pass
+
+def _run_execfile():
     pass
