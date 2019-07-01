@@ -36,13 +36,6 @@ class SetupModel(typing.NamedTuple):
     Vpv to Vph, and assume a constant value of Eta.
 
     Fields:
-        vsv:
-            - (n_boundary_depths_inverted_for * 2 + 2, ) np.array
-            - Units:    km/s
-            - Shear velocity at the surface, the top and bottom of boundaries
-              of interest, and at the base of the model (pinned)
-            - Velocities are assumed to be piecewise linear between these
-              points.
         boundary_widths:
             - (n_boundary_depths_inverted_for, ) np.array
             - Units:   km
@@ -60,48 +53,67 @@ class SetupModel(typing.NamedTuple):
               priori constraints.
             - Used for setting up model layers and in weighting the constraints
               in the inversion.
-        base_of_model_depth:
+        boundary_vsv:
+            - (n_boundary_depths_inverted_for * 2, ) np.array
+            - Units:    km/s
+            - Shear velocity at the top and bottom of boundaries of interest
+            - Velocities are assumed to be piecewise linear between these
+              points.
+        depth_limits:
+            - (2, ) np.array
+            - Units:    km
+            - Top and base of the model that we are inverting for.
+            - Outside of this range, the model is fixed to our starting MINEOS
+              model card (which extends throughout the whole Earth).
+        Moho_depth:
+            - 2-tuple
+            - Units:    if Moho_depth(0): dimensionless; else km
+            - Crustal thickness - required for density scaling.
+            - This has the format (is Moho a boundary of interest?, Moho depth)
+            - That is, if one of the boundaries of interest is the Moho,
+                (True, index of boundary in .boundary_*)
+              If the Moho is not being inverted for specifically,
+                (False, depth of Moho in km)
+        min_layer_thickness:
             - float
             - Units:    km
-            - Base of the model that we are inverting for.
-            - Beyond this depth, the model is fixed to our starting MINEOS
-              model card (which extends throughout the whole Earth).
-            - Note that .vsv[-1] is the shear velocity at this point, which
-              is pinned to the value in the MINEOS model card for a seamless
-              transition.
+            - Minimum thickness of the layer, should cover several (three)
+              knots in the MINEOS model card.
+            - Default value: 6
         vsv_vsh_ratio:
             - float
             - Units:    dimensionless
             - Ratio of Vsv to Vsh, default value = 1 (i.e. radial isotropy)
         vpv_vsv_ratio:
-            - float   ***** Perhaps worth changing in crust vs mantle? *****
+            - float
             - Units:    dimensionless
             - Ratio of Vpv to Vsv, default value = 1.75
         vpv_vph_ratio:
             - float
             - Units:    dimensionless
             - Ratio of Vpv to Vph, default value = 1 (i.e. radial isotropy)
-        Moho_depth:
-            - float
-            - Units:    km
-            - Crustal thickness - required for density scaling.
-        min_layer_thickness:
-            - float
-            - Units:    km
-            - Minimum thickness of the layer, should cover several knots in the
-              MINEOS model card.
+        ref_card_csv_name:
+            - str
+            - Path to a .csv file containing the information for the reference
+              full MINEOS model card that we'll be altering.
+            - This could be some reference Earth model (e.g. PREM), or some
+              more specific local model.
+            - Default value: 'data/earth_model/prem.csv'
+            - Note that this csv file should be in SI units (m, kg.m^-3, etc)
 
     """
-    vsv: np.array
-    boundary_widths: np.array
+
     boundary_depths: np.array
     boundary_depth_uncertainty: np.array
-    base_of_model_depth: float
-    min_layer_thickness: float
-    Moho_depth: float
+    boundary_widths: np.array
+    boundary_vsv: np.array
+    depth_limits: np.array
+    Moho_depth: tuple
+    min_layer_thickness: float = 6.
     vsv_vsh_ratio: float = 1.
     vpv_vsv_ratio: float = 1.75
     vpv_vph_ratio: float = 1.
+    ref_card_csv_name: str = 'data/earth_models/prem.csv'
 
 
 class InversionModel(typing.NamedTuple):
@@ -117,7 +129,8 @@ class InversionModel(typing.NamedTuple):
             - (n_layers, 1) np.array
             - Units:    km
             - Thickness of layer above defined vsv point, such that
-              depth of .vsv[i] point is at sum(thickness[:i]) km
+              depth of .vsv[i] point is at sum(thickness[:i+1]) km.
+                Note that this means the sum of thicknesses up to the ith point.
             - That is, as the first .vsv point is defined at the surface, the
               first value of .thickness will be 0 always.
         boundary_inds:
@@ -191,48 +204,57 @@ def setup_starting_model(setup_model):
             - Model primed for use in the inversion.
     """
 
-    n_layers = setup_model.vsv.size
-    n_bounds = setup_model.boundary_widths.size
+    n_bounds = setup_model.boundary_depths.size
+    ref_model =  pd.read_csv(setup_model.ref_card_csv_name)
+    ref_depth = (ref_model['radius'].iloc[-1] - ref_model['radius']) * 1e-3
+    ref_vs = ref_model['vsv'] * 1e-3
+    # Remove discontinuities and make depth increasing for purposes of interp
+    ref_depth[np.append(np.diff(ref_depth), 0) == 0] += 0.01
+    ref_depth = ref_depth.iloc[::-1]
+    ref_vs = ref_vs.iloc[::-1]
 
-    thickness = [0] # first point is at the surface
-    vsv = [setup_model.vsv[0]]
+    thickness = [setup_model.depth_limits[0]] # first point
+    vsv = [np.interp(setup_model.depth_limits[0], ref_depth, ref_vs)]
     boundary_inds = []
     for i_b in range(n_bounds):
         # boundary[i_b] is our boundary of interest
-        vsv_at_top = setup_model.vsv[(i_b + 1) * 2 -1]
-        vsv_at_base = setup_model.vsv[(i_b + 1) * 2]
-        top_of_layer = (setup_model.boundary_depths[i_b]
+        vsv_top_layer_i = setup_model.boundary_vsv[i_b * 2]
+        vsv_base_layer_i = setup_model.boundary_vsv[i_b * 2 + 1]
+        depth_top_layer_i = (setup_model.boundary_depths[i_b]
                         - setup_model.boundary_widths[i_b]/2)
-        bottom_of_layer = top_of_layer + setup_model.boundary_widths[i_b]
+        depth_base_layer_i = (depth_top_layer_i
+                              + setup_model.boundary_widths[i_b])
 
         # Overlying layer is pinned in depth at the top but not the bottom,
         # so the thickness of the overlying layer defines the depth to the
         # boundary.
-        top_of_layer_above = (top_of_layer
-                              - setup_model.boundary_depth_uncertainty[i_b]
-                              - setup_model.min_layer_thickness)
-        bottom_of_layer_below = (bottom_of_layer
-                              + setup_model.boundary_depth_uncertainty[i_b]
-                              + setup_model.min_layer_thickness)
+        padding = (setup_model.boundary_depth_uncertainty[i_b]
+                   + setup_model.min_layer_thickness)
+        depth_top_layer_i_minus_1 = depth_top_layer_i - padding
+        depth_base_layer_i_plus_1 = depth_base_layer_i + padding
 
-        dist_between_boundaries = top_of_layer - sum(thickness)
-        n_layers_above = max((1,
-                            int((top_of_layer_above - sum(thickness))
-                                // setup_model.min_layer_thickness)
-                            ))
-        thick_layers_above = ((top_of_layer_above - sum(thickness))
-                             / n_layers_above)
-        vsv_grad_above = (vsv_at_top - vsv[-1]) / dist_between_boundaries
+        depth_boundary_above = sum(thickness)
+        depth_between_boundaries = depth_top_layer_i - depth_boundary_above
+        n_layers_above = max(
+            (1,
+            int((depth_top_layer_i_minus_1 - depth_boundary_above)
+                 // setup_model.min_layer_thickness)
+            )
+        )
+        thickness_layers_above = (
+            (depth_top_layer_i_minus_1 - depth_boundary_above) / n_layers_above
+        )
+        vsv_grad_above = (vsv_top_layer_i - vsv[-1]) / depth_between_boundaries
 
         for n in range(n_layers_above):
-            vsv += [vsv[-1] + vsv_grad_above * thick_layers_above]
-        vsv += [vsv_at_top, vsv_at_base, vsv_at_base]
+            vsv += [vsv[-1] + vsv_grad_above * thickness_layers_above]
+        vsv += [vsv_top_layer_i, vsv_base_layer_i, vsv_base_layer_i]
 
         thickness += (
-            [(top_of_layer_above - sum(thickness)) / n_layers_above] * n_layers_above
-            + [top_of_layer - top_of_layer_above]
+            [thickness_layers_above] * n_layers_above
+            + [depth_top_layer_i - depth_top_layer_i_minus_1]
             + [setup_model.boundary_widths[i_b]]
-            + [bottom_of_layer_below - bottom_of_layer]
+            + [depth_base_layer_i_plus_1 - depth_base_layer_i]
         )
 
         # Retrieve boundary index,
@@ -240,15 +262,19 @@ def setup_starting_model(setup_model):
         boundary_inds += [len(thickness) - 3]
 
     # And add on everything to the base of the model
-    dist_to_bottom = setup_model.base_of_model_depth - sum(thickness)
-    n_layers_below = max((1,
-                          int(dist_to_bottom // setup_model.min_layer_thickness)
-                        ))
-    thick_layers_below = dist_to_bottom / n_layers_below
-    vsv_grad_below = (setup_model.vsv[-1] - vsv[-1]) / dist_to_bottom
+    depth_to_bottom = setup_model.depth_limits[1] - sum(thickness)
+    n_layers_below = max(
+        (1,
+        int(depth_to_bottom // setup_model.min_layer_thickness)
+        )
+    )
+    thick_layers_below = depth_to_bottom / n_layers_below
+    vsv_grad_below = (
+        (np.interp(setup_model.depth_limits[1], ref_depth, ref_vs) - vsv[-1])
+        / depth_to_bottom
+    )
     for n in range(n_layers_below):
         vsv += [vsv[-1] + vsv_grad_below * thick_layers_below]
-    #vsv += [setup_model.vsv[-1]]
     thickness += [thick_layers_below] * n_layers_below
 
     return InversionModel(vsv = np.array(vsv)[np.newaxis].T,
@@ -262,14 +288,14 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model):
     # Load PREM (http://ds.iris.edu/ds/products/emc-prem/)
     # Slightly edited to remove the water layer and give the model point
     # at 24 km depth lower crustal parameter values.
-    prem = pd.read_csv('./data/earth_models/prem.csv', header=None)
+    prem = pd.read_csv('./data/earth_models/prem.csv')
 
-
-    radius_Earth = 6371.
-    radius_bottom_model = radius_Earth - setup_model.base_of_model_depth
+    radius_Earth = prem['radius'].iloc[-1] * 1e-3
+    radius_model_top = radius_Earth - setup_model.depth_limits[0]
+    radius_model_base = radius_Earth - setup_model.depth_limits[1]
     step = setup_model.min_layer_thickness / 3
-    radius = np.arange(radius_bottom_model, radius_Earth, step)
-    radius = np.append(radius, radius_Earth)
+    radius = np.arange(radius_model_base, radius_model_top, step)
+    radius = np.append(radius, radius_model_top)
     depth = (radius_Earth - radius) # still in km at this point
     radius *= 1e3 # convert to SI
 
@@ -283,6 +309,11 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model):
     q_mu = np.interp(radius, prem['radius'], prem['q_mu'])
     q_kappa = np.interp(radius, prem['radius'], prem['q_kappa'])
     rho = np.interp(radius, prem['radius'], prem['q_kappa'])
+    if setup_model.Moho[0]:
+        Moho_depth = setup_model.boundary_depths[setup_model.Moho[1]]
+    else:
+        Moho_depth = setup_model.Moho[1]
+    rho[(depth < Moho_depth) & (2.9 < rho)] = 2.9
 
     # Now paste the two models together, with 100 km of smoothing between them
     model = pd.concat([
@@ -297,7 +328,9 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model):
                     'vph': vph,
                     'vsh': vsh,
                     'eta': eta,
-                })
+                }),
+                prem[radius[-1] < prem['radius']],
+    ])
     smoothing_z = 100
     #prem[prem['radius'] ]
 
