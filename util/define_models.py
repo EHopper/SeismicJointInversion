@@ -108,7 +108,7 @@ class SetupModel(typing.NamedTuple):
     boundary_widths: np.array
     boundary_vsv: np.array
     depth_limits: np.array
-    Moho_depth: tuple
+    Moho: tuple
     min_layer_thickness: float = 6.
     vsv_vsh_ratio: float = 1.
     vpv_vsv_ratio: float = 1.75
@@ -288,9 +288,9 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model):
     # Load PREM (http://ds.iris.edu/ds/products/emc-prem/)
     # Slightly edited to remove the water layer and give the model point
     # at 24 km depth lower crustal parameter values.
-    prem = pd.read_csv('./data/earth_models/prem.csv')
+    ref_model =  pd.read_csv(setup_model.ref_card_csv_name)
 
-    radius_Earth = prem['radius'].iloc[-1] * 1e-3
+    radius_Earth = ref_model['radius'].iloc[-1] * 1e-3
     radius_model_top = radius_Earth - setup_model.depth_limits[0]
     radius_model_base = radius_Earth - setup_model.depth_limits[1]
     step = setup_model.min_layer_thickness / 3
@@ -303,47 +303,85 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model):
                     np.cumsum(inversion_model.thickness),
                     inversion_model.vsv.flatten()) * 1e3 # convert to SI
     vsh = vsv / setup_model.vsv_vsh_ratio
-    vpv = vsv / setup_model.vpv_vsv_ratio
+    vpv = vsv * setup_model.vpv_vsv_ratio
     vph = vpv / setup_model.vpv_vph_ratio
     eta = np.ones(vsv.shape)
-    q_mu = np.interp(radius, prem['radius'], prem['q_mu'])
-    q_kappa = np.interp(radius, prem['radius'], prem['q_kappa'])
-    rho = np.interp(radius, prem['radius'], prem['q_kappa'])
+    q_mu = np.interp(radius, ref_model['radius'], ref_model['q_mu'])
+    q_kappa = np.interp(radius, ref_model['radius'], ref_model['q_kappa'])
+    rho = np.interp(radius, ref_model['radius'], ref_model['rho'])
     if setup_model.Moho[0]:
-        Moho_depth = setup_model.boundary_depths[setup_model.Moho[1]]
+        Moho_ind = inversion_model.boundary_inds[setup_model.Moho[1]]
+        Moho_depth = np.sum(inversion_model.thickness[:Moho_ind + 1])
     else:
         Moho_depth = setup_model.Moho[1]
-    rho[(depth < Moho_depth) & (2.9 < rho)] = 2.9
+    rho[(depth <= Moho_depth) & (2900 < rho)] = 2900
 
-    # Now paste the two models together, with 100 km of smoothing between them
-    model = pd.concat([
-                prem[prem['radius'] < radius[0]],
-                pd.DataFrame({
-                    'radius': radius,
-                    'rho': rho,
-                    'vpv': vpv,
-                    'vsv': vsv,
-                    'q_kappa': q_kappa,
-                    'q_mu': q_mu,
-                    'vph': vph,
-                    'vsh': vsh,
-                    'eta': eta,
-                }),
-                prem[radius[-1] < prem['radius']],
-    ])
-    smoothing_z = 100
-    #prem[prem['radius'] ]
+    # Now paste the models together, with 100 km of smoothing between
+    new_model = pd.DataFrame({
+        'radius': radius,
+        'rho': rho,
+        'vpv': vpv,
+        'vsv': vsv,
+        'q_kappa': q_kappa,
+        'q_mu': q_mu,
+        'vph': vph,
+        'vsh': vsh,
+        'eta': eta,
+    })
+    smoothed_below = smooth_to_ref_model_below(ref_model, new_model)
+    smoothed_above = smooth_to_ref_model_above(ref_model, new_model)
+
+    return pd.concat([smoothed_below, new_model, smoothed_above])
 
 
+def smooth_to_ref_model_below(ref_model, new_model):
+    """
+    """
 
+    smooth_z = 100 * 1e3  # 100 km in SI units - depth range to smooth over
+    base_of_smoothing = new_model['radius'].iloc[0] - smooth_z
+    unadulterated_ref_model = ref_model[ref_model['radius'] < base_of_smoothing]
+    smoothed_ref_model = ref_model[
+        (base_of_smoothing <= ref_model['radius'])
+        & (ref_model['radius'] < new_model['radius'].iloc[0])
+    ].copy()
 
+    fraction_new_model = (
+        (smoothed_ref_model['radius'] - base_of_smoothing) / smooth_z
+    )
 
-        # radius: np.array
-        # rho: np.array
-        # vpv: np.array
-        # vsv: np.array
-        # q_kappa: np.array
-        # q_mu: np.array
-        # vph: np.array
-        # vsh: np.array
-        # eta: np.array
+    for col in ref_model.columns.tolist()[1:]: # remove radius
+        ref_value_at_model_base = np.interp(new_model['radius'].iloc[0],
+                                            ref_model['radius'], ref_model[col])
+        smoothed_ref_model[col] += (
+            (new_model[col].iloc[0] - ref_value_at_model_base)
+            * fraction_new_model
+        )
+
+    return pd.concat([unadulterated_ref_model, smoothed_ref_model])
+
+def smooth_to_ref_model_above(ref_model, new_model):
+    """
+    """
+
+    smooth_z = 100 * 1e3  # 100 km in SI units - depth range to smooth over
+    top_of_smoothing = new_model['radius'].iloc[-1] + smooth_z
+    unadulterated_ref_model = ref_model[top_of_smoothing < ref_model['radius']]
+    smoothed_ref_model = ref_model[
+        (new_model['radius'].iloc[-1] < ref_model['radius'])
+        & (ref_model['radius'] <= top_of_smoothing )
+    ].copy()
+
+    fraction_new_model = (
+        (top_of_smoothing - smoothed_ref_model['radius']) / smooth_z
+    )
+
+    for col in ref_model.columns.tolist()[1:]: # remove radius
+        ref_value_at_model_top = np.interp(new_model['radius'].iloc[-1],
+                                            ref_model['radius'], ref_model[col])
+        smoothed_ref_model[col] += (
+            (new_model[col].iloc[-1] - ref_value_at_model_top)
+            * fraction_new_model
+        )
+
+    return pd.concat([smoothed_ref_model, unadulterated_ref_model])
