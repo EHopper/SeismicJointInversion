@@ -18,8 +18,10 @@ Functions:
 #import collections
 import typing
 import numpy as np
+import subprocess
+import os
 
-import surface_waves
+#import surface_waves
 
 
 # =============================================================================
@@ -30,36 +32,72 @@ class RunParameters(typing.NamedTuple):
     """ Parameters needed to run MINEOS.
 
     Fields:
-        - Rayleigh_or_Love (str): 'R' or 'L' for Rayleigh or Love
-        - phase_or_group_velocity (str): 'ph' or 'gr' for phase or group velocity
-        - l_min (int)=0: minimum angular order
-        - l_max (int)=3500: expected max angular order
-        - freq_min (float)=0.05: min frequency (mHz)
-        - freq_max (float)=200.05: max frequency (mHz) - reset by min period
-        - l_increment_standard (int)=2: how much to increment lmin by normally*
-        - l_increment_failed (int)=5: how much to incrememnt lmin by if broken*
-        - max_run_N (int)=5e2: how often to try rerunning MINEOS if it's broken
-        - qmod_path (str)='[...]/safekeeping/qmod'
-
-    The l_increment_... is for when MINEOS breaks and has to be restarted with
-    a higher lmin.  Normally, it is restarted at l_min = the last successfully
-    calculated l (l_last) + l_increment_standard.  If the last attempt didn't
-    do any successful calculations, l_min is instead incrememented by
-    l_increment_failed from l_last.  If the code has to restart MINEOS more than
-    max_run_N times, it will return an error.
+        Rayleigh_or_Love:
+            - str
+            - 'Rayleigh' or 'Love' for Rayleigh or Love
+            - Default value = 'Rayleigh'
+        phase_or_group_velocity:
+            - str
+            - 'ph' or 'gr' for phase or group velocity
+            - Default value =  'ph'
+        l_min:
+            - int
+            - Minimum angular order for calculations
+            - Default value = 0
+        l_max:
+            - int
+            - Expected max angular order for calculations
+            - Default value = 3500.
+        freq_min:
+            - float
+            - Units:    mHz
+            - Minimum frequency for calculations.
+            - Default value = 0.05 mHz (i.e. 20,000 s)
+        freq_max:
+            - float
+            - Units:    mHz
+            - Maximum frequency - should be set to 1000/min(sw_periods) + 1
+                need to compute a little bit beyond the ideal minimum period
+        l_increment_standard:
+            - int
+            - When MINEOS breaks and has to be restarted with a higher lmin,
+              it is normally restarted at l_min = the last successfully
+              calculated l (l_last) + l_increment_standard.
+            - Default value = 2
+        l_increment_failed:
+            - int
+            - When MINEOS breaks and has to be restarted with a higher lmin,
+              if the last attempt produced no successful calculations, l_min
+              is instead l_last + l_increment_failed.
+            - Default value = 5 how much to incrememnt lmin by if broken*
+        max_run_N:
+            - int
+            - When MINEOS breaks and has to be restarted with a higher lmin,
+              if it tries to restart more than max_run_N times, it will
+              return an error instead.
+            - Default value = 5e2
+        qmod_path:
+            - str
+            - Path to the standard qmod file for attenuation corrections.
+            - Default value = './data/earth_models/qmod'
+        bin_path:
+            - str
+            - Path to the FORTRAN executables for MINEOS
+            - Default value = '../MINEOS/bin'
 
     """
 
-    Rayleigh_or_Love: str = 'R'
+    freq_max: float
+    freq_min: float = 0.05
+    Rayleigh_or_Love: str = 'Rayleigh'
     phase_or_group_velocity: str = 'ph'
     l_min: int = 0
     l_max: int = 3500
-    freq_min: float = 0.05
-    freq_max: float = 200.05
     l_increment_standard: int = 2
     l_increment_failed: int = 2
     max_run_N: int = 500
-    qmod_path: str = './mineos_data/safekeeping/qmod'
+    qmod_path: str = './data/earth_models/qmod'
+    bin_path: str = '../MINEOS/bin'
 
 
 
@@ -68,43 +106,111 @@ class RunParameters(typing.NamedTuple):
 # =============================================================================
 
 def run_mineos(parameters:RunParameters, periods:np.array,
-               earth_model_name:str) -> np.array:
+               card_name:str) -> np.array:
     """
-    Given an earth_model_name (MINEOS card saved as a text file), run MINEOS.
+    Given a card_model_name (MINEOS card saved as a text file), run MINEOS.
     """
 
-    _run_mineos_until_not_broken()
-
+    # Run MINEOS - and re-run repeatedly if/when it breaks
+    min_calculated_period = min_desired_period + 1 # arbitrarily larger
+    l_run = 0
+    while min_calculated_period > min_desired_period:
+        min_calculated_period = _run_mineos(parameters, periods,
+                                            card_name, l_run)
     _fix_eigfiles()
-
     _do_Q_correction()
 
     pass
 
 
-def _run_mineos_until_not_broken(min_desired_period):
-    min_calculated_period = 1e10
-    while min_calculated_period > min_desired_period:
-        min_calculated_period = _run_mineos()
+
+def _run_mineos(parameters:RunParameters, card_name:str, l_run:int):
+    """ Write all the files, then run the fortran code.
+    """
+
+    # Set filenames
+    execfile = 'output/{0}/{0}_{1}.run_mineos'.format(card_name, l_run)
+    ascfile = 'output/{0}/{0}_{1}.asc'.format(card_name, l_run)
+    eigfile = 'output/{0}/{0}_{1}.eig'.format(card_name, l_run)
+    modefile = 'output/{0}/{0}_{1}.mode'.format(card_name, l_run)
+    logfile = 'output/{0}/{0}.log'.format(card_name)
+    cardfile = 'output/{0}/{0}.card'.format(card_name)
+
+    _write_modefile(modefile, parameters)
+    _write_execfile(execfile, cardfile, modefile, eigfile, ascfile, logfile,
+                    parameters)
+    subprocess.run('chmod u+x ./{}'.format(execfile))
+    subprocess.run('timeout 100 ./{}'.format(execfile))
+
+    #Tmin = _check_output()
+
+    #return Tmin
+
+def _write_modefile(modefile, parameters):
+    """
+     mode table looks like
+    1.d-12  1.d-12  1.d-12 .126
+    [3 (if spherical) or 2 (if toroidal)]
+    (minL) (maxL) (minF) (maxF) (N_[ST]modes)
+    0
+    - top line: EPS EPS1 EPS2 WGRAV   (accuracy of mode calculation)
+    where EPS controls the accuracy of the integration scheme, EPS1 controls
+    the precision with which a root is found, EPS2 is the minimum separation
+    of two roots.  WGRAV is the frequency (rad/s) above which gravitational
+    terms are neglected (much faster calculation)
+    - next line: 1 (radial modes); 2 (toroidal modes); 3 (speheroidal modes)
+           4 (inner core toroidal modes); 0 (quit the program)
+    - min/max L are angular order range
+    - min/max F are frequency range (in mHz)
+    - N_[TS]modes are number of mode branches for Love and Rayleigh
+    i.e. 1 if just fundamental mode, 2 if fundamental mode & first overtone
+    """
+    try:
+        os.remove(modefile)
+    except:
+        pass
+
+    m_codes = ['quit', 'radial', 'toroidal', 'spheroidal', 'inner core']
+    wave_to_mode = {
+        'Rayleigh': 'spheroidal',
+        'Love': 'toroidal',
+    }
+    m_code = m_codes.index(wave_to_mode[parameters.Rayleigh_or_Love])
+
+    fid = open(modefile, 'w')
+    # First line: accuracy of mode calculation - eps eps1 eps2 wgrav
+    #       where eps - accuracy of integration scheme
+    #             eps1 - precision when finding roots
+    #             eps2 - minimum separation of roots
+    #             wgrav - freqeuncy (rad/s) above which gravitational terms
+    #                     are neglected
+    # Second line - m_code gives the index in the list above, m_codes
+    fid.write('1.d-12  1.d-12  1.d-12 .126\n{}\n'.format(m_code))
+    # Third line: lmin and lmax give range of angular order, fmin and fmax
+    #       give the range of frequency (mHz), final parameter is the number
+    #       of mode branches for Love and Rayleigh - hardwired to be 1 for
+    #       fundamental mode (= 2 would include first overtone)
+    # Fourth line: not entirely sure what this 0 means
+    fid.write('{} {} {:.3f} {:.3f} 1\n0\n'.format(parameters.l_min,
+        parameters.l_max, parameters.freq_min, parameters.freq_max))
+
+    fid.close()
+
+def _write_execfile(execfile:str, cardfile:str, modefile:str, eigfile:str,
+                    ascfile:str, logfile:str, params:RunParameters):
+    """
+    """
+    try:
+        os.remove(modefile)
+    except:
+        pass
+
+    fid = open(execfile, 'w')
+    fid.write('{}/mineos_nohang << ! > {}\n'.format(params.bin_path, logfile))
+    fid.write('{0}\n{1}\n{2}\n{3}\n!\n#\nrm {4}\n'.format(cardfile, ascfile,
+        eigfile, modefile, logfile))
+    fid.close()
 
 
-    pass
-
-
-def _run_mineos():
-
-    _write_modefile()
-    _write_execfile()
-    _run_execfile()
-    Tmin = _check_output()
-
-    return Tmin
-
-def _write_modefile():
-    pass
-
-def _write_execfile():
-    pass
-
-def _run_execfile():
+def _check_output():
     pass

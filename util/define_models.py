@@ -16,6 +16,7 @@ import typing
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
+import os
 
 # =============================================================================
 # Set up classes for commonly used variables
@@ -36,6 +37,9 @@ class SetupModel(typing.NamedTuple):
     Vpv to Vph, and assume a constant value of Eta.
 
     Fields:
+        id:
+            - str
+            - Unique name of model for saving things.
         boundary_widths:
             - (n_boundary_depths_inverted_for, ) np.array
             - Units:   km
@@ -65,7 +69,7 @@ class SetupModel(typing.NamedTuple):
             - Top and base of the model that we are inverting for.
             - Outside of this range, the model is fixed to our starting MINEOS
               model card (which extends throughout the whole Earth).
-        Moho_depth:
+        Moho:
             - 2-tuple
             - Units:    if Moho_depth(0): dimensionless; else km
             - Crustal thickness - required for density scaling.
@@ -74,6 +78,7 @@ class SetupModel(typing.NamedTuple):
                 (True, index of boundary in .boundary_*)
               If the Moho is not being inverted for specifically,
                 (False, depth of Moho in km)
+            - Default value: (True, 0) i.e. Moho is first boundary of interest
         min_layer_thickness:
             - float
             - Units:    km
@@ -103,17 +108,20 @@ class SetupModel(typing.NamedTuple):
 
     """
 
+    id: str
     boundary_depths: np.array
     boundary_depth_uncertainty: np.array
     boundary_widths: np.array
     boundary_vsv: np.array
     depth_limits: np.array
-    Moho: tuple
+    Moho: tuple = (True, 0)
     min_layer_thickness: float = 6.
     vsv_vsh_ratio: float = 1.
     vpv_vsv_ratio: float = 1.75
     vpv_vph_ratio: float = 1.
     ref_card_csv_name: str = 'data/earth_models/prem.csv'
+
+
 
 
 class InversionModel(typing.NamedTuple):
@@ -155,26 +163,6 @@ class InversionModel(typing.NamedTuple):
     thickness: np.array
     boundary_inds: np.array
 
-class MINEOSCardModel(typing.NamedTuple):
-    """ Model that is used for all the MINEOS interfacing.
-
-    MINEOS requires radius, rho, vpv, vsv, vph, vsh, bulk and shear Q, and eta.
-    Rows are ordered by increasing radius.  There should be some reference
-    PREM MINEOS card that can be loaded in and have this pasted on the bottom
-    for using with MINEOS, as MINEOS requires a card that goes all the way to
-    the centre of the Earth.
-    """
-    radius: np.array
-    rho: np.array
-    vpv: np.array
-    vsv: np.array
-    q_kappa: np.array
-    q_mu: np.array
-    vph: np.array
-    vsh: np.array
-    eta: np.array
-
-
 
 def setup_starting_model(setup_model):
     """ Convert from SetupModel to InversionModel.
@@ -203,6 +191,11 @@ def setup_starting_model(setup_model):
             - Units:    seismological, i.e. km, km/s
             - Model primed for use in the inversion.
     """
+    # Set up directory to save to
+    try:
+        os.mkdir('output/' + setup_model.id)
+    except:
+        print('This model ID has already been used!')
 
     n_bounds = setup_model.boundary_depths.size
     ref_model =  pd.read_csv(setup_model.ref_card_csv_name)
@@ -277,12 +270,19 @@ def setup_starting_model(setup_model):
         vsv += [vsv[-1] + vsv_grad_below * thick_layers_below]
     thickness += [thick_layers_below] * n_layers_below
 
+
     return InversionModel(vsv = np.array(vsv)[np.newaxis].T,
                           thickness = np.array(thickness)[np.newaxis].T,
                           boundary_inds = np.array(boundary_inds))
 
 def convert_inversion_model_to_mineos_model(inversion_model, setup_model):
-    """
+    """ Generate model that is used for all the MINEOS interfacing.
+
+    MINEOS requires radius, rho, vpv, vsv, vph, vsh, bulk and shear Q, and eta.
+    Rows are ordered by increasing radius.  There should be some reference
+    MINEOS card that can be loaded in and have this pasted on the bottom
+    for using with MINEOS, as MINEOS requires a card that goes all the way to
+    the centre of the Earth.
     """
 
     # Load PREM (http://ds.iris.edu/ds/products/emc-prem/)
@@ -331,7 +331,42 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model):
     smoothed_below = smooth_to_ref_model_below(ref_model, new_model)
     smoothed_above = smooth_to_ref_model_above(ref_model, new_model)
 
-    return pd.concat([smoothed_below, new_model, smoothed_above])
+    mineos_card_model = pd.concat([smoothed_below, new_model,
+                                   smoothed_above]).reset_index(drop=True)
+    mineos_card_model.to_csv('output/' + setup_model.id + '.csv', index=False)
+
+    # Write MINEOS model to .card (txt) file
+    # Find the values for the header line
+    outer_core = mineos_card_model[(mineos_card_model.vsv == 0)
+                                   & (mineos_card_model.q_mu == 0)]
+    n_inner_core_layers = outer_core.iloc[[0]].index[0] - 1
+    n_core_layers = outer_core.iloc[[-1]].index[0]
+
+    fid = open('output/' + setup_model.id + '.card', 'w')
+    # First line: name of the model card
+    # Second line: if_anisotropic   t_ref   if_deck
+        # Hardwired to calculate anisotropy (even if not truly anisotropic)
+        # t_ref is the reference period for dispersion calculation,
+        #       Howver, we correct for dispersion later, so setting it to < 1
+        #       means no dispersion corrections are done at this stage
+        # if_deck set to 1 for a model card or 0 for a polynomial model
+    fid.write(setup_model.id + '\n  1   -1   1\n')
+    # Third line: total_layers, index_top_of_inner_core, i_top_of_outer_core
+    fid.write('  {0:d}   {1:d}   {2:d}\n'.format(mineos_card_model.shape[0],
+            n_inner_core_layers, n_core_layers));
+    # Now print the model
+    for index, row in mineos_card_model.iterrows():
+        # (radius) (rho) (vpv) (vsv) (q_kappa) (q_mu) (vph) (vsh) (eta)
+        fid.write('{0:7.0f}.{1:9.2f}{2:9.2f}{3:9.2f}'.format(
+            row['radius'], row['rho'], row['vpv'], row['vsv']
+        ))
+        fid.write('{0:9.1f}{1:9.1f}{2:9.2f}{3:9.2f}{4:9.5f}\n'.format(
+            row['q_kappa'], row['q_mu'], row['vph'], row['vsh'], row['eta']
+        ))
+
+    fid.close()
+
+    return mineos_card_model
 
 
 def smooth_to_ref_model_below(ref_model, new_model):
