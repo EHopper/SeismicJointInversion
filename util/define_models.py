@@ -333,7 +333,8 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model):
 
     mineos_card_model = pd.concat([smoothed_below, new_model,
                                    smoothed_above]).reset_index(drop=True)
-    mineos_card_model.to_csv('output/' + setup_model.id + '.csv', index=False)
+    mineos_card_model.to_csv('output/{0}/{0}.csv'.format(setup_model.id),
+                             index=False)
 
     # Write MINEOS model to .card (txt) file
     # Find the values for the header line
@@ -342,7 +343,7 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model):
     n_inner_core_layers = outer_core.iloc[[0]].index[0] - 1
     n_core_layers = outer_core.iloc[[-1]].index[0]
 
-    fid = open('output/' + setup_model.id + '.card', 'w')
+    fid = open('output/{0}/{0}.card'.format(setup_model.id), 'w')
     # First line: name of the model card
     # Second line: if_anisotropic   t_ref   if_deck
         # Hardwired to calculate anisotropy (even if not truly anisotropic)

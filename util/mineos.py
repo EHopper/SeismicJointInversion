@@ -20,6 +20,7 @@ import typing
 import numpy as np
 import subprocess
 import os
+import shutil
 
 #import surface_waves
 
@@ -114,6 +115,8 @@ def run_mineos(parameters:RunParameters, periods:np.array,
     # Run MINEOS - and re-run repeatedly if/when it breaks
     min_calculated_period = min_desired_period + 1 # arbitrarily larger
     l_run = 0
+    shutil.copyfile('output/{0}/{0}.card'.format(card_name),
+                    'output/{0}/{0}_{1}.card'.format(card_name, l_run))
     while min_calculated_period > min_desired_period:
         min_calculated_period = _run_mineos(parameters, periods,
                                             card_name, l_run)
@@ -139,8 +142,8 @@ def _run_mineos(parameters:RunParameters, card_name:str, l_run:int):
     _write_modefile(modefile, parameters)
     _write_execfile(execfile, cardfile, modefile, eigfile, ascfile, logfile,
                     parameters)
-    subprocess.run('chmod u+x ./{}'.format(execfile))
-    subprocess.run('timeout 100 ./{}'.format(execfile))
+    subprocess.run(['chmod', 'u+x', './{}'.format(execfile)])
+    subprocess.run(['timeout', '20', './{}'.format(execfile)])
 
     #Tmin = _check_output()
 
@@ -201,14 +204,14 @@ def _write_execfile(execfile:str, cardfile:str, modefile:str, eigfile:str,
     """
     """
     try:
-        os.remove(modefile)
+        os.remove(execfile)
     except:
         pass
 
     fid = open(execfile, 'w')
     fid.write('{}/mineos_nohang << ! > {}\n'.format(params.bin_path, logfile))
-    fid.write('{0}\n{1}\n{2}\n{3}\n!\n#\nrm {4}\n'.format(cardfile, ascfile,
-        eigfile, modefile, logfile))
+    fid.write('{0}\n{1}\n{2}\n{3}\n!'.format(cardfile, ascfile,
+        eigfile, modefile)) # \n#\nrm {4}\n, logfile
     fid.close()
 
 
