@@ -21,6 +21,7 @@ import numpy as np
 import subprocess
 import os
 import shutil
+import pandas as pd
 
 #import surface_waves
 
@@ -113,21 +114,36 @@ def run_mineos(parameters:RunParameters, periods:np.array,
     """
 
     # Run MINEOS - and re-run repeatedly if/when it breaks
+    min_desired_period = np.min(periods)
     min_calculated_period = min_desired_period + 1 # arbitrarily larger
+    n_runs = 0
     l_run = 0
-    shutil.copyfile('output/{0}/{0}.card'.format(card_name),
-                    'output/{0}/{0}_{1}.card'.format(card_name, l_run))
+    l_min = parameters.l_min
+
     while min_calculated_period > min_desired_period:
-        min_calculated_period = _run_mineos(parameters, periods,
-                                            card_name, l_run)
-    _fix_eigfiles()
-    _do_Q_correction()
+        print('Run {:3.0f}, min. l {:3.0f}'.format(n_runs, l_min))
+        min_calculated_period, l_run, l_min = (
+            _run_mineos(parameters, card_name, l_run, l_min)
+        )
+
+        n_runs += 1
+        if n_runs > parameters.max_run_N:
+            print('Too many tries! Breaking MINEOS eig loop')
+            break
+
+    ascfiles = ['output/{0}/{0}_{1}.asc'.format(card_name, run)
+                for run in range(l_run + 1)]
+    eigfiles = ['output/{0}/{0}_{1}.eig'.format(card_name, run)
+                for run in range(l_run + 1)]
+
+    #_fix_eigfiles()
+    #_do_Q_correction()
 
     pass
 
 
 
-def _run_mineos(parameters:RunParameters, card_name:str, l_run:int):
+def _run_mineos(parameters:RunParameters, card_name:str, l_run:int, l_min:int):
     """ Write all the files, then run the fortran code.
     """
 
@@ -139,17 +155,24 @@ def _run_mineos(parameters:RunParameters, card_name:str, l_run:int):
     logfile = 'output/{0}/{0}.log'.format(card_name)
     cardfile = 'output/{0}/{0}.card'.format(card_name)
 
-    _write_modefile(modefile, parameters)
+    _write_modefile(modefile, parameters, l_min)
     _write_execfile(execfile, cardfile, modefile, eigfile, ascfile, logfile,
                     parameters)
     subprocess.run(['chmod', 'u+x', './{}'.format(execfile)])
-    subprocess.run(['timeout', '20', './{}'.format(execfile)])
+    subprocess.run(['timeout', '10', './{}'.format(execfile)])
 
-    #Tmin = _check_output()
+    Tmin, l_last = _check_output([ascfile])
 
-    #return Tmin
+    if not l_last:
+        l_last = l_min + parameters.l_increment_failed
+        os.remove(eigfile)
+        os.remove(ascfile)
+    else:
+        l_run += 1
 
-def _write_modefile(modefile, parameters):
+    return Tmin, l_run, l_last + parameters.l_increment_standard
+
+def _write_modefile(modefile, parameters, l_min):
     """
      mode table looks like
     1.d-12  1.d-12  1.d-12 .126
@@ -166,7 +189,7 @@ def _write_modefile(modefile, parameters):
     - min/max L are angular order range
     - min/max F are frequency range (in mHz)
     - N_[TS]modes are number of mode branches for Love and Rayleigh
-    i.e. 1 if just fundamental mode, 2 if fundamental mode & first overtone
+      i.e. 0 if just fundamental mode
     """
     try:
         os.remove(modefile)
@@ -194,7 +217,7 @@ def _write_modefile(modefile, parameters):
     #       of mode branches for Love and Rayleigh - hardwired to be 1 for
     #       fundamental mode (= 2 would include first overtone)
     # Fourth line: not entirely sure what this 0 means
-    fid.write('{} {} {:.3f} {:.3f} 1\n0\n'.format(parameters.l_min,
+    fid.write('{} {} {:.3f} {:.3f} 1\n0\n'.format(l_min,
         parameters.l_max, parameters.freq_min, parameters.freq_max))
 
     fid.close()
@@ -210,10 +233,67 @@ def _write_execfile(execfile:str, cardfile:str, modefile:str, eigfile:str,
 
     fid = open(execfile, 'w')
     fid.write('{}/mineos_nohang << ! > {}\n'.format(params.bin_path, logfile))
-    fid.write('{0}\n{1}\n{2}\n{3}\n!'.format(cardfile, ascfile,
-        eigfile, modefile)) # \n#\nrm {4}\n, logfile
+    fid.write('{0}\n{1}\n{2}\n{3}\n!\n#\nrm {4}\n,'.format(cardfile, ascfile,
+        eigfile, modefile, logfile))
     fid.close()
 
 
-def _check_output():
-    pass
+def _check_output(ascfiles:list):
+
+    modes = _read_ascfiles(ascfiles)
+
+    last_fundamental_l = max(modes[(modes['n'] == 0)]['l'])
+    lowest_fundamental_period = min(modes[(modes['n'] == 0)]['T_sec'])
+
+    return lowest_fundamental_period, last_fundamental_l
+
+
+def _read_ascfiles(ascfiles:list):
+    """
+    """
+
+    n = [] # mode - number of nodes in radius
+    l = [] # angular order - number of nodes in latitude
+    w_rad_per_s = [] # anglar frequency in rad/s
+    w_mHz = [] # frequency in mHz
+    T_sec = [] # period (s)
+    grV_km_per_s = [] # group velocity
+    Q = [] # quality factor
+
+    for ascfile in ascfiles:
+        fid = open(ascfile, 'r')
+        at_mode = False
+
+        for line in fid:
+            # Find beginning of mode description
+            if 'MODE' in line:
+                fid.readline() # skip blank line
+                line = fid.readline()
+                at_mode = True
+
+            if at_mode:
+                mode_line = line.split()
+                try:
+                    n += [float(mode_line[0])]
+                    l += [float(mode_line[2])]
+                    w_rad_per_s += [float(mode_line[3])]
+                    w_mHz += [float(mode_line[4])]
+                    T_sec += [float(mode_line[5])]
+                    grV_km_per_s += [float(mode_line[6])]
+                    Q += [float(mode_line[7])]
+                except:
+                    print('Line in .asc file improperly formatted')
+                    pass
+
+
+        fid.close()
+
+    return pd.DataFrame({
+        'n': n,
+        'l': l,
+        'w_rad_per_s': w_rad_per_s,
+        'w_mHz': w_mHz,
+        'T_sec': T_sec,
+        'grV_km_per_s': grV_km_per_s,
+        'Q': Q,
+    })

@@ -340,8 +340,8 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model):
     # Find the values for the header line
     outer_core = mineos_card_model[(mineos_card_model.vsv == 0)
                                    & (mineos_card_model.q_mu == 0)]
-    n_inner_core_layers = outer_core.iloc[[0]].index[0] - 1
-    n_core_layers = outer_core.iloc[[-1]].index[0]
+    n_inner_core_layers = outer_core.iloc[[0]].index[0]
+    n_core_layers = outer_core.iloc[[-1]].index[0] + 1
 
     fid = open('output/{0}/{0}.card'.format(setup_model.id), 'w')
     # First line: name of the model card
