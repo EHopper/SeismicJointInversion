@@ -113,6 +113,8 @@ def run_mineos(parameters:RunParameters, periods:np.array,
     Given a card_model_name (MINEOS card saved as a text file), run MINEOS.
     """
 
+    save_name = 'output/{0}/{0}'.format(card_name)
+
     # Run MINEOS - and re-run repeatedly if/when it breaks
     min_desired_period = np.min(periods)
     min_calculated_period = min_desired_period + 1 # arbitrarily larger
@@ -122,44 +124,48 @@ def run_mineos(parameters:RunParameters, periods:np.array,
 
     while min_calculated_period > min_desired_period:
         print('Run {:3.0f}, min. l {:3.0f}'.format(n_runs, l_min))
-        min_calculated_period, l_run, l_min = (
-            _run_mineos(parameters, card_name, l_run, l_min)
+        new_min_T, l_run, l_min = (
+            _run_mineos(parameters, save_name, l_run, l_min)
         )
+        if new_min_T:
+            min_calculated_period = new_min_T
 
         n_runs += 1
         if n_runs > parameters.max_run_N:
             print('Too many tries! Breaking MINEOS eig loop')
             break
 
-    ascfiles = ['output/{0}/{0}_{1}.asc'.format(card_name, run)
-                for run in range(l_run + 1)]
-    eigfiles = ['output/{0}/{0}_{1}.eig'.format(card_name, run)
-                for run in range(l_run + 1)]
-
-    #_fix_eigfiles()
-    #_do_Q_correction()
-
-    pass
+    for run in range(l_run):
+        execfile = _write_eig_recover(parameters, save_name, run)
+        _run_execfile(execfile)
 
 
+    execfile, qfile = _write_q_correction(parameters, save_name, l_run)
+    _run_execfile(execfile)
 
-def _run_mineos(parameters:RunParameters, card_name:str, l_run:int, l_min:int):
+    #phase_vel, group_vel = _read_qfile(qfile, periods)
+
+    return #phase_vel, group_vel
+
+
+
+def _run_mineos(parameters:RunParameters, save_name:str, l_run:int, l_min:int):
     """ Write all the files, then run the fortran code.
     """
 
     # Set filenames
-    execfile = 'output/{0}/{0}_{1}.run_mineos'.format(card_name, l_run)
-    ascfile = 'output/{0}/{0}_{1}.asc'.format(card_name, l_run)
-    eigfile = 'output/{0}/{0}_{1}.eig'.format(card_name, l_run)
-    modefile = 'output/{0}/{0}_{1}.mode'.format(card_name, l_run)
-    logfile = 'output/{0}/{0}.log'.format(card_name)
-    cardfile = 'output/{0}/{0}.card'.format(card_name)
+    execfile = '{0}_{1}.run_mineos'.format(save_name, l_run)
+    ascfile = '{0}_{1}.asc'.format(save_name, l_run)
+    eigfile = '{0}_{1}.eig'.format(save_name, l_run)
+    modefile = '{0}_{1}.mode'.format(save_name, l_run)
+    logfile = '{0}.log'.format(save_name)
+    cardfile = '{0}.card'.format(save_name)
 
     _write_modefile(modefile, parameters, l_min)
     _write_execfile(execfile, cardfile, modefile, eigfile, ascfile, logfile,
                     parameters)
-    subprocess.run(['chmod', 'u+x', './{}'.format(execfile)])
-    subprocess.run(['timeout', '10', './{}'.format(execfile)])
+
+    _run_execfile(execfile)
 
     Tmin, l_last = _check_output([ascfile])
 
@@ -217,7 +223,7 @@ def _write_modefile(modefile, parameters, l_min):
     #       of mode branches for Love and Rayleigh - hardwired to be 1 for
     #       fundamental mode (= 2 would include first overtone)
     # Fourth line: not entirely sure what this 0 means
-    fid.write('{} {} {:.3f} {:.3f} 1\n0\n'.format(l_min,
+    fid.write('{:.0f} {:.0f} {:.3f} {:.3f} 1\n0\n'.format(l_min,
         parameters.l_max, parameters.freq_min, parameters.freq_max))
 
     fid.close()
@@ -233,14 +239,22 @@ def _write_execfile(execfile:str, cardfile:str, modefile:str, eigfile:str,
 
     fid = open(execfile, 'w')
     fid.write('{}/mineos_nohang << ! > {}\n'.format(params.bin_path, logfile))
-    fid.write('{0}\n{1}\n{2}\n{3}\n!\n#\nrm {4}\n,'.format(cardfile, ascfile,
+    fid.write('{0}\n{1}\n{2}\n{3}\n!\n#\nrm {4}\n'.format(cardfile, ascfile,
         eigfile, modefile, logfile))
     fid.close()
 
+def _run_execfile(execfile):
+    """
+    """
+    subprocess.run(['chmod', 'u+x', './{}'.format(execfile)])
+    subprocess.run(['timeout', '100', './{}'.format(execfile)])
 
 def _check_output(ascfiles:list):
 
     modes = _read_ascfiles(ascfiles)
+
+    if modes.empty:
+        return None, None
 
     last_fundamental_l = max(modes[(modes['n'] == 0)]['l'])
     lowest_fundamental_period = min(modes[(modes['n'] == 0)]['T_sec'])
@@ -297,3 +311,78 @@ def _read_ascfiles(ascfiles:list):
         'grV_km_per_s': grV_km_per_s,
         'Q': Q,
     })
+
+
+def _write_eig_recover(params, save_name, l_run):
+    """
+    """
+
+    execfile ='{0}_{1}.eig_recover'.format(save_name, l_run)
+    eigfile = '{0}_{1}.eig'.format(save_name, l_run)
+
+    try:
+        os.remove(eigrecoverfile)
+    except:
+        pass
+
+    ascfile = '{0}_{1}.asc'.format(save_name, l_run)
+    modes = _read_ascfiles([ascfile])
+    l_last = modes['l'].iloc[-1]
+
+    fid = open(execfile, 'w')
+    fid.write('#!/bin/bash\n#\n')
+    fid.write('{}/eig_recover << ! \n'.format(params.bin_path))
+    fid.write('{0}\n{1:.0f}\n!\n'.format(eigfile, l_last))
+    fid.close()
+
+    return execfile
+
+
+def _write_q_correction(params, save_name, l_run):
+    """
+    """
+
+    execfile = '{}.run_mineosq'.format(save_name)
+    qfile = '{}.q'.format(save_name)
+    logfile = '{}.log'.format(save_name)
+
+    try:
+        os.remove(execfile)
+    except:
+        pass
+
+
+    fid = open(execfile, 'w')
+    fid.write('#!/bin/bash\n#\necho "Q-correcting velocities"\n')
+    fid.write('{}/mineos_q << ! >> {}\n'.format(params.bin_path, logfile))
+    fid.write('{0}\n{1}\n'.format(params.qmod_path, qfile))
+    for run in range(l_run):
+        fid.write('{}_{}.eigfile_fix\n'.format(save_name, run))
+    fid.write('\n!\n')#echo "Done velocity calculation, cleaning up..."\n')
+    #fid.write('rm {}\n'.format(logfile))
+    fid.close()
+
+    return execfile, qfile
+
+
+def _read_qfile(qfile, periods):
+    """
+    """
+
+    fid = open(qfile, 'r')
+    lines = fid.readlines()
+    n_q_lines = int(lines[0])
+
+    for line in lines[n_q_lines + 2:]:
+        n += [float(mode_line[0])]
+        l += [float(mode_line[2])]
+        w_rad_per_s += [float(mode_line[3])]
+        w_mHz += [float(mode_line[4])]
+        T_sec += [float(mode_line[5])]
+        grV_km_per_s += [float(mode_line[6])]
+        Q += [float(mode_line[7])]
+        ex
+
+    fid.close()
+
+    pass

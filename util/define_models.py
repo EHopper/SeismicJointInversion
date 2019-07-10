@@ -347,7 +347,7 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model):
     # First line: name of the model card
     # Second line: if_anisotropic   t_ref   if_deck
         # Hardwired to calculate anisotropy (even if not truly anisotropic)
-        # t_ref is the reference period for dispersion calculation,
+        # tref is the reference period for dispersion calculation,
         #       Howver, we correct for dispersion later, so setting it to < 1
         #       means no dispersion corrections are done at this stage
         # if_deck set to 1 for a model card or 0 for a polynomial model
