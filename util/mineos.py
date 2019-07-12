@@ -239,7 +239,7 @@ def _write_execfile(execfile:str, cardfile:str, modefile:str, eigfile:str,
 
     fid = open(execfile, 'w')
     fid.write('{}/mineos_nohang << ! > {}\n'.format(params.bin_path, logfile))
-    fid.write('{0}\n{1}\n{2}\n{3}\n!\n#\nrm {4}\n'.format(cardfile, ascfile,
+    fid.write('{0}\n{1}\n{2}\n{3}\n!\n#\n#rm {4}\n'.format(cardfile, ascfile,
         eigfile, modefile, logfile))
     fid.close()
 
@@ -315,6 +315,7 @@ def _read_ascfiles(ascfiles:list):
 
 def _write_eig_recover(params, save_name, l_run):
     """
+    Note: eig_recover will save a new file [filename].eig_fix
     """
 
     execfile ='{0}_{1}.eig_recover'.format(save_name, l_run)
@@ -340,6 +341,14 @@ def _write_eig_recover(params, save_name, l_run):
 
 def _write_q_correction(params, save_name, l_run):
     """
+    NOTE: qmod is probably complete bullshit!  Took Zach's qmod and then
+    changed the 0 for q_mu in the inner core to 100000, because otherwise
+    get a divide by 0 error and a whole bunch on NaN.  Clearly, the Q of
+    a liquid should be pretty low (?!?) so this doesn't seem to make sense.
+    BUT it does mean it runs ok.
+
+    Josh says he thinks that running the Q correction might be falling out
+    of favour with Jim, so can always use the uncorrected phase vel etc.
     """
 
     execfile = '{}.run_mineosq'.format(save_name)
@@ -354,10 +363,12 @@ def _write_q_correction(params, save_name, l_run):
 
     fid = open(execfile, 'w')
     fid.write('#!/bin/bash\n#\necho "Q-correcting velocities"\n')
-    fid.write('{}/mineos_q << ! >> {}\n'.format(params.bin_path, logfile))
+    fid.write('{}/mineos_qcorrectphv << ! >> {}\n'.format(params.bin_path, logfile))
     fid.write('{0}\n{1}\n'.format(params.qmod_path, qfile))
     for run in range(l_run):
-        fid.write('{}_{}.eigfile_fix\n'.format(save_name, run))
+        fid.write('{}_{}.eig_fix\n'.format(save_name, run))
+        if run == 0:
+            fid.write('y\n')
     fid.write('\n!\n')#echo "Done velocity calculation, cleaning up..."\n')
     #fid.write('rm {}\n'.format(logfile))
     fid.close()
@@ -374,14 +385,18 @@ def _read_qfile(qfile, periods):
     n_q_lines = int(lines[0])
 
     for line in lines[n_q_lines + 2:]:
-        n += [float(mode_line[0])]
-        l += [float(mode_line[2])]
-        w_rad_per_s += [float(mode_line[3])]
-        w_mHz += [float(mode_line[4])]
-        T_sec += [float(mode_line[5])]
-        grV_km_per_s += [float(mode_line[6])]
-        Q += [float(mode_line[7])]
-        ex
+        line = line.split()
+        n += [float(line[0])]
+        l += [float(line[1])]
+        w_mHz += [float(line[2]) / (2 * pi) * 1000] # convert rad/s to mHz
+        T_sec += [float(line[9]])]
+        T_qcorrected += [float(line[8])]
+        grV_km_per_s += [float(line[6])]
+        Q += [float(line[3])]
+        phi += [float(line[4])]
+        ph_vel += [float(line[5])]
+        gr_vel += [float(line[6])]
+        ph_vel_qcorrected += [float(line[7])]
 
     fid.close()
 

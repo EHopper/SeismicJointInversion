@@ -350,6 +350,11 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model):
         # tref is the reference period for dispersion calculation,
         #       Howver, we correct for dispersion later, so setting it to < 1
         #       means no dispersion corrections are done at this stage
+        # NOTE: If set tref > 0, will break when running Q correction
+        #       through mineos_qcorrectphv as the automatically generated
+        #       input file assumes tref < 0, so it enters an if statement
+        #       in the Fortran file that requires 'y'.  If tref > 0, having
+        #       y in the runfile breaks the code.
         # if_deck set to 1 for a model card or 0 for a polynomial model
     fid.write(setup_model.id + '\n  1   -1   1\n')
     # Third line: total_layers, index_top_of_inner_core, i_top_of_outer_core
