@@ -13,6 +13,7 @@ import pandas as pd
 
 from util import matlab
 from util import define_earth_model
+from util import mineos
 from util import surface_waves
 
 
