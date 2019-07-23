@@ -190,8 +190,9 @@ def run_mineos_and_kernels(parameters:RunParameters, periods:np.array,
                            card_name:str):
 
     ph_vel, gr_vel, n_runs = run_mineos(parameters, periods, card_name)
-    run_kernels(parameters, periods, card_name, n_runs)
-    pass
+    kernels = run_kernels(parameters, periods, card_name, n_runs)
+
+    return ph_vel, kernels
 
 def run_kernels(parameters:RunParameters, periods:np.array,
                 card_name:str, n_runs:int):
