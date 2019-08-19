@@ -124,6 +124,7 @@ def run_mineos(parameters:RunParameters, periods:np.array,
 
     while min_calculated_period > min_desired_period:
         print('Run {:3.0f}, min. l {:3.0f}'.format(n_runs, l_min))
+        execfile = _write_run_mineos(parameters, save_name, l_run, l_min)
         new_min_T, l_run, l_min = (
             _run_mineos(parameters, save_name, l_run, l_min)
         )
@@ -143,13 +144,17 @@ def run_mineos(parameters:RunParameters, periods:np.array,
     execfile, qfile = _write_q_correction(parameters, save_name, l_run)
     _run_execfile(execfile)
 
-    #phase_vel, group_vel = _read_qfile(qfile, periods)
+    phase_vel, group_vel = _read_qfile(qfile, periods)
 
-    return #phase_vel, group_vel
+    # Calculate the Frechet kernels
+    execfile = _write_kernel_calc(parameters, save_name, l_run)
+
+    return phase_vel, group_vel
 
 
 
-def _run_mineos(parameters:RunParameters, save_name:str, l_run:int, l_min:int):
+def _write_run_mineos(parameters:RunParameters, save_name:str,
+                      l_run:int, l_min:int):
     """ Write all the files, then run the fortran code.
     """
 
@@ -162,8 +167,18 @@ def _run_mineos(parameters:RunParameters, save_name:str, l_run:int, l_min:int):
     cardfile = '{0}.card'.format(save_name)
 
     _write_modefile(modefile, parameters, l_min)
-    _write_execfile(execfile, cardfile, modefile, eigfile, ascfile, logfile,
-                    parameters)
+
+    try:
+        os.remove(execfile)
+    except:
+        pass
+
+    fid = open(execfile, 'w')
+    fid.write('{}/mineos_nohang << ! > {}\n'.format(params.bin_path, logfile))
+    fid.write('{0}.card\n{0}_{1}.asc\n{0}_{1}.eig\n{0}_{1}.mode\n!'.format(
+                save_name, l_run))
+    fid.write
+    fid.close()
 
     _run_execfile(execfile)
 
@@ -228,20 +243,7 @@ def _write_modefile(modefile, parameters, l_min):
 
     fid.close()
 
-def _write_execfile(execfile:str, cardfile:str, modefile:str, eigfile:str,
-                    ascfile:str, logfile:str, params:RunParameters):
-    """
-    """
-    try:
-        os.remove(execfile)
-    except:
-        pass
 
-    fid = open(execfile, 'w')
-    fid.write('{}/mineos_nohang << ! > {}\n'.format(params.bin_path, logfile))
-    fid.write('{0}\n{1}\n{2}\n{3}\n!\n#\n#rm {4}\n'.format(cardfile, ascfile,
-        eigfile, modefile, logfile))
-    fid.close()
 
 def _run_execfile(execfile):
     """
@@ -264,8 +266,6 @@ def _check_output(ascfiles:list):
 
 def _read_ascfiles(ascfiles:list):
     """
-    """
-
     n = [] # mode - number of nodes in radius
     l = [] # angular order - number of nodes in latitude
     w_rad_per_s = [] # anglar frequency in rad/s
@@ -273,44 +273,27 @@ def _read_ascfiles(ascfiles:list):
     T_sec = [] # period (s)
     grV_km_per_s = [] # group velocity
     Q = [] # quality factor
+    """
+
+    output = pd.DataFrame()
 
     for ascfile in ascfiles:
-        fid = open(ascfile, 'r')
-        at_mode = False
+        n_lines = 0
+        with open(ascfile, 'r') as fid:
+            for line in fid:
+                n_lines += 1
+                if 'MODE' in line:
+                    break
 
-        for line in fid:
-            # Find beginning of mode description
-            if 'MODE' in line:
-                fid.readline() # skip blank line
-                line = fid.readline()
-                at_mode = True
+        output = output.append(pd.read_csv(ascfile, sep='\s+',
+                               skiprows=n_lines, header=None))
 
-            if at_mode:
-                mode_line = line.split()
-                try:
-                    n += [float(mode_line[0])]
-                    l += [float(mode_line[2])]
-                    w_rad_per_s += [float(mode_line[3])]
-                    w_mHz += [float(mode_line[4])]
-                    T_sec += [float(mode_line[5])]
-                    grV_km_per_s += [float(mode_line[6])]
-                    Q += [float(mode_line[7])]
-                except:
-                    print('Line in .asc file improperly formatted')
-                    pass
+    output.columns = ['n', 'mode', 'l', 'w_rad_per_s', 'w_mHz', 'T_sec',
+                          'grV_km_per_s', 'Q', 'RaylQuo']
+    output.drop(['mode', 'RaylQuo'], axis=1, inplace=True)
 
 
-        fid.close()
-
-    return pd.DataFrame({
-        'n': n,
-        'l': l,
-        'w_rad_per_s': w_rad_per_s,
-        'w_mHz': w_mHz,
-        'T_sec': T_sec,
-        'grV_km_per_s': grV_km_per_s,
-        'Q': Q,
-    })
+    return output
 
 
 def _write_eig_recover(params, save_name, l_run):
@@ -377,27 +360,18 @@ def _write_q_correction(params, save_name, l_run):
 
 
 def _read_qfile(qfile, periods):
+    """ Read Q corrected output in, and interpolate over desired periods.
     """
-    """
 
-    fid = open(qfile, 'r')
-    lines = fid.readlines()
-    n_q_lines = int(lines[0])
+    with open(qfile, 'r') as fid:
+        n_q_lines = int(fid.readline())
 
-    for line in lines[n_q_lines + 2:]:
-        line = line.split()
-        n += [float(line[0])]
-        l += [float(line[1])]
-        w_mHz += [float(line[2]) / (2 * pi) * 1000] # convert rad/s to mHz
-        T_sec += [float(line[9]])]
-        T_qcorrected += [float(line[8])]
-        grV_km_per_s += [float(line[6])]
-        Q += [float(line[3])]
-        phi += [float(line[4])]
-        ph_vel += [float(line[5])]
-        gr_vel += [float(line[6])]
-        ph_vel_qcorrected += [float(line[7])]
+    qf = pd.read_csv(qfile, sep='\s+', skiprows=n_q_lines+2, header=None)
+    qf.columns = ['n', 'l', 'w_mHz', 'Q', 'phi', 'ph_vel', 'gr_vel',
+                  'ph_vel_qcorrected', 'T_qcorrected', 'T_sec']
+    # Flip the df so it is increasing in period (rather than spherical order)
+    qf = qf[::-1]
+    phase_vel = np.interp(periods, qf.T_qcorrected, qf.ph_vel_qcorrected)
+    group_vel = np.interp(periods, qf.T_sec, qf.gr_vel)
 
-    fid.close()
-
-    pass
+    return phase_vel, group_vel
