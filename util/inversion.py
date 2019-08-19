@@ -140,7 +140,7 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     # e.g. defaults include l_min, l_max; qmod_path; phase_or_group_velocity
     params = mineos.RunParameters(freq_max = 1000 / min(periods) + 1)
     ph_vel, kernels = mineos.run_mineos_and_kernels(params, periods,
-                                                    setup_mode.id)
+                                                    setup_model.id)
     kernels = kernels[kernels['z'] <= setup_model.depth_limits[1]]
 
     p = _build_model_vector(model)
@@ -410,7 +410,7 @@ def _convert_to_model_kernels(depth, model):
             model, i, depth, dm_dt_mat
         )
 
-    dm_dp_mat = np.hstack((dm_ds_mat, dm_d_mat))
+    dm_dp_mat = np.hstack((dm_ds_mat, dm_dt_mat))
 
     return dm_dp_mat
 
@@ -628,7 +628,7 @@ def _convert_kernels_d_shallowerm_by_d_t(model:define_models.InversionModel,
             np.sum(model.thickness[:model.boundary_inds[i] + 1])
             = np.sum(model.thickness[:model.boundary_inds[i]]) + t_i
       - As above, we've defined y_ib, y_ib+1, etc
-      - For any depth, z_a, try to find ib s.t. y_b < z_a < y_b+1
+      - For any depth, z_a, try to find b s.t. y_b < z_a < y_b+1
         CONDITIONAL ON this being in the depth range y_ib-1 < z_a < y_ib+2
             (There may be no such z_a if these z points fall outside of the
             depth range of interest for this boundary layer, i)
@@ -697,7 +697,7 @@ def _convert_kernels_d_shallowerm_by_d_t(model:define_models.InversionModel,
     for i_d in d_inds:
         dm_dt_mat[i_d, i] = -(
             ((model.vsv[ib] - model.vsv[ib - 1]) * (depth[i_d] - y_ib_minus_1))
-            / t_i^2
+            / (t_i ** 2)
         )
 
     return dm_dt_mat
@@ -798,16 +798,19 @@ def _convert_kernels_d_withinboundarym_by_d_t(
     ib = model.boundary_inds[i]
     w_i = model.thickness[ib + 1]
 
-    y_ib = np.sum(model.thickness[:i_b + 1])
-    y_ib_plus_1 = np.sum(model.thickness[:i_b + 2])
+    y_ib = np.sum(model.thickness[:ib + 1])
+    y_ib_plus_1 = np.sum(model.thickness[:ib + 2])
 
+    # Assuming constant boundary layer width shifted up or down by some small dt
+    # Therefore, all points in the boundary layer will be affected in the same
+    # way, so the partial derivative is constant throughout the layer.
+    # Note that we are assuming small dt, such that no depth point, z_a,
+    # actually changes sides of a node in the new model parameterisation, p.
     d_inds, = np.where(np.logical_and(y_ib <= depth, depth < y_ib_plus_1))
-
-    for i_d in d_inds:
-        dm_dt_mat[i_d, i] = -(
-            (model.vsv[i_b + 1] - model.vsv[i_b])
+    dm_dt_mat[d_inds, i] = -(
+            (model.vsv[ib + 1] - model.vsv[ib])
             / w_i
-        )
+    )
 
     return dm_dt_mat
 
@@ -955,14 +958,14 @@ def _convert_kernels_d_deeperm_by_d_t(model:define_models.InversionModel,
 
     y_ib_minus_1 = np.sum(model.thickness[:ib])
     y_ib_plus_1 = np.sum(model.thickness[:ib + 2])
-    y_i_plus_2 = np.sum(model.thickness[:i_b + 3])
+    y_ib_plus_2 = np.sum(model.thickness[:ib + 3])
 
-    d_inds, = np.where(np.logical_and(y_i_plus_1 <= depth, depth < y_ib_plus_2))
+    d_inds, = np.where(np.logical_and(y_ib_plus_1 <= depth, depth < y_ib_plus_2))
 
     for i_d in d_inds:
         dm_dt_mat[i_d, i] = (
             (model.vsv[ib + 2] - model.vsv[ib + 1]) * (depth[i_d] - y_ib_plus_2)
-            / (t_i - (y_ib_plus_2 - y_ib_minus_1 - w_i))^2
+            / ((t_i - (y_ib_plus_2 - y_ib_minus_1 - w_i)) ** 2)
         )
 
     return dm_dt_mat
