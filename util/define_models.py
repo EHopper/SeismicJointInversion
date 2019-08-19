@@ -147,8 +147,8 @@ class InversionModel(typing.NamedTuple):
             - Indices in .vsv and .thickness identifying the boundaries of
               special interest, e.g. Moho, LAB.  For these boundaries, we
               will want to specifically prescribe the width of the layer
-              (given in SetupModel.boundary_widths), and to invert for the
-              thickness of the overlying layer (i.e. the depth to the top
+              (originally set as SetupModel.boundary_widths), and to invert for
+              the thickness of the overlying layer (i.e. the depth to the top
               of this boundary).
             - That is, InversionModel.(vsv|thickness)[boundary_inds[i]] is
               the velocity at the top of the boundary and the thickness of the
@@ -220,7 +220,8 @@ def setup_starting_model(setup_model):
 
         # Overlying layer is pinned in depth at the top but not the bottom,
         # so the thickness of the overlying layer defines the depth to the
-        # boundary.
+        # boundary.  This layer has to be thick enough that the boundary layer
+        # can move shallower and still leave a sufficiently thick layer.
         padding = (setup_model.boundary_depth_uncertainty[i_b]
                    + setup_model.min_layer_thickness)
         depth_top_layer_i_minus_1 = depth_top_layer_i - padding
@@ -336,6 +337,43 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model):
     mineos_card_model.to_csv('output/{0}/{0}.csv'.format(setup_model.id),
                              index=False)
 
+    _write_mineos_card(mineos_card_model, setup_model.id)
+
+    return mineos_card_model
+
+def _write_mineos_card(mineos_card_model:pd.DataFrame, name:str):
+    """ Write the MINEOS card model txt file to (name).card.
+
+    Given a pandas DataFrame with the following columns:
+        radius, rho, vpv, vsv, q_kappa, q_mu, vph, vsh, eta
+    write a model card text file to output/(name)/(name).card.
+
+    All of the values in the input DataFrame are assumed to have the correct
+    units etc.  This code will work out how many inner core layers and total
+    core layers there are for the header of the model card.
+
+    The layout of the card file:
+    First line:
+                    name of the model card
+    Second line:
+                    if_anisotropic   t_ref   if_deck
+        This is hardwired with if_anisotropic = 1, i.e. assume anisotropy
+              (even if not truly anisotropic)
+        tref is the reference period for dispersion calculation,
+              However, we correct for dispersion separately, so setting it to
+              < 1 means no dispersion corrections are done at this stage
+        NOTE: If set tref > 0, MINEOS will break when running the Q correction
+              through mineos_qcorrectphv, as the automatically generated
+              input file assumes tref < 0, so it enters an if statement
+              in the Fortran file that requires 'y'.  If tref > 0, having
+              y in the runfile breaks the code.
+        if_deck set to 1 for a model card or 0 for a polynomial model
+    Third line:
+                    total_layers, index_top_of_inner_core, i_top_of_outer_core
+    Rest of file (each line is a depth point):
+                    radius  rho  vpv  vsv  q_kappa  q_mu  vph  vsh  eta
+    """
+
     # Write MINEOS model to .card (txt) file
     # Find the values for the header line
     outer_core = mineos_card_model[(mineos_card_model.vsv == 0)
@@ -343,26 +381,12 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model):
     n_inner_core_layers = outer_core.iloc[[0]].index[0]
     n_core_layers = outer_core.iloc[[-1]].index[0] + 1
 
-    fid = open('output/{0}/{0}.card'.format(setup_model.id), 'w')
-    # First line: name of the model card
-    # Second line: if_anisotropic   t_ref   if_deck
-        # Hardwired to calculate anisotropy (even if not truly anisotropic)
-        # tref is the reference period for dispersion calculation,
-        #       Howver, we correct for dispersion later, so setting it to < 1
-        #       means no dispersion corrections are done at this stage
-        # NOTE: If set tref > 0, will break when running Q correction
-        #       through mineos_qcorrectphv as the automatically generated
-        #       input file assumes tref < 0, so it enters an if statement
-        #       in the Fortran file that requires 'y'.  If tref > 0, having
-        #       y in the runfile breaks the code.
-        # if_deck set to 1 for a model card or 0 for a polynomial model
-    fid.write(setup_model.id + '\n  1   -1   1\n')
-    # Third line: total_layers, index_top_of_inner_core, i_top_of_outer_core
+    fid = open('output/{0}/{0}.card'.format(name), 'w')
+    fid.write(name + '\n  1   -1   1\n')
     fid.write('  {0:d}   {1:d}   {2:d}\n'.format(mineos_card_model.shape[0],
             n_inner_core_layers, n_core_layers));
     # Now print the model
     for index, row in mineos_card_model.iterrows():
-        # (radius) (rho) (vpv) (vsv) (q_kappa) (q_mu) (vph) (vsh) (eta)
         fid.write('{0:7.0f}.{1:9.2f}{2:9.2f}{3:9.2f}'.format(
             row['radius'], row['rho'], row['vpv'], row['vsv']
         ))
@@ -372,7 +396,6 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model):
 
     fid.close()
 
-    return mineos_card_model
 
 
 def smooth_to_ref_model_below(ref_model, new_model):

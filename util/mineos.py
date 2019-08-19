@@ -94,18 +94,119 @@ class RunParameters(typing.NamedTuple):
     Rayleigh_or_Love: str = 'Rayleigh'
     phase_or_group_velocity: str = 'ph'
     l_min: int = 0
-    l_max: int = 3500
+    l_max: int = 7000
     l_increment_standard: int = 2
     l_increment_failed: int = 2
     max_run_N: int = 500
     qmod_path: str = './data/earth_models/qmod'
     bin_path: str = '../MINEOS/bin'
 
+class LoveKernels(typing.NamedTuple):
+    """ Frechet kernels for Love (toroidal) waves.
 
+    Kernels for different periods are appended to each other.
+
+    Fields:
+        period:
+            - (n_love_periods * n_depth_points, ) np.array
+            - Units:    seconds
+            - Period of Love wave of interest.
+        depth:
+            - (n_depth_points, ) np.array
+            - Units:    kilometres
+            - Depth vector for kernel.
+        vsv:
+            - (n_depth_points * n_love_periods, ) np.array
+            - Units:    assumes velocities in km/s
+            - Vertically polarised S wave kernel.
+        vsh:
+            - (n_depth_points * n_love_periods, ) np.array
+            - Units:    assumes velocities in km/s
+            - Horizontally polarised S wave kernel.
+        type: str = 'love'
+            - Default shouldn't be changed
+            - This is because was having issues with isinstance() for locally
+              defined classes.
+
+
+    """
+
+    period: np.array
+    depth: np.array
+    vsv: np.array
+    vsh: np.array
+    type: str = 'love'
+
+class RayleighKernels(typing.NamedTuple):
+    """ Frechet kernels for Rayleigh (spheroidal) waves.
+
+    Kernels for different periods are stacked on top of each other.
+
+    Fields:
+        period:
+            - (n_love_periods * n_depth_points, ) np.array
+            - Units:    seconds
+            - Period of Rayleigh wave of interest.
+        depth:
+            - (n_depth_points, ) np.array
+            - Units:    kilometres
+            - Depth vector for kernel.
+        vsv:
+            - (n_love_periods * n_depth_points, ) np.array
+            - Units:    assumes velocities in km/s
+            - Vertically polarised S wave kernel.
+        vpv:
+            - (n_love_periods * n_depth_points, ) np.array
+            - Units:    assumes velocities in km/s
+            - Vertically polarised P wave kernel.
+        vph:
+            - (n_love_periods * n_depth_points, ) np.array
+            - Units:    assumes velocities in km/s
+            - Horizontally polarised P wave kernel.
+        eta:
+            - (n_love_periods * n_depth_points, ) np.array
+            - Units:    assumes velocities in km/s
+            - Anellipticity (eta = F/(A-2L)) kernel.
+        type: str = 'rayleigh'
+            - Default shouldn't be changed.
+            - This is because was having issues with isinstance() for locally
+              defined classes.
+
+    """
+
+    period: np.array
+    depth: np.array
+    vsv: np.array
+    vpv: np.array
+    vph: np.array
+    eta: np.array
+    type: str = 'rayleigh'
 
 # =============================================================================
 #       Run MINEOS - calculate phase velocity, group velocity, kernels
 # =============================================================================
+
+def run_mineos_and_kernels(parameters:RunParameters, periods:np.array,
+                           card_name:str):
+
+    ph_vel, n_runs = run_mineos(parameters, periods, card_name)
+    kernels = run_kernels(parameters, periods, card_name, n_runs)
+
+    return ph_vel, kernels
+
+def run_kernels(parameters:RunParameters, periods:np.array,
+                card_name:str, n_runs:int):
+
+    save_name = 'output/{0}/{0}'.format(card_name)
+    execfile = _write_kernel_files(parameters, periods, save_name, n_runs)
+    _run_execfile(execfile)
+
+    kernels = _read_kernels(save_name, periods)
+    kernels['type'] = parameters.Rayleigh_or_Love
+
+    return kernels
+
+
 
 def run_mineos(parameters:RunParameters, periods:np.array,
                card_name:str) -> np.array:
@@ -144,12 +245,9 @@ def run_mineos(parameters:RunParameters, periods:np.array,
     execfile, qfile = _write_q_correction(parameters, save_name, l_run)
     _run_execfile(execfile)
 
-    phase_vel, group_vel = _read_qfile(qfile, periods)
+    phase_vel = _read_qfile(qfile, periods)
 
-    # Calculate the Frechet kernels
-    execfile = _write_kernel_calc(parameters, save_name, l_run)
-
-    return phase_vel, group_vel
+    return phase_vel, n_runs
 
 
 
@@ -186,8 +284,8 @@ def _write_run_mineos(parameters:RunParameters, save_name:str,
 
     if not l_last:
         l_last = l_min + parameters.l_increment_failed
-        os.remove(eigfile)
-        os.remove(ascfile)
+        #os.remove(eigfile)
+        #os.remove(ascfile)
     else:
         l_run += 1
 
@@ -249,7 +347,7 @@ def _run_execfile(execfile):
     """
     """
     subprocess.run(['chmod', 'u+x', './{}'.format(execfile)])
-    subprocess.run(['timeout', '100', './{}'.format(execfile)])
+    subprocess.run(['timeout', '120', './{}'.format(execfile)])
 
 def _check_output(ascfiles:list):
 
@@ -360,18 +458,143 @@ def _write_q_correction(params, save_name, l_run):
 
 
 def _read_qfile(qfile, periods):
-    """ Read Q corrected output in, and interpolate over desired periods.
+    """
+    Note we are returning the Q corrected phase velocity only
     """
 
     with open(qfile, 'r') as fid:
-        n_q_lines = int(fid.readline())
+        n_lines = int(fid.readline())
 
-    qf = pd.read_csv(qfile, sep='\s+', skiprows=n_q_lines+2, header=None)
-    qf.columns = ['n', 'l', 'w_mHz', 'Q', 'phi', 'ph_vel', 'gr_vel',
-                  'ph_vel_qcorrected', 'T_qcorrected', 'T_sec']
-    # Flip the df so it is increasing in period (rather than spherical order)
+    qf = pd.read_csv(qfile, header=None, skiprows=n_lines+1, sep='\s+')
+    qf.columns = ['n', 'l', 'w_mHz', 'Q', 'phi', 'ph_vel',
+                     'gr_vel', 'ph_vel_qcorrected', 'T_qcorrected', 'T_sec']
     qf = qf[::-1]
-    phase_vel = np.interp(periods, qf.T_qcorrected, qf.ph_vel_qcorrected)
-    group_vel = np.interp(periods, qf.T_sec, qf.gr_vel)
+    qf = qf[qf['n'] == 0] # Fundamental mode only
 
-    return phase_vel, group_vel
+    ph_vel = np.interp(periods, qf.T_qcorrected, qf.ph_vel_qcorrected)
+
+    return ph_vel
+
+def _write_kernel_files(parameters:RunParameters, periods:np.array,
+                        save_name:str, n_runs:int):
+    """
+    Note this is hardwired to only calculate phase velocity - possible to
+    do for group velocity as well.
+
+    Also note that I changed the plot_wk execfile part from Zach's code -
+    he had it running from angular order 0 to 3000.  I increased the upper
+    limit and also started it at 1 (because my output never has n=0, l=0 -
+    and the fact this mode was missing was breaking the table function).
+    """
+
+    execfile = '{0}.run_kernels'.format(save_name)
+
+    max_angular_order = {
+        'Rayleigh': 5500,
+        'Love': 3500,
+    }
+
+    eigfiles = (['{}_{}.eig_fix'.format(save_name, run)
+                for run in range(1, n_runs)])
+
+
+    with open(execfile, 'w') as fid:
+        fid.write("""#!/bin/bash
+#
+echo "======================" > {0}.log
+echo "Stripping MINEOS" >> {0}.log
+#
+{1}/mineos_strip <<! >> {0}.log
+{0}.strip
+{2}
+{3}
+
+!
+#
+echo "======================" > {0}.log
+echo "Done stripping, now calculating tables" > {0}.log
+#
+{1}/mineos_table <<! >> {0}.log
+{0}.table
+40000
+0 {4:.1f}
+1 {5:.0f}
+{0}.q
+{0}.strip
+
+!
+#
+echo "======================" > {0}.log
+echo "Creating branch file" > {0}.log
+#
+{1}/plot_wk <<! >> {0}.log
+table {0}.table_hdr
+search
+1 0.0 {4:.1f}
+99 0 0
+branch
+
+quit
+!
+#
+echo "======================" > {0}.log
+echo "Making frechet phV kernels binary" > {0}.log
+#
+rm {0}.cvfrechet
+{1}/frechet_cv <<! >> {0}.log
+{6}
+{0}.table_hdr.branch
+{0}.cvfrechet
+{2}
+0
+{3}
+
+!
+#
+echo "======================" > {0}.log
+echo "Writing phV kernel files for each period" > {0}.log
+#
+                 """.format(
+                 save_name,
+                 parameters.bin_path,
+                 '{}_0.eig_fix'.format(save_name),
+                 '\n'.join(eigfiles),
+                 1000 / min(periods) + 0.1, # max freq. in mHz
+                 max_angular_order[parameters.Rayleigh_or_Love],
+                 parameters.qmod_path,
+                 ))
+
+    # Need to loop through periods in executable
+    for period in periods:
+        with open(execfile, 'a') as fid:
+            fid.write("""{1}/draw_frechet_gv <<!
+{0}.cvfrechet
+{0}_cvfrechet_{2:.1f}s
+{2:.2f}
+!
+            """.format(
+            save_name,
+            parameters.bin_path,
+            period,
+            ))
+
+
+    return execfile
+
+def _read_kernels(save_name, periods):
+    """
+    """
+    kernels = pd.DataFrame([])
+
+    for period in periods:
+        kernelfile = '{0}_cvfrechet_{1:.1f}s'.format(save_name, period)
+        kf = pd.read_csv(kernelfile, sep='\s+', header=None)
+        kf.columns = ['r', 'vsv', 'vpv', 'vsh', 'vph', 'eta', 'rho']
+        kf['z'] = 6371 - kf['r'] * 1e-3
+        kf['period'] = period
+        kf = kf[::-1]
+        kernels = kernels.append(kf)
+
+    kernels = kernels[['z', 'period', 'vsv', 'vpv', 'vsh', 'vph', 'eta', 'rho']]
+
+    return kernels

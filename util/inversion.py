@@ -4,6 +4,12 @@ This is based on MATLAB code from Josh Russell and Natalie Accardo (2019),
 and formulated after Geophysical Data Analysis: Discrete Inverse Theory.
 (DOI: 10.1016/B978-0-12-397160-9.00003-5) by Bill Menke (2012).
 
+For simplicity, I am only doing this for Rayleigh waves at the moment,
+although there are some bits scattered around for Love waves that are commented
+out.  This isn't complete, though, and for now I am not going to test those.
+In any comments talking about stacking Love and Rayleigh kernels/data etc,
+this indicates how it should be done, not that it is being done here.
+
 """
 
 #import collections
@@ -12,7 +18,8 @@ import numpy as np
 import pandas as pd
 
 from util import matlab
-from util import define_earth_model
+from util import define_models
+from util import mineos
 from util import surface_waves
 
 
@@ -96,114 +103,48 @@ class ModelLayerValues(typing.NamedTuple):
     asthenosphere: np.array
 
 
-class LoveKernels(typing.NamedTuple):
-    """ Frechet kernels for Love (toroidal) waves.
-
-    Kernels for different periods are appended to each other.
-
-    Fields:
-        period:
-            - (n_love_periods * n_depth_points, ) np.array
-            - Units:    seconds
-            - Period of Love wave of interest.
-        depth:
-            - (n_depth_points, ) np.array
-            - Units:    kilometres
-            - Depth vector for kernel.
-        vsv:
-            - (n_depth_points * n_love_periods, ) np.array
-            - Units:    assumes velocities in km/s
-            - Vertically polarised S wave kernel.
-        vsh:
-            - (n_depth_points * n_love_periods, ) np.array
-            - Units:    assumes velocities in km/s
-            - Horizontally polarised S wave kernel.
-        type: str = 'love'
-            - Default shouldn't be changed
-            - This is because was having issues with isinstance() for locally
-              defined classes.
-
-
-    """
-
-    period: np.array
-    depth: np.array
-    vsv: np.array
-    vsh: np.array
-    type: str = 'love'
-
-class RayleighKernels(typing.NamedTuple):
-    """ Frechet kernels for Rayleigh (spheroidal) waves.
-
-    Kernels for different periods are stacked on top of each other.
-
-    Fields:
-        period:
-            - (n_love_periods * n_depth_points, ) np.array
-            - Units:    seconds
-            - Period of Rayleigh wave of interest.
-        depth:
-            - (n_depth_points, ) np.array
-            - Units:    kilometres
-            - Depth vector for kernel.
-        vsv:
-            - (n_love_periods * n_depth_points, ) np.array
-            - Units:    assumes velocities in km/s
-            - Vertically polarised S wave kernel.
-        vpv:
-            - (n_love_periods * n_depth_points, ) np.array
-            - Units:    assumes velocities in km/s
-            - Vertically polarised P wave kernel.
-        vph:
-            - (n_love_periods * n_depth_points, ) np.array
-            - Units:    assumes velocities in km/s
-            - Horizontally polarised P wave kernel.
-        eta:
-            - (n_love_periods * n_depth_points, ) np.array
-            - Units:    assumes velocities in km/s
-            - Anellipticity (eta = F/(A-2L)) kernel.
-        type: str = 'rayleigh'
-            - Default shouldn't be changed.
-            - This is because was having issues with isinstance() for locally
-              defined classes.
-
-    """
-
-    period: np.array
-    depth: np.array
-    vsv: np.array
-    vpv: np.array
-    vph: np.array
-    eta: np.array
-    type: str = 'rayleigh'
-
-
 
 # =============================================================================
 #       Run the Damped Least Squares Inversion
 # =============================================================================
 
-def run_inversion(model:define_earth_model.EarthModel,
+def run_inversion(setup_model:define_models.SetupModel,
                   data:surface_waves.ObsPhaseVelocity,
-                  n_iterations:int=5) -> (define_earth_model.EarthModel):
+                  n_iterations:int=5) -> (define_models.InversionModel):
     """ Set the inversion running over some number of iterations.
 
     """
 
+    model = define_models.setup_starting_model(setup_model)
 
     for i in range(n_iterations):
-        model = _inversion_iteration(model, data)
+        # Still need to pass setup_model as it has info on e.g. vp/vs ratio
+        # needed to convert from InversionModel to MINEOS card
+        model = _inversion_iteration(setup_model, model, data)
 
     return model
 
-def _inversion_iteration(model, data):
+def _inversion_iteration(setup_model:define_models.SetupModel,
+                         model:define_models.InversionModel,
+                         data:surface_waves.ObsPhaseVelocity
+                         ) -> define_models.InversionModel:
     """ Run a single iteration of the least squares
     """
 
     # Build all of the inputs to the damped least squares
-    rayleigh_kernels, love_kernels, depth = _calculate_Frechet_kernels(model)
-    m0 = _build_model_vector(model, depth)
-    G = _build_partial_derivatives_matrix(rayleigh_kernels, love_kernels)
+    # Run MINEOS to get phase velocities and kernels
+    mineos_model = define_models.convert_inversion_model_to_mineos_model(
+        model, setup_model
+    )
+    # Can vary other parameters in MINEOS by putting them as inputs to this call
+    # e.g. defaults include l_min, l_max; qmod_path; phase_or_group_velocity
+    params = mineos.RunParameters(freq_max = 1000 / min(periods) + 1)
+    ph_vel, kernels = mineos.run_mineos_and_kernels(params, periods,
+                                                    setup_mode.id)
+    kernels = kernels[kernels['z'] <= setup_model.depth_limits[1]]
+
+    p = _build_model_vector(model)
+    G = _build_partial_derivatives_matrix(kernels, model)
     d = _build_data_misfit_matrix(data, model, m0, G)
 
     # Build all of the weighting functions for damped least squares
@@ -216,154 +157,40 @@ def _inversion_iteration(model, data):
 
     return _build_earth_model_from_vector(model_new)
 
-def _calculate_Frechet_kernels(model:define_earth_model.EarthModel,
-                               max_depth=None) -> (RayleighKernels, LoveKernels,
-                                                   np.array):
-    """ Load in pre-calculated, constant Frechet kernels from csv.
 
-    Ultimately, this will be a call to MINEOS, updating Frechet kernels
-    at every model iteration.
-
-    Note that MINEOS works in SI units, so need to convert depth from
-    metres to kilometres.
-
-    Arguments
-        model:
-            - This will ultimately be used to make a card for MINEOS.  Now it's
-              a placeholder for when I do things properly.
-        max_depth:
-            - float
-            - Units:    kilometres
-            - Depth below which to crop off the Frechet kernels
-            - i.e. do not invert for Earth structure below this depth.
-
-    Returns
-        rayleigh_kernels:
-            - RayleighKernels
-        love_kernels: LoveKernels
-            - LoveKernels
-        depth:
-            - (n_depth_points, ) np.array
-            - Units:    kilometres
-            - Vector of depth (km) that is the same as in the loaded kernels.
-    """
-
-    if max_depth is None:
-        max_depth = model.depth.max() + model.thickness[-1]
-
-    file_name = './mineos_inputs/frechet_kernels.csv'
-    frechet = pd.read_csv(file_name, ',\s+', engine='python')
-
-    frechet['D_km'] = frechet['Depth'] / 1e3 # metres to km
-
-    rayleigh_kernels = RayleighKernels(
-        period = np.array(_crop(frechet['Period'], frechet['D_km'], max_depth)),
-        depth = np.array(_crop(frechet['D_km'], frechet['D_km'], max_depth)),
-        vsv = np.array(_crop(frechet['Vsv'], frechet['D_km'], max_depth)),
-        vpv = np.array(_crop(frechet['Vpv'], frechet['D_km'], max_depth)),
-        vph = np.array(_crop(frechet['Vph'], frechet['D_km'], max_depth)),
-        eta = np.array(_crop(frechet['Eta'], frechet['D_km'], max_depth)),
-    )
-
-
-    love_kernels = LoveKernels(
-        period = np.array(_crop(frechet['Period'], frechet['D_km'], max_depth)),
-        depth = np.array(_crop(frechet['D_km'], frechet['D_km'], max_depth)),
-        vsv = np.array(_crop(frechet['Vsv'], frechet['D_km'], max_depth)),
-        vsh = np.array(_crop(frechet['Vsh'], frechet['D_km'], max_depth)),
-    )
-
-    depth = (rayleigh_kernels.depth[rayleigh_kernels.period
-                                    == rayleigh_kernels.period[0]])
-
-    return rayleigh_kernels, love_kernels, depth
-
-def _crop(field, field_to_crop_by, max_value):
-    """ Crop one field according to the maximum value of a second field """
-
-    return field[field_to_crop_by < max_value]
-
-
-def _build_model_vector(model:define_earth_model.EarthModel,
-                        depth:np.array) -> (np.array):
-    """ Make model into column vector n_depth_points*n_model_parameters x 1.
+def _build_model_vector(model:define_models.InversionModel,
+                        ) -> (np.array):
+    """ Make model into column vector [s; t].
 
     Arguments:
         model:
-            - define_earth_model.EarthModel
-            - Units:    seismological, so km/s for velocities
-            - Input Vs, Vp model.
-        depth:
-            - (n_depth_points, ) np.array
-            - Units:    kilometres
-            - This is a non-MINEOS workaround to make sure the depth vectors
-              are the same
+            - define_models.InversionModel
+            - Units:    seismological (km/s, km)
+            - Input Vs model
 
     Returns:
-        m0:
-            - (n_model_points, 1) np.array
-            - Units:    seismological, so km/s for velocities,
-                        dimensionless for eta
-            - Vsv, Vsh, Vpv, Vph, eta model stacked on top of each other.
-            - N.B. n_model_points = n_depth_points * n_model_parameters
+        p:
+            - (n_depth points + n_boundary_layers, 1) np.array
+            - Units:    seismological, so km/s for velocities (s),
+                        km for layer thicknesses (t)
+            - Inversion model, p, is made up of velocities defined at various
+              depths (s) and thicknesses for the layers above boundary layers
+              of interest (t), i.e. controlling the depth of e.g. Moho, LAB
+            - All other thicknesses are either fixed, or are dependent only
+              on the variation of thicknesses, t
+            - This model, p, ONLY includes the parameters that we are inverting
+              for - it is not a complete description of vs(z)!
     """
 
-    # Find depth vector from kernels and interpolate model over it
-    depth = _make_2D(depth)
-
-    vsv = _interpolate_earth_model_parameter(depth, model, 'vs')
-    vsh = _interpolate_earth_model_parameter(depth, model, 'vs')
-    vpv = _interpolate_earth_model_parameter(depth, model, 'vp')
-    vph = _interpolate_earth_model_parameter(depth, model, 'vp')
-    eta = np.ones_like(depth)
-
-    return np.vstack((vsv, vsh, vpv, vph, eta))
-
-def _make_2D(x:np.array) -> np.array:
-    """ Turn a 1D numpy array into a column vector. """
-
-    return x[np.newaxis].T
-
-def _interpolate_earth_model_parameter(new_depth:np.array,
-                                       model:define_earth_model.EarthModel,
-                                       field_str:str) -> np.array:
-    """ Convert from EarthModel layout and interpolate.
-
-    Arguments:
-        new_depth:
-            - (n_depth_points, 1) np.array
-            - Units:    kilometres
-            - Depth vector over which to interpolate EarthModel parameter.
-            - Shape of this vector, i.e. a column, is very important!
-              np.interp will generate vectors of the same shape.
-        model:
-            - define_earth_model.EarthModel
-            - Units:    seismological (e.g. km not m)
-            - Input EarthModel.
-        field_str:
-            - str
-            - Name of the parameter (field in model) to be interpolated.
-
-    Returns:
-        new_field:
-            - (n_depth_points, 1) np.array
-            - Units:    as units of field in input model.
-            - Vector of model parameter interpolated onto new_depth and ready
-              to be vertically stacked into m0.
+    return np.vstack((model.vsv, model.thickness[model.boundary_inds]))
 
 
-    """
-
-    depth, field = define_earth_model._convert_earth_model(model, field_str)
-    new_field = np.interp(new_depth, depth, field)
-
-    return new_field
-
-
-def _build_partial_derivatives_matrix(rayleigh, love):
+def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
+                                      model:define_models.InversionModel):
     """ Make partial derivative matrix, G, by stacking the Frechet kernels.
 
-    Build the G matrix - this is a n_Love_periods+n_Rayleigh_periods by
+    Build the G matrix.
+    Ultimately, this will be a n_Love_periods+n_Rayleigh_periods by
     n_depth_points*5 (SV, SH, PV, PH, ETA) matrix.  This is filled in by
     the frechet kernels for each period - first the vsv and vsh T frechet
     kernels (sensitivities from Love) rows, then the vsv, (vsh set to 0), vpv,
@@ -381,11 +208,16 @@ def _build_partial_derivatives_matrix(rayleigh, love):
     entry in the matrix above (including the 0) is actually a row vector
     n_depth_points long.
 
+    For now, we are only using Rayleigh waves, so in the above explanation,
+    n_Love_periods = 0, i.e. there are no rows in G for the T_*** kernels.
+
     Arguments:
         rayleigh:
-            - RayleighKernels
-        love:
-            - LoveKernels
+            - mineos.RayleighKernels
+        (love:
+            - mineos.LoveKernels
+            - Not currently passed, but if want to use both Rayleigh and Love,
+              easier to pass this in as a separate argument)
 
     Returns:
         G_inversion_model:
@@ -395,35 +227,35 @@ def _build_partial_derivatives_matrix(rayleigh, love):
 
     """
 
-    periods = np.unique(rayleigh.period)
+    periods = np.unique(kernels['period'])
 
-    G_Rayleigh = _hstack_frechet_kernels(rayleigh, periods[0])
-    G_Love = _hstack_frechet_kernels(love, periods[0])
+    G_Rayleigh = _hstack_frechet_kernels(kernels, periods[0])
+    # G_Love = _hstack_frechet_kernels(love, periods[0])
     for i_p in range(1,len(periods)):
         G_Rayleigh = np.vstack((G_Rayleigh,
-                               _hstack_frechet_kernels(rayleigh, periods[i_p])))
-        G_Love = np.vstack((G_Love,
-                            _hstack_frechet_kernels(love, periods[i_p])))
+                               _hstack_frechet_kernels(kernels, periods[i_p])))
+        # G_Love = np.vstack((G_Love,
+        #                     _hstack_frechet_kernels(love, periods[i_p])))
 
-    # surface_waves code only calculates Rayleigh phv
+    # G_MINEOS is dc/dm matrix
     G_MINEOS = G_Rayleigh #np.vstack((G_Love, G_Rayleigh))
 
     # Convert to kernels for the model parameters we are inverting for
-    G_inversion_model = _convert_to_model_kernels(G_MINEOS, rayleigh.depth,
-                                                  model)
+    dm_dp_mat = _convert_to_model_kernels(kernels['z'].unique(), model)
+    G_inversion_model = np.matmul(G_MINEOS, dm_dp_mat)
 
     return G_inversion_model
 
 
-def _hstack_frechet_kernels(kernel, period:float):
+def _hstack_frechet_kernels(kernels, period:float):
     """ Append all of the relevent Frechet kernels into a row of the G matrix.
 
     Different parameters are of interest for Rayleigh (Vsv, Vpv, Vph, Eta)
     and Love (Vsv, Vsh) waves.
 
     Arguments:
-        kernel:
-            - RayleighKernels or LoveKernels
+        kernels:
+            - pd.DataFrame
             - Frechet kernels across all periods
         period:
             - float
@@ -441,26 +273,27 @@ def _hstack_frechet_kernels(kernel, period:float):
               the kernel is a Love or Rayleigh kernel.
     """
 
-    # Note: if want to have kernels scaled for changes in velocity in SI
+    # Note: To have kernels scaled for changes in velocity in SI
     #       units (i.e. m/s not km/s), multiply all kernels (including eta)
-    #       by 1e3.
-    vsv = kernel.vsv[kernel.period == period]
+    #       by 1e3.  Even though MINEOS requires SI input, the kernel output
+    #       assumes seismological (km/s) units!
+    vsv = kernels.vsv[kernels.period == period]
 
-    if kernel.type == 'rayleigh':#isinstance(kernel, RayleighKernels):
+    if kernels['type'].iloc[0] == 'Rayleigh':#isinstance(kernel, mineos.RayleighKernels):
         vsh = np.zeros_like(vsv)
-        vpv = kernel.vpv[kernel.period == period]
-        vph = kernel.vph[kernel.period == period]
-        eta = kernel.eta[kernel.period == period]
+        vpv = kernels.vpv[kernels.period == period]
+        vph = kernels.vph[kernels.period == period]
+        eta = kernels.eta[kernels.period == period]
 
-    if kernel.type == 'love':#isinstance(kernel, LoveKernels):
-        vsh = kernel.vsh[kernel.period == period]
+    if kernels['type'].iloc[0]  == 'Love':#isinstance(kernel, mineos.LoveKernels):
+        vsh = kernels.vsh[kernels.period == period]
         vpv = np.zeros_like(vsv)
         vph = np.zeros_like(vsv)
         eta = np.zeros_like(vsv)
 
     return np.hstack((vsv, vsh, vpv, vph, eta))
 
-def _convert_to_model_kernels(G_MINEOS):
+def _convert_to_model_kernels(depth, model):
     """ Convert from Frechet kernels as function of v(z) to function of m0.
 
     The Frechet kernels from MINEOS are given at the same depths as those in
@@ -493,171 +326,646 @@ def _convert_to_model_kernels(G_MINEOS):
                     :     ,  : ,    :       ,    :       ,  : ,    :
                deta_M/ds_0, ..., deta_M/ds_P, deta_M/dt_0, ..., deta_M/dt_D
 
-    By matrix multiplication, this works out as dc_0/ds_0 = sum(dvsv_a/ds_0),
+    By matrix multiplication, this works out as
+        e.g. dc_0/ds_0 = sum(dc_0/dm_a * dm_a/ds_0)
     where the sum is from a = 0 to a = N.
 
-    A lot of these partial derivatives will be zero, i.e. for values of vsv,
-    vsh, vpv, vph that are far from the value of s or t that is being varied;
-    eta is held constant and never dependent on our model parameters [s, t].
+    A lot of these partial derivatives (dm_a/dp_b) will be zero,
+    e.g. for values of vsv, vsh, vpv, vph that are far from the value of s
+         or t that is being varied; eta is held constant and never dependent
+         on our model parameters [s, t].
+    The ones that are non-zero are calculated differently depending on where
+    the depth point at which m_a is defined (z_a) is compared to the depth
+    of the model parameter, p_b, that is being varied.  So we will call
+    different functions to build the partial derivatives in the layer
+    above p_b, the layer below p_b (and, when we are varying t, the layer two
+    layers below p_b, i.e. the layer below the boundary layer).
 
     Given that s is just Vsv defined at a number of points in depth, we find
     the partial derivatives of the other velocities (vsh, vpv, vph) by
     scaling between them.
 
     Arguments:
-        G_MINEOS:
-            - (n_Love_periods + n_Rayleigh_periods, n_card_depths) np.array
-            - Units:    assumes velocities in km/s
-            - Partial derivative matrix is of the format described earlier in
-              the docstring, stacking the Love and Rayleigh kernels vertically
-              on top of each other with rows corresponding to different periods.
-            - For now, I have set this to only the Rayleigh wave kernels -
-              part of the non-MINEOS workaround.
         depth:
             - (n_card_depths, ) np.array
             - Units:    kilometres
             - Depth vector for MINEOS kernel.
         model:
+            - define_models.InversionModel
+            - Units:    seismological (i.e. vsv in km/s, thickness in km)
+            - Remember that the field boundary_inds contains the indices of
+              the boundaries that we are inverting the depth/width of.  So if
+              i_b is the first of these boundary_inds,
+                model.vsv[i_b]: Vsv at the top of the layer
+                model.vsv[i_b + 1]: Vsv at the bottom of the layer
+                model.thickness[i_b]: thickness of the layer above the boundary
+                    (controls the depth of the boundary layer)
+                np.sum(model.thickness[:i_b + 1]): depth of the top of the
+                    boundary layer (i.e. up to and including thickness[i_b])
+                model.thickness[i_b + 1]: width of the boundary layer itself
+            - Remember that, for a given inversion, we are fixing the width
+              of the boundary layer and only varying the depth to the top of
+              of the boundary layer.
+                i.e.    t = model.thickness[model.boundary_inds]
 
     Returns:
-        G_inversion_model:
+        dm_dp_mat:
+            - (n_MINEOS_model_points,
+               n_inversion_model_depths + n_boundary_layers) np.array
+            - Units:    seismological (i.e. vsv in km/s, thickness in km)
+            - This is dm/dp, where p = [s; t], s = vsv defined at a series of
+              depth points and t = the thickness of the layer overlying a
+              boundary layer (and thus controlling its depth), and m is the
+              model that corresponds to the MINEOS kernels.
 
 
     """
 
     # Build dm/dp matrix up column by column
-    n_layers = model.s.size - 1 # last value of s is pinned (not inverted for)
+    n_layers = model.vsv.size - 1 # last value of s is pinned (not inverted for)
     dm_ds_mat = np.zeros((depth.size, n_layers))
-    dm_dt_mat = np.zeros((depth.size, model.t.size))
+    dm_dt_mat = np.zeros((depth.size, model.boundary_inds.size))
 
-    # First, do dc/ds column by column
-    # Build first column, dc/ds_0 - only affect layers deeper
+    # First, do dm/ds column by column
+    # Build first column, dm/ds_0 - only affects layers deeper than s_0
     dm_ds_mat = _convert_kernels_d_deeperm_by_d_s(model, 0, depth, dm_ds_mat)
     # Build other columns, dc/ds_i
     for i in range(1, n_layers):
         dm_ds_mat = _convert_kernels_d_shallowerm_by_d_s(
             model, i, depth, dm_ds_mat
         )
-        dm_ds_mat = _convert_kernels_d_shallowerm_by_d_s(
+        dm_ds_mat = _convert_kernels_d_deeperm_by_d_s(
             model, i, depth, dm_ds_mat
         )
 
-    # Now, do dc/dt column by column
-    for i in range(model.t.size):
-        dm_dt_mat = _convert_kernels_d_shallowerthanboundm_by_d_t(
+    # Now, do dm/dt column by column
+    for i in range(model.boundary_inds.size):
+        dm_dt_mat = _convert_kernels_d_shallowerm_by_d_t(
             model, i, depth, dm_dt_mat
         )
-        dm_dt_mat = _convert_kernels_d_boundarym_by_d_t(
+        dm_dt_mat = _convert_kernels_d_withinboundarym_by_d_t(
             model, i, depth, dm_dt_mat
         )
-        dm_dt_mat = _convert_kernels_d_deeperthanboundm_by_d_t(
+        dm_dt_mat = _convert_kernels_d_deeperm_by_d_t(
             model, i, depth, dm_dt_mat
         )
 
-def _convert_kernels_d_shallowerthanboundm_by_d_t(model, i, depth, dm_dt_mat):
-    # s_i is the velocity at the top of the boundary, model.boundary_inds[i]
-    # s_i_minus_1 is the velocity at the top of the model layer above this
+    dm_dp_mat = np.hstack((dm_ds_mat, dm_d_mat))
 
-    # model.thickness[i_b - 1] is the thickness of the layer above the boundary
-    # i.e. what we are inverting for; model.thickness[i_b] is the thickness
-    # of the boundary layer itself
-    i_b = model.boundary_inds[i]
+    return dm_dp_mat
 
-    depth_to_s_i_minus_1 = np.sum(model.thickness[:i_b-1])
-    depth_to_s_i = np.sum(model.thickness[:i_b])
 
-    d_inds, = np.where(np.logical_and(depth_to_s_i_minus_1 < depth,
-                                      depth <= depth_to_s_i))
+def _convert_kernels_d_shallowerm_by_d_s(model:define_models.InversionModel,
+                                         i:int, depth:np.array,
+                                         dm_ds_mat:np.array):
+    """ Find dm/ds for the model card points above the boundary layer.
+
+    To convert the MINEOS kernels (dc/dm) to inversion model kernels (dc/dp),
+    we need to define the matrix dm/dp (dc/dp = dc/dm * dm/dp).  We divide
+    our inversion model, p, into two parts: the defined velocities at various
+    depths (s) and the depth and thickness of certain boundary layers of
+    interest (t).
+
+    Here, we calculate dm/ds for the model card points above (shallower than)
+    the boundary layer.  In the following description, I'm replacing subscripts
+    with underscores - everything before the next space should be subscripted.
+    e.g. y_i+1 is the 'i+1'th value of y.
+
+    We can define the model card Vsv (m = v(z)) in terms of s as follows:
+      - For every point s_i, we define the depth of that point, y_i, as the
+        sum of the thicknesses above it: np.sum(thickness[:i + 1])
+            (Remember model.thickness[i] is the thickness of the layer ABOVE
+             the point where model.vsv[i] is defined)
+      - For any depth, z_a, find b s.t. y_b <= z_a < y_b+1
+            (Remember that v(z) is just linearly interpolated between s values)
+      - Can then define v_a as
+            v_a = s_b + (s_b+1 - s_b)/(y_b+1 - y_b) * (z_a - y_b)
+      - Note that if z_a == y_b, then v_a == s_b
+
+    Here, we are looking specifically at the values of m that are shallower than
+    the s point in question, s_i, that will still be affected by a change to
+    s_i - that is, the values of z between y_i-1 and y_i.  So i = b+1 in the
+    equation above.
+            v_a = s_i-1 + (s_i - s_i-1)/(y_i - y_i-1) * (z_a - y_i-1)
+
+    In terms of the partial derivative:
+            d(v_a)/d(s_i) = (z_a - y_i-1)/(y_i - y_i-1)
+
+    Note that (y_i - y_i-1) is equivalent to thickness[i], the thickness of
+    the layer above the point i.
+
+    Here, we are calculating this one layer at a time, with the loop in
+    the calling function - passing the index, i, in as an argument.  This fills
+    some of a single column of dm_ds_mat ([dm_0/ds_i; ...; dm_N/ds_i]),
+    although most of these values will be zero.
+
+    Arguments:
+        model:
+            - define_models.InversionModel
+            - Units:    seismological (km/s and km)
+            - Model in layout ready for easy conversion to column vector
+              to be used in least squares inversion.
+        i:
+            - int
+            - Units:    n/a
+            - Index in InversionModel for which we are calculating the column
+              of partial derivatives.
+        depth:
+            - (n_card_depths, ) np.array
+            - Units:    kilometres
+            - Depth vector for MINEOS kernel.
+        dm_ds_mat:
+            - (n_card_depths, n_inversion_model_depths) np.array
+            - Units:    assumes seismological (km/s, km)
+            - Partial derivative matrix of dm/ds that we are filling in a bit
+              at a time.
+
+    Returns:
+        dm_ds_mat:
+            - (n_card_depths, n_inversion_model_depths) np.array
+            - Units:    assumes seismological (km/s, km)
+            - Partial derivative matrix of dm/ds with a few more values filled
+              in - specifically, those in the 'i'th column (for model parameter
+              s_i) in rows corresponding to depths between y_i-1 and y_i.
+
+    """
+    # Find the layers in card depth, z, shallower than the depth where s_i is
+    # defined, y_i, and deeper than the depth where s_i-1 is specified, y_i-1.
+    # These are the points in z that will be affected by varying s_i
+    y_i_minus_1 = np.sum(model.thickness[:i])
+    y_i = np.sum(model.thickness[:i+1])
+
+    d_inds, = np.where(np.logical_and(y_i_minus_1 < depth, depth <= y_i))
 
     for i_d in d_inds:
-        dm_dt_mat[i_d, i + (model.s.size - 1)] = -(
-            (
-                (model.s[i_b] - model.s[i_b - 1])
-                * (depth[i_d] - depth_to_s_i_minus_1)
-            )
-            * model.thickness[i_b - 1]^-2
-        )
-
-    return dm_dt_mat
-
-def _convert_kernels_d_boundarym_by_d_t(model, i, depth, dm_dt_mat):
-    # s_i is the velocity at the top of the boundary, model.boundary_inds[i]
-    # s_i_plus_1 is the velocity at the bottom of the boundary
-    i_b = model.boundary_inds[i]
-
-    depth_to_s_i = np.sum(model.thickness[:i_b])
-    depth_to_s_i_plus_1 = np.sum(model.thickness[:i_b+1])
-
-    d_inds, = np.where(np.logical_and(depth_to_s_i <= depth,
-                                      depth < depth_to_s_i_plus_1))
-
-    for i_d in d_inds:
-        dm_dt_mat[i_d, i + (model.s.size - 1)] = -(
-            (model.s[i_b + 1] - model.s[i_b])
-            * model.thickness[i_b]^-2
-        )
-
-    return dm_dt_mat
-
-def _convert_kernels_d_deeperthanboundm_by_d_t(model, i, depth, dm_dt_mat):
-    # ************ NEED TO WORK OUT HOW THICKNESS LINES UP WITH S ******
-    # s_i_minus_1 is the velocity at the top of the model layer above this
-    # s_i is the velocity at the top of the boundary, model.boundary_inds[i]
-    # s_i_plus_1 is the velocity at the bottom of the boundary
-    # s_i_plus_2 is the velocity at the bottom of the layer below the boundary
-    i_b = model.boundary_inds[i]
-
-    depth_to_s_i_minus_1 = np.sum(model.thickness[:i_b-2])
-    depth_to_s_i = np.sum(model.thickness[:i_b-1])
-    depth_to_s_i_plus_1 = np.sum(model.thickness[:i_b])
-    depth_to_s_i_plus_2 = np.sum(model.thickness[:i_b+1])
-
-    d_inds, = np.where(np.logical_and(depth_to_s_i_plus_1 <= depth,
-                                      depth < depth_to_s_i_plus_2))
-
-    for i_d in d_inds:
-        dm_dt_mat[i_d, i + (model.s.size - 1)] = -(
-            (
-                (model.s[i_b + 1] - model.s[i_b])
-                * (depth[i_d] - depth_to_s_i_plus_2)
-            )
-            * (model.thickness[i_b + 2]^-2
-        )
-
-    return dm_dt_mat
-
-
-def _convert_kernels_d_shallowerm_by_d_s(model, i, depth, dm_ds_mat):
-
-    # Find h, the number of layers in card depth deeper than defined s point
-    # that will be affected by varying that s
-    depth_to_s_i_minus_1 = np.sum(model.thickness[:i-1])
-    depth_to_s_i = np.sum(model.thickness[:i])
-
-    d_inds, = np.where(np.logical_and(depth_to_s_minus_i < depth,
-                                      depth <= depth_to_s_i))
-
-    for i_d in d_inds:
-        dm_ds_mat[i_d, i] = ((depth[i_d] - depth_to_s_i_minus_1)
-                             /model.thickness[i-1])
+        dm_ds_mat[i_d, i] = ((depth[i_d] - y_i_minus_1)
+                             /model.thickness[i])
 
     return dm_ds_mat
 
 def _convert_kernels_d_deeperm_by_d_s(model, i, depth, dm_ds_mat):
+    """ Find dm/ds for the model card points above the boundary layer.
 
+    To convert the MINEOS kernels (dc/dm) to inversion model kernels (dc/dp),
+    we need to define the matrix dm/dp (dc/dp = dc/dm * dm/dp).  We divide
+    our inversion model, p, into two parts: the defined velocities at various
+    depths (s) and the depth and thickness of certain boundary layers of
+    interest (t).
+
+    Here, we calculate dm/ds for the model card points above (shallower than)
+    the boundary layer.  In the following description, I'm replacing subscripts
+    with underscores - everything before the next space should be subscripted.
+    e.g. y_i+1 is the 'i+1'th value of y.
+
+    We can define the model card Vsv (m = v(z)) in terms of s as follows:
+      - For every point s_i, we define the depth of that point, y_i, as the
+        sum of the thicknesses above it: np.sum(thickness[:i + 1])
+            (Remember model.thickness[i] is the thickness of the layer ABOVE
+             the point where model.vsv[i] is defined)
+      - For any depth, z_a, find b s.t. y_b <= z_a < y_b+1
+            (Remember that v(z) is just linearly interpolated between s values)
+      - Can then define v_a as
+            v_a = s_b + (s_b+1 - s_b)/(y_b+1 - y_b) * (z_a - y_b)
+      - Note that if z_a == y_b, then v_a == s_b
+
+    Here, we are looking specifically at the values of m that are deeper than
+    the s point in question, s_i, that will still be affected by a change to
+    s_i - that is, the values of z between y_i and y_i+1.  So i = b in the
+    equation above.
+            v_a = s_i + (s_i+1 - s_i)/(y_i+1 - y_i) * (z_a - y_i)
+
+    In terms of the partial derivative:
+            d(v_a)/d(s_i) = 1 - (z_a - y_i)/(y_i+1 - y_i)
+
+    Note that (y_i+1 - y_i) is equivalent to thickness[i+1], the thickness of
+    the layer below the point i.
+
+    Here, we are calculating this one layer at a time, with the loop in
+    the calling function - passing the index, i, in as an argument.  This fills
+    some of a single column of dm_ds_mat ([dm_0/ds_i; ...; dm_N/ds_i]),
+    although most of these values will be zero.
+
+    Arguments:
+        model:
+            - define_models.InversionModel
+            - Units:    seismological (km/s and km)
+            - Model in layout ready for easy conversion to column vector
+              to be used in least squares inversion.
+        i:
+            - int
+            - Units:    n/a
+            - Index in InversionModel for which we are calculating the column
+              of partial derivatives.
+        depth:
+            - (n_card_depths, ) np.array
+            - Units:    kilometres
+            - Depth vector for MINEOS kernel.
+        dm_ds_mat:
+            - (n_card_depths, n_inversion_model_depths) np.array
+            - Units:    assumes seismological (km/s, km)
+            - Partial derivative matrix of dm/ds that we are filling in one
+              bit at a time.
+
+    Returns:
+        dm_ds_mat:
+            - (n_card_depths, n_inversion_model_depths) np.array
+            - Units:    assumes seismological (km/s, km)
+            - Partial derivative matrix of dm/ds with a few more values filled
+              in - specifically, those in the 'i'th column (for model parameter
+              s_i) in rows corresponding to depths between y_i and y_i+1.
+    """
     # Find h, the number of layers in card depth deeper than defined s point
     # that will be affected by varying that s
-    depth_to_s_i = np.sum(model.thickness[:i])
-    depth_to_s_i_plus_1 = np.sum(model.thickness[:i+1])
+    y_i = np.sum(model.thickness[:i+1])
+    y_i_plus_1 = np.sum(model.thickness[:i+2])
 
-    d_inds, = np.where(np.logical_and(depth_to_s_i <= depth,
-                                      depth < depth_to_s_i_plus_1))
+    d_inds, = np.where(np.logical_and(y_i <= depth, depth < y_i_plus_1))
 
     for i_d in d_inds:
-        dm_ds_mat[i_d, i] = 1 - ((depth[i_d] - depth_to_s_i)
-                                 /model.thickness[i])
+        dm_ds_mat[i_d, i] = 1 - ((depth[i_d] - y_i)
+                                 /model.thickness[i+1])
 
     return dm_ds_mat
+
+def _convert_kernels_d_shallowerm_by_d_t(model:define_models.InversionModel,
+                                         i:int, depth:np.array,
+                                         dm_dt_mat:np.array) -> np.array:
+    """ Find dm/dt for the model card points above the boundary layer.
+
+    To convert the MINEOS kernels (dc/dm) to inversion model kernels (dc/dp),
+    we need to define the matrix dm/dp (dc/dp = dc/dm * dm/dp).  We divide
+    our inversion model, p, into two parts: the defined velocities at various
+    depths (s) and the depth and thickness of certain boundary layers of
+    interest (t).
+
+    Here, we calculate dm/dt for the model card points above (shallower than)
+    the boundary layer.  In the following description, I'm replacing subscripts
+    with underscores - everything before the next space should be subscripted.
+    e.g. y_i+1 is the 'i+1'th value of y.
+
+    The values, t_i, in the model, p, have slightly confusing effects on v(z)
+    because we have to go via the effect on s, the velocities defined in p.
+    Let's define ib, the index in s that corresponds to the index i in t.
+        ib = model.boundary_inds[i]
+    Note that ib-1, ib+1, etc are adding to the indices in s, not in t.
+    Let's also define y_ib, the depth of s_ib; d_i, the depth of t_i;
+    w_i, the width of the boundary layer.
+        y_ib = d_i = y_ib-1 + t_i
+        y_ib+1 = d_i + w_i = y_ib-1 + t_i + w_i
+    We want to keep the width of the boundary layer, w_i, constant throughout
+    a single inversion.  Otherwise, we want to pin the absolute depths, y, of
+    all other points in s.  That is, other than y_ib and y_ib+1 for each t_i,
+    the depths, y, are immutable.  However, changing these depth points changes
+    the velocity gradient on either side of them.  Therefore, changing t_i will
+    affect velocities between y_ib-1 < z_a < y_ib+2 (note not inclusive!).
+
+
+    We can define the model card Vsv (m = v(z)) in terms of t as follows:
+      - Each point t_i refers to the thickness of the layer above a boundary
+        layer, model.thickness[model.boundary_inds[i]]
+      - For every point t_i, we define the depth of that point, d_i, as the
+        sum of the thicknesses above it:
+            np.sum(model.thickness[:model.boundary_inds[i] + 1])
+            = np.sum(model.thickness[:model.boundary_inds[i]]) + t_i
+      - As above, we've defined y_ib, y_ib+1, etc
+      - For any depth, z_a, try to find ib s.t. y_b < z_a < y_b+1
+        CONDITIONAL ON this being in the depth range y_ib-1 < z_a < y_ib+2
+            (There may be no such z_a if these z points fall outside of the
+            depth range of interest for this boundary layer, i)
+      - Can then define v_a as
+            v_a = s_b + ((s_b+1 - s_b) / (y_b+1 - y_b) * (z_a - y_b))
+
+    Here, we are looking specifically at the values of m that are shallower than
+    the s point in question, s_ib, that will still be affected by a change to
+    t_i - that is, the values of z between y_ib-1 and y_ib.  So b = ib-1
+            v_a = s_ib-1 + ((s_ib - s_ib-1) / (y_ib - y_ib-1) * (z_a - y_ib-1))
+            v_a = s_ib-1 + ((s_ib - s_ib-1) / t_i * (z_a - y_ib-1))
+
+    In terms of the partial derivative:
+            d(v_a)/d(t_i) = -(z_a - y_ib-1) * (s_ib - s_ib-1) / t_i^2
+
+    Here, we are calculating this one layer at a time, with the loop in
+    the calling function - passing the index, i, in as an argument.  This fills
+    some of a single column of dm_dt_mat ([dm_0/dt_i; ...; dm_N/dt_i]),
+    although most of these values will be zero.
+
+    Arguments:
+        model:
+            - define_models.InversionModel
+            - Units:    seismological (km/s and km)
+            - Model in layout ready for easy conversion to column vector
+              to be used in least squares inversion.
+        i:
+            - int
+            - Units:    n/a
+            - Index in InversionModel for which we are calculating the column
+              of partial derivatives.
+        depth:
+            - (n_card_depths, ) np.array
+            - Units:    kilometres
+            - Depth vector for MINEOS kernel.
+        dm_dt_mat:
+            - (n_card_depths, n_boundary_layers) np.array
+            - Units:    assumes seismological (km/s, km)
+            - Partial derivative matrix of dm/dt that we are filling in a bit
+              at a time.
+
+    Returns:
+        dm_dt_mat:
+            - (n_card_depths, n_boundary_layers) np.array
+            - Units:    assumes seismological (km/s, km)
+            - Partial derivative matrix of dm/dt with a few more values filled
+              in - specifically, those in the 'i'th column (for model parameter
+              t_i) in rows corresponding to depths between y_ib-1 and y_ib.
+
+    """
+    # s_ib is the velocity at the top of the boundary, model.boundary_inds[i]
+    # s_ib_minus_1 is the velocity at the top of the model layer above this
+
+    # model.thickness[i_b] is the thickness of the layer above the boundary
+    # i.e. what we are inverting for; model.thickness[i_b + 1] is the thickness
+    # of the boundary layer itself
+
+    ib = model.boundary_inds[i]
+    t_i = model.thickness[ib]
+
+    y_ib_minus_1 = np.sum(model.thickness[:ib])
+    y_ib = np.sum(model.thickness[:ib + 1])
+
+    d_inds, = np.where(np.logical_and(y_ib_minus_1 < depth, depth < y_ib))
+
+    for i_d in d_inds:
+        dm_dt_mat[i_d, i] = -(
+            ((model.vsv[ib] - model.vsv[ib - 1]) * (depth[i_d] - y_ib_minus_1))
+            / t_i^2
+        )
+
+    return dm_dt_mat
+
+def _convert_kernels_d_withinboundarym_by_d_t(
+        model:define_models.InversionModel, i:int, depth:np.array,
+        dm_dt_mat:np.array) -> np.array:
+    """ Find dm/dt for the model card points within the boundary layer.
+
+    To convert the MINEOS kernels (dc/dm) to inversion model kernels (dc/dp),
+    we need to define the matrix dm/dp (dc/dp = dc/dm * dm/dp).  We divide
+    our inversion model, p, into two parts: the defined velocities at various
+    depths (s) and the depth and thickness of certain boundary layers of
+    interest (t).
+
+    Here, we calculate dm/dt for the model card points within the boundary
+    layer.  In the following description, I'm replacing subscripts with
+    underscores - everything before the next space should be subscripted.
+    e.g. y_i+1 is the 'i+1'th value of y.
+
+    The values, t_i, in the model, p, have slightly confusing effects on v(z)
+    because we have to go via the effect on s, the velocities defined in p.
+    Let's define ib, the index in s that corresponds to the index i in t.
+        ib = model.boundary_inds[i]
+    Note that ib-1, ib+1, etc are adding to the indices in s, not in t.
+    Let's also define y_ib, the depth of s_ib; d_i, the depth of t_i;
+    w_i, the width of the boundary layer.
+        y_ib = d_i = y_ib-1 + t_i
+        y_ib+1 = d_i + w_i = y_ib-1 + t_i + w_i
+    We want to keep the width of the boundary layer, w_i, constant throughout
+    a single inversion.  Otherwise, we want to pin the absolute depths, y, of
+    all other points in s.  That is, other than y_ib and y_ib+1 for each t_i,
+    the depths, y, are immutable.  However, changing these depth points changes
+    the velocity gradient on either side of them.  Therefore, changing t_i will
+    affect velocities between y_ib-1 < z_a < y_ib+2 (note not inclusive!).
+
+
+    We can define the model card Vsv (m = v(z)) in terms of t as follows:
+      - Each point t_i refers to the thickness of the layer above a boundary
+        layer, model.thickness[model.boundary_inds[i]]
+      - For every point t_i, we define the depth of that point, d_i, as the
+        sum of the thicknesses above it:
+            np.sum(model.thickness[:model.boundary_inds[i] + 1])
+            = np.sum(model.thickness[:model.boundary_inds[i]]) + t_i
+      - As above, we've defined y_ib, y_ib+1, etc
+      - For any depth, z_a, try to find ib s.t. y_b < z_a < y_b+1
+        CONDITIONAL ON this being in the depth range y_ib-1 < z_a < y_ib+2
+            (There may be no such z_a if these z points fall outside of the
+            depth range of interest for this boundary layer, i)
+      - Can then define v_a as
+            v_a = s_b + ((s_b+1 - s_b) / (y_b+1 - y_b) * (z_a - y_b))
+
+    Here, we are looking specifically at the values of m that are within the
+    boundary layer in question - that is, the values of z between y_ib and
+    y_ib+1.  So ib = b in the equation above.
+            v_a = s_ib + ((s_ib+1 - s_ib) / (y_ib+1 - y_ib) * (z_a - y_ib))
+            v_a = s_ib + ((s_ib+1 - s_ib) / w_i * (z_a - (y_ib-1 + t_i)))
+
+    In terms of the partial derivative:
+            d(v_a)/d(t_i) = -(s_ib+1 - s_ib) / w_i
+
+    Here, we are calculating this one layer at a time, with the loop in
+    the calling function - passing the index, i, in as an argument.  This fills
+    some of a single column of dm_dt_mat ([dm_0/dt_i; ...; dm_N/dt_i]),
+    although most of these values will be zero.
+
+    Arguments:
+        model:
+            - define_models.InversionModel
+            - Units:    seismological (km/s and km)
+            - Model in layout ready for easy conversion to column vector
+              to be used in least squares inversion.
+        i:
+            - int
+            - Units:    n/a
+            - Index in InversionModel for which we are calculating the column
+              of partial derivatives.
+        depth:
+            - (n_card_depths, ) np.array
+            - Units:    kilometres
+            - Depth vector for MINEOS kernel.
+        dm_dt_mat:
+            - (n_card_depths, n_boundary_layers) np.array
+            - Units:    assumes seismological (km/s, km)
+            - Partial derivative matrix of dm/dt that we are filling in a bit
+              at a time.
+
+    Returns:
+        dm_dt_mat:
+            - (n_card_depths, n_boundary_layers) np.array
+            - Units:    assumes seismological (km/s, km)
+            - Partial derivative matrix of dm/dt with a few more values filled
+              in - specifically, those in the 'i'th column (for model parameter
+              t_i) in rows corresponding to depths between y_ib-1 and y_ib.
+
+    """
+
+    ib = model.boundary_inds[i]
+    w_i = model.thickness[ib + 1]
+
+    y_ib = np.sum(model.thickness[:i_b + 1])
+    y_ib_plus_1 = np.sum(model.thickness[:i_b + 2])
+
+    d_inds, = np.where(np.logical_and(y_ib <= depth, depth < y_ib_plus_1))
+
+    for i_d in d_inds:
+        dm_dt_mat[i_d, i] = -(
+            (model.vsv[i_b + 1] - model.vsv[i_b])
+            / w_i
+        )
+
+    return dm_dt_mat
+
+def _convert_kernels_d_deeperm_by_d_t(model:define_models.InversionModel,
+                                      i:int, depth:np.array,
+                                      dm_dt_mat:np.array) -> np.array:
+    """ Find dm/dt for the model card points below the boundary layer.
+
+    To convert the MINEOS kernels (dc/dm) to inversion model kernels (dc/dp),
+    we need to define the matrix dm/dp (dc/dp = dc/dm * dm/dp).  We divide
+    our inversion model, p, into two parts: the defined velocities at various
+    depths (s) and the depth and thickness of certain boundary layers of
+    interest (t).
+
+    Here, we calculate dm/dt for the model card points below (deeper than)
+    the boundary layer.  In the following description, I'm replacing subscripts
+    with underscores - everything before the next space should be subscripted.
+    e.g. y_i+1 is the 'i+1'th value of y.
+
+    The values, t_i, in the model, p, have slightly confusing effects on v(z)
+    because we have to go via the effect on s, the velocities defined in p.
+    Let's define ib, the index in s that corresponds to the index i in t.
+        ib = model.boundary_inds[i]
+    Note that ib-1, ib+1, etc are adding to the indices in s, not in t.
+    Let's also define y_ib, the depth of s_ib; d_i, the depth of t_i;
+    w_i, the width of the boundary layer.
+        y_ib = d_i = y_ib-1 + t_i
+        y_ib+1 = d_i + w_i = y_ib-1 + t_i + w_i
+    We want to keep the width of the boundary layer, w_i, constant throughout
+    a single inversion.  Otherwise, we want to pin the absolute depths, y, of
+    all other points in s.  That is, other than y_ib and y_ib+1 for each t_i,
+    the depths, y, are immutable.  However, changing these depth points changes
+    the velocity gradient on either side of them.  Therefore, changing t_i will
+    affect velocities between y_ib-1 < z_a < y_ib+2 (note not inclusive!).
+
+
+    We can define the model card Vsv (m = v(z)) in terms of t as follows:
+      - Each point t_i refers to the thickness of the layer above a boundary
+        layer, model.thickness[model.boundary_inds[i]]
+      - For every point t_i, we define the depth of that point, d_i, as the
+        sum of the thicknesses above it:
+            np.sum(model.thickness[:model.boundary_inds[i] + 1])
+            = np.sum(model.thickness[:model.boundary_inds[i]]) + t_i
+      - As above, we've defined y_ib, y_ib+1, etc
+      - For any depth, z_a, try to find ib s.t. y_b < z_a < y_b+1
+        CONDITIONAL ON this being in the depth range y_ib-1 < z_a < y_ib+2
+            (There may be no such z_a if these z points fall outside of the
+            depth range of interest for this boundary layer, i)
+      - Can then define v_a as
+            v_a = s_b + ((s_b+1 - s_b) / (y_b+1 - y_b) * (z_a - y_b))
+
+    Here, we are looking specifically at the values of m that are deeper than
+    the boundary layer in question, s_ib, that will still be affected by a
+    change to t_i - that is, the values of z between y_ib+1 and y_ib+2.
+    So, from the equation above, sub in b = ib+1
+            v_a = s_ib+1
+                  + ((s_ib+2 - s_ib+1) / (y_ib+2 - y_ib+1) * (z_a - y_ib+1))
+            v_a = s_ib+1
+                  + ((s_ib+2 - s_ib+1) / (y_ib+2 - (y_ib-1 + t_i + w_i)
+                     * (z_a - (y_ib-1 + t_i + w_i)))
+
+    In terms of the partial derivative (via the chain rule & product rule):
+            d(v_a)/d(t_i) = ((s_ib+2 - s_ib+1) * (z_a - y_ib+2))
+                            / (t_i - y_ib+2 + y_ib-1 + w_i)^2
+
+    DERIVATION BREAK
+    For the purposes of deriving this, let's simplify terms a little bit.
+        a = s_ib+2 - s_ib+1
+        b = z_a - y_ib-1 - w_i
+        c = y_ib+2 - y_ib-1 - w_i
+        x = t_i
+
+    Our equation is now
+        d(v_a)/dx = d/dx (s_ib+1 + a * (b-x) / (c-x))
+                  = d/dx (a/(c-x) * (b-x)/(c-x))
+                  = d/dx (ab/(c-x) - ax/(c-x))
+
+    The chain rule is d/dx (f(g(x)) = f'(g(x))g'(x))
+        d/dx (ab/(c-x)):     g(x) = c-x      g'(x) = -1
+                             f(y) = ab/y     f'(y) = -ab/y^2
+        d/dx (ab/(c-x)) = ab/(c-x)^2
+
+    The product rule is d/dx (h(x)j(x)) = h'(x)j(x) + h(x)j'(x)
+        d/dx (-ax/(c-x)):   h(x) = -ax      h'(x) = -a
+                            j(x) = 1/(c-x)  j'(x) = -1/(c-x)^2
+        d/dx (-ax/(c-x)) = -a/(c-x) + ax/(c-x)^2
+                         = (-a(c-x) + ax)/(c-x)^2
+                         = -ac/(c-x)^2
+
+    The total derivative is therefore
+        d(v_a)/dx = ab/(c-x)^2 - ac/(c-x)^2
+                  = a(b-c)/(c-x)^2
+                  = a(b-c)/(x-c)^2
+
+                  = (s_ib+2 - s_ib+1) * (z_a - y_ib+2)
+                    / (t_i - y_ib+2 + y_ib-1 + w_i)^2
+
+    BACK TO THE REAL DOCSTRING
+
+    Here, we are calculating this one layer at a time, with the loop in
+    the calling function - passing the index, i, in as an argument.  This fills
+    some of a single column of dm_dt_mat ([dm_0/dt_i; ...; dm_N/dt_i]),
+    although most of these values will be zero.
+
+    Arguments:
+        model:
+            - define_models.InversionModel
+            - Units:    seismological (km/s and km)
+            - Model in layout ready for easy conversion to column vector
+              to be used in least squares inversion.
+        i:
+            - int
+            - Units:    n/a
+            - Index in InversionModel for which we are calculating the column
+              of partial derivatives.
+        depth:
+            - (n_card_depths, ) np.array
+            - Units:    kilometres
+            - Depth vector for MINEOS kernel.
+        dm_dt_mat:
+            - (n_card_depths, n_boundary_layers) np.array
+            - Units:    assumes seismological (km/s, km)
+            - Partial derivative matrix of dm/dt that we are filling in a bit
+              at a time.
+
+    Returns:
+        dm_dt_mat:
+            - (n_card_depths, n_boundary_layers) np.array
+            - Units:    assumes seismological (km/s, km)
+            - Partial derivative matrix of dm/dt with a few more values filled
+              in - specifically, those in the 'i'th column (for model parameter
+              t_i) in rows corresponding to depths between y_ib-1 and y_ib.
+
+    """
+    # s_ib_minus_1 is the velocity at the top of the model layer above this
+    # s_ib is the velocity at the top of the boundary, model.boundary_inds[i]
+    # s_ib_plus_1 is the velocity at the bottom of the boundary
+    # s_ib_plus_2 is the velocity at the bottom of the layer below the boundary
+    # ((s_ib+2 - s_ib+1) * (z_a - y_ib+2))
+    #                 / (t_i - y_ib+2 + y_ib-1 + w_i)^2
+
+    ib = model.boundary_inds[i]
+    t_i = model.thickness[ib]
+    w_i = model.thickness[ib + 1]
+
+    y_ib_minus_1 = np.sum(model.thickness[:ib])
+    y_ib_plus_1 = np.sum(model.thickness[:ib + 2])
+    y_i_plus_2 = np.sum(model.thickness[:i_b + 3])
+
+    d_inds, = np.where(np.logical_and(y_i_plus_1 <= depth, depth < y_ib_plus_2))
+
+    for i_d in d_inds:
+        dm_dt_mat[i_d, i] = (
+            (model.vsv[ib + 2] - model.vsv[ib + 1]) * (depth[i_d] - y_ib_plus_2)
+            / (t_i - (y_ib_plus_2 - y_ib_minus_1 - w_i))^2
+        )
+
+    return dm_dt_mat
 
 
 def _build_data_misfit_matrix(data, model, m0, G):
@@ -721,7 +1029,7 @@ def _build_data_misfit_matrix(data, model, m0, G):
 
     return data_misfit
 
-def _build_weighting_matrices(data:ObsPhaseVelocity, m0:np.array,
+def _build_weighting_matrices(data:surface_waves.ObsPhaseVelocity, m0:np.array,
                               layers:ModelLayerIndices):
     """ Build all of the weighting matrices.
 
