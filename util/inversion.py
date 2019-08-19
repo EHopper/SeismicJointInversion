@@ -187,7 +187,8 @@ def _build_model_vector(model:define_models.InversionModel,
 
 
 def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
-                                      model:define_models.InversionModel):
+                                      model:define_models.InversionModel,
+                                      setup_model:define_models.SetupModel):
     """ Make partial derivative matrix, G, by stacking the Frechet kernels.
 
     Build the G matrix.
@@ -221,6 +222,12 @@ def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
             - define_models.InversionModel
             - Units:    seismological (km/s, km)
             - Current iteration of velocity (Vsv) model
+        setup_model:
+            - define_models.SetupModel
+            - Units:    seismological (km/s, km)
+            - Initial model constraints, including fixed parameters describing
+              the relationship between Vsv and other model parameters used
+              by MINEOS.
 
     Returns:
         G_inversion_model:
@@ -247,7 +254,7 @@ def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
     dvsv_dp_mat = _convert_to_model_kernels(kernels['z'].unique(), model)
     # Frechet kernels cover Vsv, Vsh, Vpv, Vph, Eta.  We assume that eta is
     # kept constant, and all of the others are linearly dependent on Vsv.
-    dm_dp_mat = _scale_dvsv_dp_to_other_variables(dvsv_dp_mat)
+    dm_dp_mat = _scale_dvsv_dp_to_other_variables(dvsv_dp_mat, setup_model)
     G_inversion_model = np.matmul(G_MINEOS, dm_dp_mat)
 
     return G_inversion_model
@@ -976,7 +983,8 @@ def _convert_kernels_d_deeperm_by_d_t(model:define_models.InversionModel,
 
     return dm_dt_mat
 
-def _scale_dvsv_dp_to_other_variables(dvsv_dp_mat:np.array):
+def _scale_dvsv_dp_to_other_variables(dvsv_dp_mat:np.array,
+                                      setup_model:define_models.SetupModel):
     """ Use scaling relatioships in setup_model to define other partials.
 
     Here, we assume that there is a constant Vsv/Vsh, Vpv/Vph, Vpv/Vsv, eta.
@@ -986,15 +994,21 @@ def _scale_dvsv_dp_to_other_variables(dvsv_dp_mat:np.array):
         d(c) / d(p)  = d(c) / d(other) * d(other) / d(vsv) * d(vsv) / d(p)
 
     Given we scale linearly between Vsv and all the other velocities
-    (Vsh, Vpv, Vph),    d(other) / d(vsv) = 1.
+    (Vsh, Vpv, Vph),        other = constant * vsv
+                            d(other) / d(vsv) = constant
 
     For eta, as we fix this to be constant,     d(other) / d(vsv) = 0.
 
     Given these simplistic assumptions (for now!?), this is a super easy vstack.
+    The G_MINEOS is ordered (vsv, vsh, vpv, vph, eta).
     """
 
     return np.vstack((
-                npmatlib.repmat(dvsv_dp_mat, 4, 1),
+                dvsv_dp_mat,
+                dvsv_dp_mat / setup_model.vsv_vsh_ratio,
+                dvsv_dp_mat * setup_model.vpv_vsv_ratio,
+                dvsv_dp_mat
+                    * setup_model.vpv_vsv_ratio / setup_model.vpv_vph_ratio,
                 np.zeros_like(dvsv_dp_mat)
     ))
 
