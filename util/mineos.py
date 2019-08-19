@@ -189,7 +189,7 @@ class RayleighKernels(typing.NamedTuple):
 def run_mineos_and_kernels(parameters:RunParameters, periods:np.array,
                            card_name:str):
 
-    ph_vel, gr_vel, n_runs = run_mineos(parameters, periods, card_name)
+    ph_vel, n_runs = run_mineos(parameters, periods, card_name)
     kernels = run_kernels(parameters, periods, card_name, n_runs)
 
     return ph_vel, kernels
@@ -201,7 +201,8 @@ def run_kernels(parameters:RunParameters, periods:np.array,
     execfile = _write_kernel_files(parameters, periods, save_name, n_runs)
     _run_execfile(execfile)
 
-    kernels = _read_kernels()
+    kernels = _read_kernels(save_name, periods)
+    kernels['type'] = parameters.Rayleigh_or_Love
 
     return kernels
 
@@ -243,9 +244,9 @@ def run_mineos(parameters:RunParameters, periods:np.array,
     execfile, qfile = _write_q_correction(parameters, save_name, l_run)
     _run_execfile(execfile)
 
-    phase_vel, group_vel = _read_qfile(qfile, periods)
+    phase_vel = _read_qfile(qfile, periods)
 
-    return phase_vel, group_vel, n_runs
+    return phase_vel, n_runs
 
 
 
@@ -544,7 +545,7 @@ echo "Done stripping, now calculating tables" > {0}.log
 !
 #
 echo "======================" > {0}.log
-echo "Creating branch file"" > {0}.log
+echo "Creating branch file" > {0}.log
 #
 {1}/plot_wk <<! >> {0}.log
 table {0}.table_hdr
@@ -557,7 +558,7 @@ quit
 !
 #
 echo "======================" > {0}.log
-echo "Making frechet phV kernels binary"" > {0}.log
+echo "Making frechet phV kernels binary" > {0}.log
 #
 rm {0}.cvfrechet
 {1}/frechet_cv <<! >> {0}.log
@@ -600,11 +601,20 @@ echo "Writing phV kernel files for each period" > {0}.log
 
     return execfile
 
-def _read_kernels(kernelfile):
+def _read_kernels(save_name, periods):
     """
     """
-    kf = pd.read_csv(kernelfile, sep='\s+', header=None)
-    kf.columns = ['r', 'vsv', 'vpv', 'vsh', 'vph', 'eta', 'rho']
-    kf['z'] = 6371000 - df['r']
+    kernels = pd.DataFrame([])
 
-    return kf
+    for period in periods:
+        kernelfile = '{0}_cvfrechet_{1:.1f}s'.format(save_name, period)
+        kf = pd.read_csv(kernelfile, sep='\s+', header=None)
+        kf.columns = ['r', 'vsv', 'vpv', 'vsh', 'vph', 'eta', 'rho']
+        kf['z'] = 6371 - kf['r'] * 1e-3
+        kf['period'] = period
+        kf = kf[::-1]
+        kernels = kernels.append(kf)
+
+    kernels = kernels[['z', 'period', 'vsv', 'vpv', 'vsh', 'vph', 'eta', 'rho']]
+
+    return kernels

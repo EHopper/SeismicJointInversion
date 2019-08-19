@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 
 from util import matlab
-from util import define_earth_model
+from util import define_models
 from util import mineos
 from util import surface_waves
 
@@ -132,12 +132,19 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     """
 
     # Build all of the inputs to the damped least squares
+    # Run MINEOS to get phase velocities and kernels
     mineos_model = define_models.convert_inversion_model_to_mineos_model(
         model, setup_model
     )
-    rayleigh_kernels = _calculate_Frechet_kernels(mineos_model)
-    m0 = _build_model_vector(model, depth)
-    G = _build_partial_derivatives_matrix(rayleigh_kernels, model)
+    # Can vary other parameters in MINEOS by putting them as inputs to this call
+    # e.g. defaults include l_min, l_max; qmod_path; phase_or_group_velocity
+    params = mineos.RunParameters(freq_max = 1000 / min(periods) + 1)
+    ph_vel, kernels = mineos.run_mineos_and_kernels(params, periods,
+                                                    setup_mode.id)
+    kernels = kernels[kernels['z'] <= setup_model.depth_limits[1]]
+
+    p = _build_model_vector(model)
+    G = _build_partial_derivatives_matrix(kernels, model)
     d = _build_data_misfit_matrix(data, model, m0, G)
 
     # Build all of the weighting functions for damped least squares
@@ -150,151 +157,35 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
 
     return _build_earth_model_from_vector(model_new)
 
-def _calculate_Frechet_kernels(model:define_models.InversionModel,
-                               ) -> (mineos.RayleighKernels,
-                                                   np.array):
-    """ Call to MINEOS, updating Frechet kernels at every model iteration.
 
-    Note that MINEOS works in SI units, so need to convert depth from
-    metres to kilometres.
+def _build_model_vector(model:define_models.InversionModel,
+                        ) -> (np.array):
+    """ Make model into column vector [s; t].
 
-    Arguments
+    Arguments:
         model:
             - define_models.InversionModel
             - Units:    seismological (km/s, km)
-            - Input velocity model in a format that is easy to convert to p,
-              the model column vector used in the inversion.
-        max_depth:
-            - float
-            - Units:    kilometres
-            - Depth below which to crop off the Frechet kernels
-            - i.e. do not invert for Earth structure below this depth.
-
-    Returns
-        rayleigh_kernels:
-            - mineos.RayleighKernels
-        (love_kernels: LoveKernels
-            - mineos.LoveKernels
-            - For now, don't actually return these)
-        depth:
-            - (n_depth_points, ) np.array
-            - Units:    kilometres
-            - Vector of depth (km) that is the same as in the loaded kernels.
-    """
-
-    if max_depth is None:
-        max_depth = np.sum(model.thickness)
-
-    file_name = './mineos_inputs/frechet_kernels.csv'
-    frechet = pd.read_csv(file_name, ',\s+', engine='python')
-
-    frechet['D_km'] = frechet['Depth'] / 1e3 # metres to km
-
-    rayleigh_kernels = mineos.RayleighKernels(
-        period = np.array(_crop(frechet['Period'], frechet['D_km'], max_depth)),
-        depth = np.array(_crop(frechet['D_km'], frechet['D_km'], max_depth)),
-        vsv = np.array(_crop(frechet['Vsv'], frechet['D_km'], max_depth)),
-        vpv = np.array(_crop(frechet['Vpv'], frechet['D_km'], max_depth)),
-        vph = np.array(_crop(frechet['Vph'], frechet['D_km'], max_depth)),
-        eta = np.array(_crop(frechet['Eta'], frechet['D_km'], max_depth)),
-    )
-
-
-    # love_kernels = mineos.LoveKernels(
-    #     period = np.array(_crop(frechet['Period'], frechet['D_km'], max_depth)),
-    #     depth = np.array(_crop(frechet['D_km'], frechet['D_km'], max_depth)),
-    #     vsv = np.array(_crop(frechet['Vsv'], frechet['D_km'], max_depth)),
-    #     vsh = np.array(_crop(frechet['Vsh'], frechet['D_km'], max_depth)),
-    # )
-
-    depth = (rayleigh_kernels.depth[rayleigh_kernels.period
-                                    == rayleigh_kernels.period[0]])
-
-    return rayleigh_kernels, depth
-
-def _crop(field, field_to_crop_by, max_value):
-    """ Crop one field according to the maximum value of a second field """
-
-    return field[field_to_crop_by < max_value]
-
-
-def _build_model_vector(model:define_earth_model.EarthModel,
-                        depth:np.array) -> (np.array):
-    """ Make model into column vector n_depth_points*n_model_parameters x 1.
-
-    Arguments:
-        model:
-            - define_earth_model.EarthModel
-            - Units:    seismological, so km/s for velocities
-            - Input Vs, Vp model.
-        depth:
-            - (n_depth_points, ) np.array
-            - Units:    kilometres
-            - This is a non-MINEOS workaround to make sure the depth vectors
-              are the same
+            - Input Vs model
 
     Returns:
-        m0:
-            - (n_model_points, 1) np.array
-            - Units:    seismological, so km/s for velocities,
-                        dimensionless for eta
-            - Vsv, Vsh, Vpv, Vph, eta model stacked on top of each other.
-            - N.B. n_model_points = n_depth_points * n_model_parameters
+        p:
+            - (n_depth points + n_boundary_layers, 1) np.array
+            - Units:    seismological, so km/s for velocities (s),
+                        km for layer thicknesses (t)
+            - Inversion model, p, is made up of velocities defined at various
+              depths (s) and thicknesses for the layers above boundary layers
+              of interest (t), i.e. controlling the depth of e.g. Moho, LAB
+            - All other thicknesses are either fixed, or are dependent only
+              on the variation of thicknesses, t
+            - This model, p, ONLY includes the parameters that we are inverting
+              for - it is not a complete description of vs(z)!
     """
 
-    # Find depth vector from kernels and interpolate model over it
-    depth = _make_2D(depth)
-
-    vsv = _interpolate_earth_model_parameter(depth, model, 'vs')
-    vsh = _interpolate_earth_model_parameter(depth, model, 'vs')
-    vpv = _interpolate_earth_model_parameter(depth, model, 'vp')
-    vph = _interpolate_earth_model_parameter(depth, model, 'vp')
-    eta = np.ones_like(depth)
-
-    return np.vstack((vsv, vsh, vpv, vph, eta))
-
-def _make_2D(x:np.array) -> np.array:
-    """ Turn a 1D numpy array into a column vector. """
-
-    return x[np.newaxis].T
-
-def _interpolate_earth_model_parameter(new_depth:np.array,
-                                       model:define_earth_model.EarthModel,
-                                       field_str:str) -> np.array:
-    """ Convert from EarthModel layout and interpolate.
-
-    Arguments:
-        new_depth:
-            - (n_depth_points, 1) np.array
-            - Units:    kilometres
-            - Depth vector over which to interpolate EarthModel parameter.
-            - Shape of this vector, i.e. a column, is very important!
-              np.interp will generate vectors of the same shape.
-        model:
-            - define_earth_model.EarthModel
-            - Units:    seismological (e.g. km not m)
-            - Input EarthModel.
-        field_str:
-            - str
-            - Name of the parameter (field in model) to be interpolated.
-
-    Returns:
-        new_field:
-            - (n_depth_points, 1) np.array
-            - Units:    as units of field in input model.
-            - Vector of model parameter interpolated onto new_depth and ready
-              to be vertically stacked into m0.
+    return np.vstack((model.vsv, model.thickness[model.boundary_inds]))
 
 
-    """
-
-    depth, field = define_earth_model._convert_earth_model(model, field_str)
-    new_field = np.interp(new_depth, depth, field)
-
-    return new_field
-
-
-def _build_partial_derivatives_matrix(rayleigh:mineos.RayleighKernels,
+def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
                                       model:define_models.InversionModel):
     """ Make partial derivative matrix, G, by stacking the Frechet kernels.
 
@@ -336,35 +227,35 @@ def _build_partial_derivatives_matrix(rayleigh:mineos.RayleighKernels,
 
     """
 
-    periods = np.unique(rayleigh.period)
+    periods = np.unique(kernels['period'])
 
-    G_Rayleigh = _hstack_frechet_kernels(rayleigh, periods[0])
+    G_Rayleigh = _hstack_frechet_kernels(kernels, periods[0])
     # G_Love = _hstack_frechet_kernels(love, periods[0])
     for i_p in range(1,len(periods)):
         G_Rayleigh = np.vstack((G_Rayleigh,
-                               _hstack_frechet_kernels(rayleigh, periods[i_p])))
+                               _hstack_frechet_kernels(kernels, periods[i_p])))
         # G_Love = np.vstack((G_Love,
         #                     _hstack_frechet_kernels(love, periods[i_p])))
 
-    # surface_waves code only calculates Rayleigh phv
+    # G_MINEOS is dc/dm matrix
     G_MINEOS = G_Rayleigh #np.vstack((G_Love, G_Rayleigh))
 
     # Convert to kernels for the model parameters we are inverting for
-    G_inversion_model = _convert_to_model_kernels(G_MINEOS, rayleigh.depth,
-                                                  model)
+    dm_dp_mat = _convert_to_model_kernels(kernels['z'].unique(), model)
+    G_inversion_model = np.matmul(G_MINEOS, dm_dp_mat)
 
     return G_inversion_model
 
 
-def _hstack_frechet_kernels(kernel, period:float):
+def _hstack_frechet_kernels(kernels, period:float):
     """ Append all of the relevent Frechet kernels into a row of the G matrix.
 
     Different parameters are of interest for Rayleigh (Vsv, Vpv, Vph, Eta)
     and Love (Vsv, Vsh) waves.
 
     Arguments:
-        kernel:
-            - mineos.RayleighKernels or mineos.LoveKernels
+        kernels:
+            - pd.DataFrame
             - Frechet kernels across all periods
         period:
             - float
@@ -386,23 +277,23 @@ def _hstack_frechet_kernels(kernel, period:float):
     #       units (i.e. m/s not km/s), multiply all kernels (including eta)
     #       by 1e3.  Even though MINEOS requires SI input, the kernel output
     #       assumes seismological (km/s) units!
-    vsv = kernel.vsv[kernel.period == period]
+    vsv = kernels.vsv[kernels.period == period]
 
-    if kernel.type == 'rayleigh':#isinstance(kernel, mineos.RayleighKernels):
+    if kernels['type'].iloc[0] == 'Rayleigh':#isinstance(kernel, mineos.RayleighKernels):
         vsh = np.zeros_like(vsv)
-        vpv = kernel.vpv[kernel.period == period]
-        vph = kernel.vph[kernel.period == period]
-        eta = kernel.eta[kernel.period == period]
+        vpv = kernels.vpv[kernels.period == period]
+        vph = kernels.vph[kernels.period == period]
+        eta = kernels.eta[kernels.period == period]
 
-    if kernel.type == 'love':#isinstance(kernel, mineos.LoveKernels):
-        vsh = kernel.vsh[kernel.period == period]
+    if kernels['type'].iloc[0]  == 'Love':#isinstance(kernel, mineos.LoveKernels):
+        vsh = kernels.vsh[kernels.period == period]
         vpv = np.zeros_like(vsv)
         vph = np.zeros_like(vsv)
         eta = np.zeros_like(vsv)
 
     return np.hstack((vsv, vsh, vpv, vph, eta))
 
-def _convert_to_model_kernels(G_MINEOS):
+def _convert_to_model_kernels(depth, model):
     """ Convert from Frechet kernels as function of v(z) to function of m0.
 
     The Frechet kernels from MINEOS are given at the same depths as those in
@@ -455,14 +346,6 @@ def _convert_to_model_kernels(G_MINEOS):
     scaling between them.
 
     Arguments:
-        G_MINEOS:
-            - (n_Love_periods + n_Rayleigh_periods, n_card_depths) np.array
-            - Units:    assumes velocities in km/s
-            - Partial derivative matrix is of the format described earlier in
-              the docstring, stacking the Love and Rayleigh kernels vertically
-              on top of each other with rows corresponding to different periods.
-            - For now, I have set this to only the Rayleigh wave kernels -
-              n_Love_periods = 0.
         depth:
             - (n_card_depths, ) np.array
             - Units:    kilometres
@@ -486,13 +369,14 @@ def _convert_to_model_kernels(G_MINEOS):
                 i.e.    t = model.thickness[model.boundary_inds]
 
     Returns:
-        G_inversion_model:
-            - (n_Love_periods + n_Rayleigh_periods,
+        dm_dp_mat:
+            - (n_MINEOS_model_points,
                n_inversion_model_depths + n_boundary_layers) np.array
             - Units:    seismological (i.e. vsv in km/s, thickness in km)
-            - This is dc/dp, where p = [s; t], s = vsv defined at a series of
+            - This is dm/dp, where p = [s; t], s = vsv defined at a series of
               depth points and t = the thickness of the layer overlying a
-              boundary layer (and thus controlling its depth).
+              boundary layer (and thus controlling its depth), and m is the
+              model that corresponds to the MINEOS kernels.
 
 
     """
@@ -515,7 +399,7 @@ def _convert_to_model_kernels(G_MINEOS):
         )
 
     # Now, do dm/dt column by column
-    for i in range(model.t.size):
+    for i in range(model.boundary_inds.size):
         dm_dt_mat = _convert_kernels_d_shallowerm_by_d_t(
             model, i, depth, dm_dt_mat
         )
@@ -526,9 +410,9 @@ def _convert_to_model_kernels(G_MINEOS):
             model, i, depth, dm_dt_mat
         )
 
-    G_inversion_model = np.hstack((dm_ds_mat, dm_d_mat))
+    dm_dp_mat = np.hstack((dm_ds_mat, dm_d_mat))
 
-    return G_inversion_model
+    return dm_dp_mat
 
 
 def _convert_kernels_d_shallowerm_by_d_s(model:define_models.InversionModel,
@@ -806,13 +690,13 @@ def _convert_kernels_d_shallowerm_by_d_t(model:define_models.InversionModel,
     t_i = model.thickness[ib]
 
     y_ib_minus_1 = np.sum(model.thickness[:ib])
-    y_ib = np.sum(model.thickness[:i_b + 1])
+    y_ib = np.sum(model.thickness[:ib + 1])
 
     d_inds, = np.where(np.logical_and(y_ib_minus_1 < depth, depth < y_ib))
 
     for i_d in d_inds:
         dm_dt_mat[i_d, i] = -(
-            ((model.s[i_b] - model.s[i_b - 1]) * (depth[i_d] - y_i_minus_1))
+            ((model.vsv[ib] - model.vsv[ib - 1]) * (depth[i_d] - y_ib_minus_1))
             / t_i^2
         )
 
@@ -921,7 +805,7 @@ def _convert_kernels_d_withinboundarym_by_d_t(
 
     for i_d in d_inds:
         dm_dt_mat[i_d, i] = -(
-            (model.s[i_b + 1] - model.s[i_b])
+            (model.vsv[i_b + 1] - model.vsv[i_b])
             / w_i
         )
 
@@ -1073,11 +957,11 @@ def _convert_kernels_d_deeperm_by_d_t(model:define_models.InversionModel,
     y_ib_plus_1 = np.sum(model.thickness[:ib + 2])
     y_i_plus_2 = np.sum(model.thickness[:i_b + 3])
 
-    d_inds, = np.where(np.logical_and(y_i_plus_1 <= depth, depth < y_i_plus_2))
+    d_inds, = np.where(np.logical_and(y_i_plus_1 <= depth, depth < y_ib_plus_2))
 
     for i_d in d_inds:
         dm_dt_mat[i_d, i] = (
-            (model.s[i_b + 2] - model.s[i_b + 1]) * (depth[i_d] - y_i_plus_2)
+            (model.vsv[ib + 2] - model.vsv[ib + 1]) * (depth[i_d] - y_ib_plus_2)
             / (t_i - (y_ib_plus_2 - y_ib_minus_1 - w_i))^2
         )
 
@@ -1145,7 +1029,7 @@ def _build_data_misfit_matrix(data, model, m0, G):
 
     return data_misfit
 
-def _build_weighting_matrices(data:ObsPhaseVelocity, m0:np.array,
+def _build_weighting_matrices(data:surface_waves.ObsPhaseVelocity, m0:np.array,
                               layers:ModelLayerIndices):
     """ Build all of the weighting matrices.
 
