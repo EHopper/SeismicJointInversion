@@ -242,7 +242,8 @@ def setup_starting_model(setup_model):
 
         for n in range(n_layers_above):
             vsv += [vsv[-1] + vsv_grad_above * thickness_layers_above]
-        vsv += [vsv_top_layer_i, vsv_base_layer_i, vsv_base_layer_i]
+        vsv += [vsv_top_layer_i, vsv_base_layer_i,
+            vsv_base_layer_i + vsv_grad_above * thickness_layers_above]
 
         thickness += (
             [thickness_layers_above] * n_layers_above
