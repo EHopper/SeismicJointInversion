@@ -15,6 +15,7 @@ this indicates how it should be done, not that it is being done here.
 #import collections
 import typing
 import numpy as np
+import numpy.matlib as npmatlib
 import pandas as pd
 
 from util import matlab
@@ -212,18 +213,20 @@ def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
     n_Love_periods = 0, i.e. there are no rows in G for the T_*** kernels.
 
     Arguments:
-        rayleigh:
-            - mineos.RayleighKernels
-        (love:
-            - mineos.LoveKernels
-            - Not currently passed, but if want to use both Rayleigh and Love,
-              easier to pass this in as a separate argument)
+        kernels:
+            - pandas DataFrame
+            - Units:    assumes velocities in km/s
+            - Rayleigh wave kernels calculated in MINEOS
+        model:
+            - define_models.InversionModel
+            - Units:    seismological (km/s, km)
+            - Current iteration of velocity (Vsv) model
 
     Returns:
         G_inversion_model:
-            - (, ) np.array
-            - Units:
-            -
+            - (n_periods, n_inversion_model_depths + n_boundary_layers) np.array
+            - Units:    assumes velocities in km/s
+            - Partial derivatives matrix for use in inversion.
 
     """
 
@@ -241,7 +244,10 @@ def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
     G_MINEOS = G_Rayleigh #np.vstack((G_Love, G_Rayleigh))
 
     # Convert to kernels for the model parameters we are inverting for
-    dm_dp_mat = _convert_to_model_kernels(kernels['z'].unique(), model)
+    dvsv_dp_mat = _convert_to_model_kernels(kernels['z'].unique(), model)
+    # Frechet kernels cover Vsv, Vsh, Vpv, Vph, Eta.  We assume that eta is
+    # kept constant, and all of the others are linearly dependent on Vsv.
+    dm_dp_mat = _scale_dvsv_dp_to_other_variables(dvsv_dp_mat)
     G_inversion_model = np.matmul(G_MINEOS, dm_dp_mat)
 
     return G_inversion_model
@@ -969,6 +975,28 @@ def _convert_kernels_d_deeperm_by_d_t(model:define_models.InversionModel,
         )
 
     return dm_dt_mat
+
+def _scale_dvsv_dp_to_other_variables(dvsv_dp_mat:np.array):
+    """ Use scaling relatioships in setup_model to define other partials.
+
+    Here, we assume that there is a constant Vsv/Vsh, Vpv/Vph, Vpv/Vsv, eta.
+    This allows us to construct a full dm/dp matrix by just scaling up the
+    values that we have calculated for dvsv/dp.
+
+        d(c) / d(p)  = d(c) / d(other) * d(other) / d(vsv) * d(vsv) / d(p)
+
+    Given we scale linearly between Vsv and all the other velocities
+    (Vsh, Vpv, Vph),    d(other) / d(vsv) = 1.
+
+    For eta, as we fix this to be constant,     d(other) / d(vsv) = 0.
+
+    Given these simplistic assumptions (for now!?), this is a super easy vstack.
+    """
+
+    return np.vstack((
+                npmatlib.repmat(dvsv_dp_mat, 4, 1),
+                np.zeros_like(dvsv_dp_mat)
+    ))
 
 
 def _build_data_misfit_matrix(data, model, m0, G):
