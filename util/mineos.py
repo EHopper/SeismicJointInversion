@@ -205,8 +205,7 @@ def run_kernels(parameters:RunParameters, periods:np.array,
     kernels['type'] = parameters.Rayleigh_or_Love
 
     return kernels
-
-
+    
 
 def run_mineos(parameters:RunParameters, periods:np.array,
                card_name:str) -> np.array:
@@ -222,26 +221,31 @@ def run_mineos(parameters:RunParameters, periods:np.array,
     n_runs = 0
     l_run = 0
     l_min = parameters.l_min
-
     while min_calculated_period > min_desired_period:
         print('Run {:3.0f}, min. l {:3.0f}'.format(n_runs, l_min))
         execfile = _write_run_mineos(parameters, save_name, l_run, l_min)
-        new_min_T, l_run, l_min = (
-            _run_mineos(parameters, save_name, l_run, l_min)
+        _run_execfile(execfile)
+
+        # Find parameters for re-running
+        # Note l_run will only increase if the above run was at least
+        # partially successful - c.f. n_runs which increments every time (below)
+        min_calculated_period, l_min, l_run = _check_mineos_run(
+            save_name, l_run, l_min, parameters
         )
-        if new_min_T:
-            min_calculated_period = new_min_T
 
         n_runs += 1
         if n_runs > parameters.max_run_N:
             print('Too many tries! Breaking MINEOS eig loop')
             break
 
+    # Recover eig files from mutliple runs
     for run in range(l_run):
+        # l_run is the number of files that need fixing (number of (partially)
+        # successful MINEOS runs).  These are named xxx_0, ..., xxx_[l_run - 1].
         execfile = _write_eig_recover(parameters, save_name, run)
         _run_execfile(execfile)
 
-
+    # Apply Q correction to velocities
     execfile, qfile = _write_q_correction(parameters, save_name, l_run)
     _run_execfile(execfile)
 
@@ -272,24 +276,15 @@ def _write_run_mineos(parameters:RunParameters, save_name:str,
         pass
 
     fid = open(execfile, 'w')
-    fid.write('{}/mineos_nohang << ! > {}\n'.format(params.bin_path, logfile))
+    fid.write('{}/mineos_nohang << ! > {}\n'.format(
+        parameters.bin_path, logfile))
     fid.write('{0}.card\n{0}_{1}.asc\n{0}_{1}.eig\n{0}_{1}.mode\n!'.format(
                 save_name, l_run))
     fid.write
     fid.close()
 
-    _run_execfile(execfile)
+    return execfile
 
-    Tmin, l_last = _check_output([ascfile])
-
-    if not l_last:
-        l_last = l_min + parameters.l_increment_failed
-        #os.remove(eigfile)
-        #os.remove(ascfile)
-    else:
-        l_run += 1
-
-    return Tmin, l_run, l_last + parameters.l_increment_standard
 
 def _write_modefile(modefile, parameters, l_min):
     """
@@ -343,23 +338,42 @@ def _write_modefile(modefile, parameters, l_min):
 
 
 
-def _run_execfile(execfile):
+def _run_execfile(execfile:str):
     """
     """
     subprocess.run(['chmod', 'u+x', './{}'.format(execfile)])
     subprocess.run(['timeout', '120', './{}'.format(execfile)])
 
-def _check_output(ascfiles:list):
 
-    modes = _read_ascfiles(ascfiles)
+def _check_mineos_run(save_name:str, l_run:int, l_min:int,
+    parameters:RunParameters):
+    """ Load in MINEOS output file and work out parameters to rerun if needed.
+
+    Read in ascfile to give the maximum achieved angular order, l (and
+    equivalently, the minimum achieved period, T) in the calculation before
+    it broke or timed out.
+
+    Return the minimum calculated period (to check if the calculations go to
+    high enough frequency) and, if the calculation does need to restart to go
+    to higher frequency, an updated starting angular order, l_min.
+    """
+
+    ascfile = '{0}_{1}.asc'.format(save_name, l_run)
+    modes = _read_ascfiles([ascfile])
 
     if modes.empty:
-        return None, None
+        l_last = l_min + parameters.l_increment_failed
+        os.remove(eigfile)
+        os.remove(ascfile)
+    else:
+        l_run += 1
+        last_fundamental_l = max(modes[(modes['n'] == 0)]['l'])
+        lowest_fundamental_period = min(modes[(modes['n'] == 0)]['T_sec'])
 
-    last_fundamental_l = max(modes[(modes['n'] == 0)]['l'])
-    lowest_fundamental_period = min(modes[(modes['n'] == 0)]['T_sec'])
 
-    return lowest_fundamental_period, last_fundamental_l
+    new_l_min = last_fundamental_l + parameters.l_increment_standard
+
+    return lowest_fundamental_period, new_l_min, l_run
 
 
 def _read_ascfiles(ascfiles:list):
@@ -376,6 +390,8 @@ def _read_ascfiles(ascfiles:list):
     output = pd.DataFrame()
 
     for ascfile in ascfiles:
+        # Find number of lines to skip - interesting output starts after
+        # line labelled 'MODE'
         n_lines = 0
         with open(ascfile, 'r') as fid:
             for line in fid:
@@ -383,8 +399,11 @@ def _read_ascfiles(ascfiles:list):
                 if 'MODE' in line:
                     break
 
-        output = output.append(pd.read_csv(ascfile, sep='\s+',
-                               skiprows=n_lines, header=None))
+        try:
+            output = output.append(pd.read_csv(ascfile, sep='\s+',
+                                   skiprows=n_lines, header=None))
+        except:
+            print(ascfile, ' is empty.')
 
     output.columns = ['n', 'mode', 'l', 'w_rad_per_s', 'w_mHz', 'T_sec',
                           'grV_km_per_s', 'Q', 'RaylQuo']
@@ -447,6 +466,7 @@ def _write_q_correction(params, save_name, l_run):
     fid.write('{}/mineos_qcorrectphv << ! >> {}\n'.format(params.bin_path, logfile))
     fid.write('{0}\n{1}\n'.format(params.qmod_path, qfile))
     for run in range(l_run):
+        print(run)
         fid.write('{}_{}.eig_fix\n'.format(save_name, run))
         if run == 0:
             fid.write('y\n')
