@@ -1,10 +1,111 @@
-def _build_weighting_matrices(data:constraints.Observations, m0:np.array,
+""" Make all of the weighting and damping parameters.
+
+HOO BOY, this is going to need a huge overhaul!!  Currently not useful,
+all formatted for the original (MINEOS) format of the inversion model.
+"""
+
+#import collections
+import typing
+import numpy as np
+import pandas as pd
+
+# =============================================================================
+# Set up classes for commonly used variables
+# =============================================================================
+
+class ModelLayerIndices(typing.NamedTuple):
+    """ Parameters used for smoothing.
+
+    Fields:
+        upper_crust:
+            - (n_depth_points_in_this_layer, ) np.array
+            - Depth indices for upper crust.
+        lower_crust:
+            - (n_depth_points_in_this_layer, ) np.array
+            - Depth indices for lower crust.
+        lithospheric_mantle:
+            - (n_depth_points_in_this_layer, ) np.array
+            - Depth indices for lithospheric mantle.
+        asthenosphere:
+            - (n_depth_points_in_this_layer, ) np.array
+            - Depth indices for asthenosphere.
+
+        discontinuities:
+            - (n_different_layers + 1, ) np.array
+            - Depth indices of model discontinuties, including the surface
+              and the base of the model.
+            - i.e. [0, mid-crustal boundary, Moho, LAB, base of mode]
+
+        depth:
+            - (n_depth_points, ) np.array
+            - Units:    kilometres
+            - Depth vector for the whole model space.
+        layer_names:
+            - list
+            - All layer names in order of increasing depth.
+
+    """
+
+    upper_crust: np.array
+    lower_crust: np.array
+    lithospheric_mantle: np.array
+    asthenosphere: np.array
+    discontinuties: np.array
+    depth: np.array
+    layer_names: list = ['upper_crust', 'lower_crust',
+                         'lithospheric_mantle', 'asthenosphere']
+
+class ModelLayerValues(typing.NamedTuple):
+    """ Values that are layer-specific.
+
+    All fields should be an (n_values_in_layer x n_unique_vals_by_model_param)
+    array, where
+        n_values_in_layer:
+            Can be 1 or ModelLayerIndices.[field_name].size.
+                i.e. constant within a layer, or specified for each depth point
+                     in that layer.
+        n_vals_by_model_param:
+            Can be 1 or the number of model parameters (5).
+                i.e. single value across all model parameters, or the value
+                     is dependent on which model parameter it is being
+                     applied to.
+
+
+    Fields:
+        upper_crust:
+            - (n_values_in_layer, n_vals_by_model_param) np.array
+        lower_crust:
+            - (n_values_in_layer, n_vals_by_model_param) np.array
+        lithospheric_mantle:
+            - (n_values_in_layer, n_vals_by_model_param) np.array
+        asthenosphere:
+            - (n_values_in_layer, n_vals_by_model_param) np.array
+
+    """
+
+    upper_crust: np.array
+    lower_crust: np.array
+    lithospheric_mantle: np.array
+    asthenosphere: np.array
+
+
+def build_weighting_damping(data:constraints.Observations, m0:np.array):
+    """
+    """
+
+    W = _build_error_weighting_matrix(data)
+    layer_indices = _set_layer_indices(m0)
+    D_mat, d_vec, H_mat, h_vec = _build_weighting_matrices(data, layer_indices)
+
+    return W, D_mat, d_vec, H_mat, h_vec
+
+def _build_weighting_matrices(data:cconstraints.Observations, m0:np.array,
                               layers:ModelLayerIndices):
     """ Build all of the weighting matrices.
 
     Arguments:
         data:
-            - surface_waves.ObsPhaseVelocity
+            - cconstraints.Observations
             - Observed phase velocity data
             - data.c is (n_periods, ) np.array
         m0:

@@ -21,87 +21,7 @@ from util import define_models
 from util import mineos
 from util import constraints
 from util import partial_derivatives
-
-
-# =============================================================================
-# Set up classes for commonly used variables
-# =============================================================================
-
-class ModelLayerIndices(typing.NamedTuple):
-    """ Parameters used for smoothing.
-
-    Fields:
-        upper_crust:
-            - (n_depth_points_in_this_layer, ) np.array
-            - Depth indices for upper crust.
-        lower_crust:
-            - (n_depth_points_in_this_layer, ) np.array
-            - Depth indices for lower crust.
-        lithospheric_mantle:
-            - (n_depth_points_in_this_layer, ) np.array
-            - Depth indices for lithospheric mantle.
-        asthenosphere:
-            - (n_depth_points_in_this_layer, ) np.array
-            - Depth indices for asthenosphere.
-
-        discontinuities:
-            - (n_different_layers + 1, ) np.array
-            - Depth indices of model discontinuties, including the surface
-              and the base of the model.
-            - i.e. [0, mid-crustal boundary, Moho, LAB, base of mode]
-
-        depth:
-            - (n_depth_points, ) np.array
-            - Units:    kilometres
-            - Depth vector for the whole model space.
-        layer_names:
-            - list
-            - All layer names in order of increasing depth.
-
-    """
-
-    upper_crust: np.array
-    lower_crust: np.array
-    lithospheric_mantle: np.array
-    asthenosphere: np.array
-    discontinuties: np.array
-    depth: np.array
-    layer_names: list = ['upper_crust', 'lower_crust',
-                         'lithospheric_mantle', 'asthenosphere']
-
-class ModelLayerValues(typing.NamedTuple):
-    """ Values that are layer-specific.
-
-    All fields should be an (n_values_in_layer x n_unique_vals_by_model_param)
-    array, where
-        n_values_in_layer:
-            Can be 1 or ModelLayerIndices.[field_name].size.
-                i.e. constant within a layer, or specified for each depth point
-                     in that layer.
-        n_vals_by_model_param:
-            Can be 1 or the number of model parameters (5).
-                i.e. single value across all model parameters, or the value
-                     is dependent on which model parameter it is being
-                     applied to.
-
-
-    Fields:
-        upper_crust:
-            - (n_values_in_layer, n_vals_by_model_param) np.array
-        lower_crust:
-            - (n_values_in_layer, n_vals_by_model_param) np.array
-        lithospheric_mantle:
-            - (n_values_in_layer, n_vals_by_model_param) np.array
-        asthenosphere:
-            - (n_values_in_layer, n_vals_by_model_param) np.array
-
-    """
-
-    upper_crust: np.array
-    lower_crust: np.array
-    lithospheric_mantle: np.array
-    asthenosphere: np.array
-
+from util import weights
 
 
 # =============================================================================
@@ -118,9 +38,9 @@ def run_with_no_inputs():
         boundary_depths=np.array([35., 90]),
         id='test')
 
+    data = constraints.extract_observations(35, -104)
 
-
-    pass
+    return run_inversion(setup_model, data)
 
 
 def run_inversion(setup_model:define_models.SetupModel,
@@ -159,19 +79,17 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     )
     kernels = kernels[kernels['z'] <= setup_model.depth_limits[1]]
 
-    p = _build_model_vector(model)
     G = partial_derivatives._build_partial_derivatives_matrix(kernels, model)
+    p = _build_model_vector(model)
     d = _build_data_misfit_matrix(data, ph_vel_pred, p, G)
 
     # Build all of the weighting functions for damped least squares
-    W = _build_error_weighting_matrix(data)
-    layer_indices = _set_layer_indices(m0)
-    D_mat, d_vec, H_mat, h_vec = _build_weighting_matrices(data, layer_indices)
+    W, D_mat, d_vec, H_mat, h_vec = weights.build_weighting_damping(data, p)
 
     # Perform inversion
-    model_new = _damped_least_squares(m0, G, d, W, D_mat, d_vec, H_mat, h_vec)
+    model_new = _damped_least_squares(p, G, d, W, D_mat, d_vec, H_mat, h_vec)
 
-    return _build_earth_model_from_vector(model_new)
+    return _build_inversion_model_from_model_vector(model_new)
 
 
 def _build_model_vector(model:define_models.InversionModel,
@@ -199,6 +117,35 @@ def _build_model_vector(model:define_models.InversionModel,
     """
 
     return np.vstack((model.vsv, model.thickness[model.boundary_inds]))
+
+def _build_inversion_model_from_model_vector(
+        p:np.array, model:define_models.InversionModel):
+    """ Make column vector, [s; t] into InversionModel format.
+
+    Arguments:
+        model:
+            - define_models.InversionModel
+            - Units:    seismological (km/s, km)
+            - Input Vs model
+        p:
+            - (n_depth points + n_boundary_layers, 1) np.array
+            - Units:    seismological, so km/s for velocities (s),
+                        km for layer thicknesses (t)
+
+    Returns:
+        model:
+            - define_models.InversionModel
+            - Units:    seismological (km/s, km)
+            - Vs model with values updated from p.
+    """
+    new_thickness = model.thickness
+    new_thickness[model.boundary_inds] = p[-2:]
+
+    return define_models.InversionModel(
+                vsv = p[:-2]
+                thickness = new_thickness,
+                boundary_inds = model.boundary_inds,
+    )
 
 
 def _build_data_misfit_matrix(data:np.array, prediction:np.array,
@@ -343,7 +290,3 @@ def _damped_least_squares(m0, G, d, W, D_mat, d_vec, H_mat, h_vec):
     # mest_all = Finv*f;
 
     return new_model
-
-def _build_earth_model_from_vector(model_vector):
-
-    return earth_model
