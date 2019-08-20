@@ -92,9 +92,10 @@ def extract_observations(lat:float, lon:float):
             phv[phv['Period'] == period].copy(), lat, lon
         )
         surface_waves = surface_waves.append(phv.loc[ind])
-    surface_waves.reset_index(drop=True, inplace=True)
+    surface_waves = (surface_waves.sort_values(by=['Period'], ascending=True)
+        .reset_index(drop=True))
 
-    ind = _find_closest_lat_lon(rfs, lat, lon)
+    ind = _find_closest_lat_lon(rfs.copy(), lat, lon)
 
 
     return Observations(
