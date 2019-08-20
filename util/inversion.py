@@ -20,7 +20,8 @@ import pandas as pd
 from util import matlab
 from util import define_models
 from util import mineos
-from util import surface_waves
+from util import constraints
+from util import partial_derivatives
 
 
 # =============================================================================
@@ -107,6 +108,21 @@ class ModelLayerValues(typing.NamedTuple):
 # =============================================================================
 #       Run the Damped Least Squares Inversion
 # =============================================================================
+def run_with_no_inputs():
+
+    setup_model = define_models.SetupModel(
+        depth_limits=np.array([0., 200.]),
+        boundary_vsv=np.array([3.5, 4.0, 4.2, 4.1]),
+        boundary_widths=np.array([5., 10.]),
+        boundary_depth_uncertainty=np.array([3., 10.,]),
+        Moho=(True,0),
+        boundary_depths=np.array([35., 90]),
+        id='test')
+
+
+
+    pass
+
 
 def run_inversion(setup_model:define_models.SetupModel,
                   data:surface_waves.ObsPhaseVelocity,
@@ -144,7 +160,7 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     kernels = kernels[kernels['z'] <= setup_model.depth_limits[1]]
 
     p = _build_model_vector(model)
-    G = _build_partial_derivatives_matrix(kernels, model)
+    G = partial_derivatives._build_partial_derivatives_matrix(kernels, model)
     d = _build_data_misfit_matrix(data, model, m0, G)
 
     # Build all of the weighting functions for damped least squares
