@@ -84,7 +84,9 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     d = _build_data_misfit_matrix(data, ph_vel_pred, p, G)
 
     # Build all of the weighting functions for damped least squares
-    W, D_mat, d_vec, H_mat, h_vec = weights.build_weighting_damping(data, p)
+    W, D_mat, d_vec, H_mat, h_vec = (
+        weights.build_weighting_damping(data, model, p)
+    )
 
     # Perform inversion
     model_new = _damped_least_squares(p, G, d, W, D_mat, d_vec, H_mat, h_vec)
@@ -142,7 +144,7 @@ def _build_inversion_model_from_model_vector(
     new_thickness[model.boundary_inds] = p[-2:]
 
     return define_models.InversionModel(
-                vsv = p[:-2]
+                vsv = p[:-2],
                 thickness = new_thickness,
                 boundary_inds = model.boundary_inds,
     )

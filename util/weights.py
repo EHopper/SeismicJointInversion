@@ -9,6 +9,8 @@ import typing
 import numpy as np
 import pandas as pd
 
+from util import constraints
+
 # =============================================================================
 # Set up classes for commonly used variables
 # =============================================================================
@@ -89,37 +91,34 @@ class ModelLayerValues(typing.NamedTuple):
     asthenosphere: np.array
 
 
-def build_weighting_damping(data:constraints.Observations, m0:np.array):
+def build_weighting_damping(data:constraints.Observations, m:np.array):
     """
     """
 
-    W = _build_error_weighting_matrix(data)
+    W = _build_error_weighting_matrix(data.surface_waves['std'].values)
     layer_indices = _set_layer_indices(m0)
     D_mat, d_vec, H_mat, h_vec = _build_weighting_matrices(data, layer_indices)
 
     return W, D_mat, d_vec, H_mat, h_vec
 
-def _build_weighting_matrices(data:cconstraints.Observations, m0:np.array,
+def _build_weighting_matrices(data:constraints.Observations, m0:np.array,
                               layers:ModelLayerIndices):
     """ Build all of the weighting matrices.
 
     Arguments:
         data:
-            - cconstraints.Observations
+            - constraints.Observations
             - Observed phase velocity data
             - data.c is (n_periods, ) np.array
         m0:
             - (n_model_points, 1) np.array
-            - Units: SI units, i.e. m/s for velocities
-            - Earth model ([Vsv; Vsh; Vpv; Vph; Eta]) in format for
-              calculating the forward problem, G * m0.
+            - n_model points = n_depth points + n_boundary_layers [s; t]
+            - Units: seismological units, i.e. km/s for velocities
+            - Column vector containing parameters to invert for
         layers:
             - ModelLayerIndices
 
     Returns:
-        data_errors:
-            - (n_periods, n_periods) np.array
-            - Units:    km/s
         roughness_mat:
             - (n_depth_points, n_model_points) np.array
         roughness_vec:
@@ -131,8 +130,6 @@ def _build_weighting_matrices(data:cconstraints.Observations, m0:np.array,
 
 
     """
-
-    model_order = {'vsv': 0, 'vsh': 1, 'vpv': 2, 'vph': 3, 'eta': 4}
 
 
     # Minimise second derivative within layers
@@ -183,7 +180,7 @@ def _build_weighting_matrices(data:cconstraints.Observations, m0:np.array,
     ))
 
 
-    return data_errors, roughness_mat, roughness_vec, a_priori_mat, a_priori_vec
+    return roughness_mat, roughness_vec, a_priori_mat, a_priori_vec
 
 def _build_layer_value_vector(values, layers):
     """
@@ -409,17 +406,15 @@ def _pad_constraints(H, n_model_points, start_ind):
 
     return H_pad
 
-def _build_error_weighting_matrix(data):
+def _build_error_weighting_matrix(obs_std):
     """ Build the error weighting matrix from data standard deviation.
 
     This is just a diagonal matrix of the inverse of standard deviation.
 
     Arguments:
-        data:
-            - surface_waves.ObsPhaseVelocity
-            - Observed surface wave information.
-            - Here, we are interested in the standard deviation of the data.
-            - data.std is a (n_periods, ) np.array
+        obs_std:
+            - (n_periods, ) np.array
+            - Observed surface wave standard deviation.
             - If no standard deviation is given, we assume 0.15.
 
     Returns:
@@ -435,7 +430,6 @@ def _build_error_weighting_matrix(data):
     """
 
     # If standard deviation of data is missing (= 0), fill in with guess
-    obs_std = data.std
     obs_std[obs_std == 0] = 0.15
 
 
@@ -458,11 +452,10 @@ def _build_smoothing_constraints(arguments:tuple) -> (np.array, np.array):
     at the boundaries between layers.
 
     Arguments:
-        arguments:
-            - tuple of (layers,)
-
-        arguments[0], or layers:
-            - ModelLayerIndices
+        model:
+            - define_models.InversionModel
+            - model.vsv.size = n_depth_points
+            - model.boundary_inds.size = n_boundary_layers
 
     Returns:
         roughness_mat
@@ -483,15 +476,24 @@ def _build_smoothing_constraints(arguments:tuple) -> (np.array, np.array):
               roughness is set to zero always.
 
     """
-    layers, = arguments
-    n_depth_points = layers.depth.size
+    n_depth_points = model.vsv.size
 
     # Make and edit the banded matrix (roughness equations)
     banded_matrix = _make_banded_matrix(n_depth_points, (1, -2, 1))
     # At all discontinuities (and the first and last layers of the model),
     # set the roughness_matrix to zero
-    for d in layers.discontinuities:
-        banded_matrix[d,:] *= 0
+    # NOTE: given that layer thickness is not equal everywhere, this
+    # version of smoothing is not going to be equal everywhere!
+    do_not_smooth = np.concantenate(
+        (np.array([0, -1]), b.boundary_inds, b.boundary_inds + 1)
+    )
+    banded_matrix[do_not_smooth, :] = 0
+    # Add columns to roughness_matrix to get it into the right shape
+    # These columns can be filled with zeros as they will be mutlipliers
+    # for the parameters controlling layer size
+    roughness_matrix = np.concatenate(
+        (banded_matrix, np.zeros((n_depth_points, model.boundary_inds.size)))
+    )
 
     roughness_vector = np.zeros((n_depth_points, 1))
 
