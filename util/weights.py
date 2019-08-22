@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from util import constraints
+from util import define_models
 
 # =============================================================================
 # Set up classes for commonly used variables
@@ -60,28 +61,23 @@ class ModelLayerIndices(typing.NamedTuple):
 class ModelLayerValues(typing.NamedTuple):
     """ Values that are layer-specific.
 
-    All fields should be an (n_values_in_layer x n_unique_vals_by_model_param)
+    All fields should be an (n_values_in_layer, 1)
     array, where
         n_values_in_layer:
             Can be 1 or ModelLayerIndices.[field_name].size.
                 i.e. constant within a layer, or specified for each depth point
                      in that layer.
-        n_vals_by_model_param:
-            Can be 1 or the number of model parameters (5).
-                i.e. single value across all model parameters, or the value
-                     is dependent on which model parameter it is being
-                     applied to.
 
 
     Fields:
         upper_crust:
-            - (n_values_in_layer, n_vals_by_model_param) np.array
+            - (n_values_in_layer, ) np.array
         lower_crust:
-            - (n_values_in_layer, n_vals_by_model_param) np.array
+            - (n_values_in_layer, ) np.array
         lithospheric_mantle:
-            - (n_values_in_layer, n_vals_by_model_param) np.array
+            - (n_values_in_layer, ) np.array
         asthenosphere:
-            - (n_values_in_layer, n_vals_by_model_param) np.array
+            - (n_values_in_layer, ) np.array
 
     """
 
@@ -91,12 +87,12 @@ class ModelLayerValues(typing.NamedTuple):
     asthenosphere: np.array
 
 
-def build_weighting_damping(data:constraints.Observations, m:np.array):
+def build_weighting_damping(data:constraints.Observations, p:np.array):
     """
     """
 
     W = _build_error_weighting_matrix(data.surface_waves['std'].values)
-    layer_indices = _set_layer_indices(m0)
+    layer_indices = _set_layer_indices(p)
     D_mat, d_vec, H_mat, h_vec = _build_weighting_matrices(data, layer_indices)
 
     return W, D_mat, d_vec, H_mat, h_vec
@@ -133,18 +129,20 @@ def _build_weighting_matrices(data:constraints.Observations, m0:np.array,
 
 
     # Minimise second derivative within layers
-    damping = ModelLayerValues()
-    roughness_mat, roughness_vec = _build_model_weighting_matrices(
-        _build_smoothing_constraints, (layers), ['vsv', 'vsh'],
-        model_order, layers, damping,
+    damping = ModelLayerValues() # of some description!
+    roughness_mat, roughness_vec = _build_smoothing_constraints(model)
+    roughness_mat, roughness_vec = _damp_constraints(
+        roughness_mat, roughness_vec, layers, damping
     )
 
     # Linear constraint equations
     # Damp towards starting model
-    damping = ModelLayerValues()
-    damp_to_m0_mat, damp_to_m0_vec = _build_model_weighting_matrices(
-        _build_constraint_damp_to_m0, (n_depth_points, start_ind, m0),
-        ['vsv', 'vsh', 'eta'], model_order, layers, damping,
+    damping = ModelLayerValues() # of some description!
+    damp_to_m0_mat, damp_to_m0_vec = _build_constraint_damp_to_m0(
+        n_depth_points, start_ind, m0
+    )
+    damp_to_m0_mat, damp_to_m0_vec = _damp_constraints(
+        damp_to_m0_mat, damp_to_m0_vec, layers, damping
     )
     # Damp towards starting Vp/Vs
     damping = ModelLayerValues()
@@ -288,7 +286,7 @@ def _build_model_weighting_matrices(function_name, function_arguments,
     return H_all, h_all
 
 
-def _damp_constraints(H, h, layers, damping, param_ind:int=0):
+def _damp_constraints(H, h, layers, damping):
     """ Apply layer specific damping to H and h.
 
     This is done one model parameter at a time - i.e. assumes that H is only
@@ -298,7 +296,7 @@ def _damp_constraints(H, h, layers, damping, param_ind:int=0):
 
     Arguments:
         H:
-            - (n_constraint_equations, n_depth_points) np.array
+            - (n_constraint_equations, n_model_points) np.array
             - Constraints matrix in H * m = h.
             - Note that this is only n_depth_points NOT n_model_points wide!
               It is assumed that H is input one model parameter at a time.
@@ -310,15 +308,8 @@ def _damp_constraints(H, h, layers, damping, param_ind:int=0):
         damping:
             - ModelLayerValues
             - This has the damping coefficients for this constraint.
-            - Component arrays are (n_values_in_layer, n_vals_by_model_param),
-              so can vary with depth across a layer and be different depending
-              on the model_param.
-        param_ind:
-            - int = 0
-            - This tells us which column in the damping arrays to apply,
-              i.e. which model parameter we are damping.
-            - Default value set to 0 for when input damping array does not
-              have model parameter-specific values.
+            - Component arrays are (n_values_in_layer, ), so can vary with
+              depth across a layer (or have a constant value for that layer).
 
         Returns:
             H:
@@ -341,7 +332,7 @@ def _damp_constraints(H, h, layers, damping, param_ind:int=0):
     #   will return an error. Note that this element-wise behaviour means all
     #   numpy * operations are commutative!
     #   As such, for any c = a * b...
-    #       a.shape | b.shape | d.shape      | Result
+    #       a.shape | b.shape | c.shape      | Result
     # ______________|_________|______________|____________________________
     #       (n,)    | (m,)    | (n==m,)      |  [a_1*b_1, ..., a_n*b_m]
     #       (1, n)  | (m,)*   | (n==m, 1)    |  [[a_1*b_1, ..., a_n*b_m]]
@@ -367,13 +358,14 @@ def _damp_constraints(H, h, layers, damping, param_ind:int=0):
         layer_damping = getattr(damping, layer_name)
 
         # (n_constraint_equations, n_depth_points_in_layer) slice of H
-        #   * (n_depth_points_in_layer, 1) slice of layer_damping
-        # As depth increases by column in H, need to transpose the slice of
-        # layer_damping for the broadcasting to work properly.
-        # For h, depth increases by row, so layer_damping slice is the
-        # correct orientation.
-        H[:, layer_inds] *= layer_damping[:, param_ind].T
-        h[layer_inds] *= layer_damping[:, param_ind]
+        #   * (n_depth_points_in_layer, ) layer_damping
+        # As depth increases by column in H, it will do element-wise
+        # multiplication with layer_damping (which is treated as a row vector)
+        # For h, depth increases by row, so layer_damping is the
+        # wrong orientation - have to add an axis (cannot transpose as
+        # it starts off as 1D)
+        H[:, layer_inds] *= layer_damping
+        h[layer_inds] *= layer_damping[:, np.newaxis]
 
     return H, h
 
@@ -435,7 +427,8 @@ def _build_error_weighting_matrix(obs_std):
 
     return np.diag(1 / obs_std)
 
-def _build_smoothing_constraints(arguments:tuple) -> (np.array, np.array):
+def _build_smoothing_constraints(
+        model:define_models.InversionModel) -> (np.array, np.array):
     """ Build the matrices needed to minimise second derivative of the model.
 
     That is, for each layer, we want to minimise the second derivative
