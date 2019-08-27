@@ -93,7 +93,7 @@ def _build_weighting_matrices(data:constraints.Observations, m0:np.array,
 
     # Linear constraint equations
     # Damp towards starting model
-    damping = ModelLayerValues() # of some description!
+    damping = _set_layer_values(layers, 0) # of some description!
     damp_to_m0_mat, damp_to_m0_vec = _build_constraint_damp_to_m0(m0)
     damp_to_m0_mat, damp_to_m0_vec = _damp_constraints(
         damp_to_m0_mat, damp_to_m0_vec, layers, damping
@@ -120,6 +120,19 @@ def _build_weighting_matrices(data:constraints.Observations, m0:np.array,
 
     return a_priori_mat, a_priori_vec
 
+
+def _set_layer_values(layers, vals):
+
+    if len(vals) == 1:
+        val, = vals
+        vals = ModelLayerValues(
+            upper_crust = val * np.ones(shape(layers.upper_crust)),
+            lower_crust = val * np.ones(shape(layers.lower_crust)),
+            lithospheric_mantle = val * np.ones(shape(layers.lithospheric_mantle)),
+            asthenosphere = val * np.ones(shape(layers.asthenosphere)),
+        )
+
+    return vals
 
 def _damp_constraints(H, h, layers, damping):
     """ Apply layer specific damping to H and h.
@@ -284,7 +297,7 @@ def _build_smoothing_constraints(
     # NOTE: given that layer thickness is not equal everywhere, this
     # version of smoothing is not going to be equal everywhere!
     do_not_smooth = np.concantenate(
-        (np.array([0, -1]), b.boundary_inds, b.boundary_inds + 1)
+        (np.array([0, -1]), model.boundary_inds, model.boundary_inds + 1)
     )
     banded_matrix[do_not_smooth, :] = 0
     # Add columns to roughness_matrix to get it into the right shape
@@ -379,19 +392,16 @@ def _build_constraint_damp_original_gradient(
     """ Damp Vsv gradients between layers to starting model values.
 
     In H * m = h, we want to end up with
-            -C * V_new_top + C * V_new_bottom = 1
-            where C = dz_old/dz_new * (1 / (V_old_bottom - V_old_top))
+            V_new_node1/V_old_node1 - V_new_node2/V_old_node2 = 0
+        (Via... V_new_node1/V_new_node2 = V_old_node1/V_old_node2)
+    As such, H is set to 1/V_node1 in the node 1 column, and to
+    1/V_node2 in the node 2 column; h is zero always.
 
-    Because dz may change with iterations around the boundary layers, to
-    preserve velocity gradient, we need to account for that.
-        ((V_new_bottom - V_new_top) / dz_new
-                = (V_old_bottom - V_old_top) / dz_old)
-
-        ((V_new_bottom - V_new_top)  * dz_old/dz_new
-            * (1 / (V_old_bottom - V_old_top)) = 1)
-
-    As such, H is set to -C in the layer 1 column, and to
-    C in the layer 2 column; h is one always.
+    This will not work around our boundary layers because the thickness of
+    the layer above, the boundary layer, and the layer below can all change -
+    so the gradient is dependent on more than just the values of velocity!
+    However, we don't want to damp the gradient in our boundary layer that
+    much, and perhaps it is ok to leave out the adjacent layers too?
 
     Arguments:
         model:
@@ -400,33 +410,37 @@ def _build_constraint_damp_original_gradient(
 
     Returns:
         H:
-            - (n_depth_points, n_model_points) np.array
+            - (n_depth_points - 1, n_model_points) np.array
             - Constraints matrix, H, in H * m = h.
-            - Set to -C in the layer 1 column, and to C in the layer 2 column,
-              where C = dz_old/dz_new * (1 / (V_old_bottom - V_old_top)).
-            - Do not constrain the gradient in the boundary layer.
+            - Set to to 1/V_node1 in the node 1 column, and to
+              1/V_node2 in the node 2 column.
+            - Note that only (n_depth_points - 1) rows in this matrix,
+              as every constraint is for two adjacent depth points.
         h:
-            - (n_depth_points, 1) np.array
+            - (n_depth_points - 1, 1) np.array
             - Constraints vector, h, in H * m = h.
-            - Set to one always.
+            - Set to zero always.
     """
 
     n_depth_points = model.vsv.size
 
-    H = np.zeros((n_depth_points, n_depth_points + model.boundary_inds.size))
+    H = np.zeros((n_depth_points - 1,
+                  n_depth_points + model.boundary_inds.size))
     for i_d in range(n_depth_point):
         # Need to transpose slice of m0 (2, 1) to fit in H (1, 2) gap,
         # because in H, depth increases with column not row.
-        C = model.thickness # hmmmm - how to get new thickness into this???
         H[i_d, [i_d, i_d+1]] = 1 / model.vsv[[i_d+1, i_d]].T
 
 
     # Remove constraints around discontinuities between layers.
-    for d in layers.discontinuities:
+    do_not_damp = np.concantenate(
+        (np.array([0, -1]), model.boundary_inds, model.boundary_inds + 1)
+    )
+    for d in do_not_damp:
         H[d,:] *= 0
         if d > 0:
             H[d-1, :] *= 0
 
-    h = np.ones((n_depth_points, 1))
+    h = np.zeros((n_depth_points - 1, 1))
 
     return H, h
