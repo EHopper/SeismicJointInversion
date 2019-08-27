@@ -63,22 +63,16 @@ class SetupModel(typing.NamedTuple):
             - Shear velocity at the top and bottom of boundaries of interest
             - Velocities are assumed to be piecewise linear between these
               points.
+        boundary_names:
+            - (n_boundary_depths_inverted_for) tuple
+            - Units: none
+            - Labels for each of the boundaries, e.g. Moho, LAB
         depth_limits:
             - (2, ) np.array
             - Units:    km
             - Top and base of the model that we are inverting for.
             - Outside of this range, the model is fixed to our starting MINEOS
               model card (which extends throughout the whole Earth).
-        Moho:
-            - 2-tuple
-            - Units:    if Moho_depth(0): dimensionless; else km
-            - Crustal thickness - required for density scaling.
-            - This has the format (is Moho a boundary of interest?, Moho depth)
-            - That is, if one of the boundaries of interest is the Moho,
-                (True, index of boundary in .boundary_*)
-              If the Moho is not being inverted for specifically,
-                (False, depth of Moho in km)
-            - Default value: (True, 0) i.e. Moho is first boundary of interest
         min_layer_thickness:
             - float
             - Units:    km
@@ -114,7 +108,7 @@ class SetupModel(typing.NamedTuple):
     boundary_widths: np.array
     boundary_vsv: np.array
     depth_limits: np.array
-    Moho: tuple = (True, 0)
+    boundary_names: tuple = ('Moho', 'LAB')
     min_layer_thickness: float = 6.
     vsv_vsh_ratio: float = 1.
     vpv_vsv_ratio: float = 1.75
@@ -162,6 +156,54 @@ class InversionModel(typing.NamedTuple):
     vsv: np.array
     thickness: np.array
     boundary_inds: np.array
+
+
+class ModelLayerIndices(typing.NamedTuple):
+    """ Parameters used for smoothing.
+
+    Fields:
+        upper_crust:
+            - (n_depth_points_in_this_layer, ) np.array
+            - Depth indices for upper crust.
+        lower_crust:
+            - (n_depth_points_in_this_layer, ) np.array
+            - Depth indices for lower crust.
+        lithospheric_mantle:
+            - (n_depth_points_in_this_layer, ) np.array
+            - Depth indices for lithospheric mantle.
+        asthenosphere:
+            - (n_depth_points_in_this_layer, ) np.array
+            - Depth indices for asthenosphere.
+
+        discontinuities:
+            - (n_different_layers + 1, ) np.array
+            - Depth indices of model discontinuties, including the surface
+              and the base of the model.
+            - i.e. [0, mid-crustal boundary, Moho, LAB, base of mode]
+
+        depth:
+            - (n_depth_points, ) np.array
+            - Units:    kilometres
+            - Depth vector for the whole model space.
+        layer_names:
+            - list
+            - All layer names in order of increasing depth.
+
+    """
+
+    upper_crust: np.array
+    lower_crust: np.array
+    lithospheric_mantle: np.array
+    asthenosphere: np.array
+    discontinuties: np.array
+    depth: np.array
+    layer_names: list = ['upper_crust', 'lower_crust',
+                         'lithospheric_mantle', 'asthenosphere']
+
+
+# =============================================================================
+#       Set up the models for various stages of the calculation
+# =============================================================================
 
 
 def setup_starting_model(setup_model):
@@ -277,7 +319,8 @@ def setup_starting_model(setup_model):
                           thickness = np.array(thickness)[np.newaxis].T,
                           boundary_inds = np.array(boundary_inds))
 
-def convert_inversion_model_to_mineos_model(inversion_model, setup_model):
+def convert_inversion_model_to_mineos_model(inversion_model, setup_model,
+                                            **kwargs):
     """ Generate model that is used for all the MINEOS interfacing.
 
     MINEOS requires radius, rho, vpv, vsv, vph, vsh, bulk and shear Q, and eta.
@@ -285,6 +328,19 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model):
     MINEOS card that can be loaded in and have this pasted on the bottom
     for using with MINEOS, as MINEOS requires a card that goes all the way to
     the centre of the Earth.
+
+    Arguments:
+        - inversion_model:
+            - InversionModel
+            - Units:    seismological
+        - setup_model:
+            - SetupModel
+            - Units:    seismological
+        - kwargs
+            - key word argument of format:
+                - Moho = some_float
+            - Units:    km
+            - Depth of the Moho - needed to define density structure
     """
 
     # Load PREM (http://ds.iris.edu/ds/products/emc-prem/)
@@ -311,11 +367,16 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model):
     q_mu = np.interp(radius, ref_model['radius'], ref_model['q_mu'])
     q_kappa = np.interp(radius, ref_model['radius'], ref_model['q_kappa'])
     rho = np.interp(radius, ref_model['radius'], ref_model['rho'])
-    if setup_model.Moho[0]:
-        Moho_ind = inversion_model.boundary_inds[setup_model.Moho[1]]
+    if 'Moho' in setup_model.boundary_names:
+        Moho_ind = (inversion_model.boundary_inds[
+                        setup_model.boundary_names.index('Moho')])
         Moho_depth = np.sum(inversion_model.thickness[:Moho_ind + 1])
     else:
-        Moho_depth = setup_model.Moho[1]
+        try:
+            Moho_depth = kwargs['Moho']
+        except:
+            print('Moho depth never specified! Guessing 35 km.')
+            Moho_depth = 35
     rho[(depth <= Moho_depth) & (2900 < rho)] = 2900
 
     # Now paste the models together, with 100 km of smoothing between
@@ -450,3 +511,56 @@ def smooth_to_ref_model_above(ref_model, new_model):
         )
 
     return pd.concat([smoothed_ref_model, unadulterated_ref_model])
+
+
+def _set_model_indices(setup_model, model, **kwargs):
+    """ Return the indices of different geological layers in the model.
+
+    This is useful for if we want to damp the different layers with different
+    parameters.
+
+    Arguments:
+        - setup_model:
+            - SetupModel
+            - Units:    seismological
+        - model:
+            - InversionModel
+            - Units:    seismological
+        - kwargs:
+            - key word arguments of format
+                - Moho = some_float
+                - LAB = some_float
+            - Units:    km
+            - If Moho and LAB are not specified in
+    """
+
+    depth = list(np.cumsum(model.thickness))
+
+    if 'Moho' in setup_model.boundary_names:
+        moho_ind = model.boundary_inds[setup_model.boundary_names.index('Moho')]
+    else:
+        try:
+            moho_ind = np.argmin(np.abs(depth - kwargs['Moho']))
+        except:
+            print('Moho depth never specified! Guessing 35 km.')
+            moho_ind = np.argmin(np.abs(depth - 35))
+
+    if 'LAB' in setup_model.boundary_names:
+        lab_ind = model.boundary_inds[setup_model.boundary_names.index('LAB')]
+    else:
+        try:
+            lab_ind = np.argmin(np.abs(depth - kwargs['LAB']))
+        except:
+            print('LAB depth never specified! Guessing 80 km.')
+            lab_ind = np.argmin(np.abs(depth - 80))
+
+
+    return ModelLayerIndices(
+        upper_crust = np.arange(moho_ind/2),
+        lower_crust = np.arange(round(moho_ind/2), moho_ind),
+        lithospheric_mantle = np.arange(moho_ind, lab_ind),
+        asthenosphere = np.arange(lab_ind, len(depth)),
+        discontinuties = np.array([moho_ind // 2, moho_ind,
+                                   lab_ind, len(depth)]),
+        depth = depth
+    )

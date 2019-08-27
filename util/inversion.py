@@ -34,7 +34,6 @@ def run_with_no_inputs():
         boundary_vsv=np.array([3.5, 4.0, 4.2, 4.1]),
         boundary_widths=np.array([5., 10.]),
         boundary_depth_uncertainty=np.array([3., 10.,]),
-        Moho=(True,0),
         boundary_depths=np.array([35., 90]),
         id='test')
 
@@ -84,8 +83,9 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     d = _build_data_misfit_matrix(data, ph_vel_pred, p, G)
 
     # Build all of the weighting functions for damped least squares
+    layer_indices = define_models._set_model_indices(setup_model, model)
     W, D_mat, d_vec, H_mat, h_vec = (
-        weights.build_weighting_damping(data, model, p)
+        weights.build_weighting_damping(data, layer_indices, p)
     )
 
     # Perform inversion
