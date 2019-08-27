@@ -106,7 +106,9 @@ def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
 
     Arguments:
         kernels:
-            - pandas DataFrame
+            - (n_MINEOS_depth_points * n_periods, 9) pandas DataFrame
+                - columns: ['z', 'period', 'vsv', 'vpv', 'vsh', 'vph',
+                            'eta', 'rho', 'type']
             - Units:    assumes velocities in km/s
             - Rayleigh wave kernels calculated in MINEOS
         model:
@@ -130,7 +132,9 @@ def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
     G_MINEOS = _build_MINEOS_G_matrix(kernels)
 
     # Convert to kernels for the model parameters we are inverting for
-    dvsv_dp_mat = _convert_to_model_kernels(kernels['z'].unique(), model)
+    periods = kernels['period'].unique()
+    depth = kernels.loc[kernels['period'] == periods[0], 'z']
+    dvsv_dp_mat = _convert_to_model_kernels(depth, model)
     # Frechet kernels cover Vsv, Vsh, Vpv, Vph, Eta.  We assume that eta is
     # kept constant, and all of the others are linearly dependent on Vsv.
     dm_dp_mat = _scale_dvsv_dp_to_other_variables(dvsv_dp_mat, setup_model)

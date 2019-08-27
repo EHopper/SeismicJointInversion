@@ -342,7 +342,11 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model,
             - Units:    km
             - Depth of the Moho - needed to define density structure
     """
-
+    try:
+        os.mkdir('output/' + setup_model.id)
+        print("This test ID hasn't been used before!")
+    except:
+        pass
     # Load PREM (http://ds.iris.edu/ds/products/emc-prem/)
     # Slightly edited to remove the water layer and give the model point
     # at 24 km depth lower crustal parameter values.

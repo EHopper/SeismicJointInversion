@@ -78,7 +78,9 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     )
     kernels = kernels[kernels['z'] <= setup_model.depth_limits[1]]
 
-    G = partial_derivatives._build_partial_derivatives_matrix(kernels, model)
+    G = partial_derivatives._build_partial_derivatives_matrix(
+        kernels, model, setup_model
+    )
     p = _build_model_vector(model)
     d = _build_data_misfit_matrix(data, ph_vel_pred, p, G)
 
@@ -114,11 +116,12 @@ def _build_model_vector(model:define_models.InversionModel,
               of interest (t), i.e. controlling the depth of e.g. Moho, LAB
             - All other thicknesses are either fixed, or are dependent only
               on the variation of thicknesses, t
+            - Note that the deepest velocity point is fixed too.
             - This model, p, ONLY includes the parameters that we are inverting
               for - it is not a complete description of vs(z)!
     """
 
-    return np.vstack((model.vsv, model.thickness[model.boundary_inds]))
+    return np.vstack((model.vsv[:-1], model.thickness[model.boundary_inds]))
 
 def _build_inversion_model_from_model_vector(
         p:np.array, model:define_models.InversionModel):
@@ -144,7 +147,7 @@ def _build_inversion_model_from_model_vector(
     new_thickness[model.boundary_inds] = p[-2:]
 
     return define_models.InversionModel(
-                vsv = p[:-2],
+                vsv = np.vstack((p[:-2], model.vsv[-1])),
                 thickness = new_thickness,
                 boundary_inds = model.boundary_inds,
     )
