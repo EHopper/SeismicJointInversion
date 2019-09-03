@@ -101,87 +101,6 @@ class RunParameters(typing.NamedTuple):
     qmod_path: str = './data/earth_models/qmod'
     bin_path: str = '../MINEOS/bin'
 
-class LoveKernels(typing.NamedTuple):
-    """ Frechet kernels for Love (toroidal) waves.
-
-    Kernels for different periods are appended to each other.
-
-    Fields:
-        period:
-            - (n_love_periods * n_depth_points, ) np.array
-            - Units:    seconds
-            - Period of Love wave of interest.
-        depth:
-            - (n_depth_points, ) np.array
-            - Units:    kilometres
-            - Depth vector for kernel.
-        vsv:
-            - (n_depth_points * n_love_periods, ) np.array
-            - Units:    assumes velocities in km/s
-            - Vertically polarised S wave kernel.
-        vsh:
-            - (n_depth_points * n_love_periods, ) np.array
-            - Units:    assumes velocities in km/s
-            - Horizontally polarised S wave kernel.
-        type: str = 'love'
-            - Default shouldn't be changed
-            - This is because was having issues with isinstance() for locally
-              defined classes.
-
-
-    """
-
-    period: np.array
-    depth: np.array
-    vsv: np.array
-    vsh: np.array
-    type: str = 'love'
-
-class RayleighKernels(typing.NamedTuple):
-    """ Frechet kernels for Rayleigh (spheroidal) waves.
-
-    Kernels for different periods are stacked on top of each other.
-
-    Fields:
-        period:
-            - (n_love_periods * n_depth_points, ) np.array
-            - Units:    seconds
-            - Period of Rayleigh wave of interest.
-        depth:
-            - (n_depth_points, ) np.array
-            - Units:    kilometres
-            - Depth vector for kernel.
-        vsv:
-            - (n_love_periods * n_depth_points, ) np.array
-            - Units:    assumes velocities in km/s
-            - Vertically polarised S wave kernel.
-        vpv:
-            - (n_love_periods * n_depth_points, ) np.array
-            - Units:    assumes velocities in km/s
-            - Vertically polarised P wave kernel.
-        vph:
-            - (n_love_periods * n_depth_points, ) np.array
-            - Units:    assumes velocities in km/s
-            - Horizontally polarised P wave kernel.
-        eta:
-            - (n_love_periods * n_depth_points, ) np.array
-            - Units:    assumes velocities in km/s
-            - Anellipticity (eta = F/(A-2L)) kernel.
-        type: str = 'rayleigh'
-            - Default shouldn't be changed.
-            - This is because was having issues with isinstance() for locally
-              defined classes.
-
-    """
-
-    period: np.array
-    depth: np.array
-    vsv: np.array
-    vpv: np.array
-    vph: np.array
-    eta: np.array
-    type: str = 'rayleigh'
-
 # =============================================================================
 #       Run MINEOS - calculate phase velocity, group velocity, kernels
 # =============================================================================
@@ -205,7 +124,7 @@ def run_kernels(parameters:RunParameters, periods:np.array,
     kernels['type'] = parameters.Rayleigh_or_Love
 
     return kernels
-    
+
 
 def run_mineos(parameters:RunParameters, periods:np.array,
                card_name:str) -> np.array:

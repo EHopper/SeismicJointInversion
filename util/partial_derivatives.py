@@ -215,13 +215,13 @@ def _hstack_frechet_kernels(kernels, period:float):
     #       assumes seismological (km/s) units!
     vsv = kernels.vsv[kernels.period == period]
 
-    if kernels['type'].iloc[0] == 'Rayleigh':#isinstance(kernel, mineos.RayleighKernels):
+    if kernels['type'].iloc[0] == 'Rayleigh':
         vsh = np.zeros_like(vsv)
         vpv = kernels.vpv[kernels.period == period]
         vph = kernels.vph[kernels.period == period]
         eta = kernels.eta[kernels.period == period]
 
-    if kernels['type'].iloc[0]  == 'Love':#isinstance(kernel, mineos.LoveKernels):
+    if kernels['type'].iloc[0]  == 'Love':
         vsh = kernels.vsh[kernels.period == period]
         vpv = np.zeros_like(vsv)
         vph = np.zeros_like(vsv)
