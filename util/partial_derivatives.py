@@ -513,7 +513,6 @@ def _convert_kernels_d_shallowerm_by_d_s(model:define_models.InversionModel,
     y_i = np.sum(model.thickness[:i+1])
 
     d_inds, = np.where(np.logical_and(y_i_minus_1 < depth, depth <= y_i))
-
     for i_d in d_inds:
         dm_ds_mat[i_d, i] = ((depth[i_d] - y_i_minus_1)
                              /model.thickness[i])
@@ -575,7 +574,6 @@ def _convert_kernels_d_deeperm_by_d_s(model, i, depth, dm_ds_mat):
     for i_d in d_inds:
         dm_ds_mat[i_d, i] = 1 - ((depth[i_d] - y_i)
                                  /model.thickness[i+1])
-
     return dm_ds_mat
 
 def _convert_kernels_d_shallowerm_by_d_t(model:define_models.InversionModel,

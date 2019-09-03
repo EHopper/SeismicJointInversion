@@ -238,8 +238,31 @@ class PipelineTest(unittest.TestCase):
             [15.5556, 16.4706, 20, 25, 32, 40, 50, 60, 80, 100, 120, 140, 150],
         )
     ])
-    #@unittest.skip("Skip this test because MINEOS is too slow to run every time")
+    @unittest.skip("Skip this test because MINEOS is too slow to run every time")
     def test_mineos(self, name, model_id, periods):
+        """
+
+        card = pd.read_csv('files_for_testing/mineos/' + model_id + '.card',
+                           skiprows=3, header=None, sep='\s+')
+        card.columns = ['r','rho', 'vpv', 'vsv', 'q_kappa', 'q_mu',
+                        'vph', 'vsh', 'eta']
+
+        n = 0
+        p = periods[n]
+        ke = kernels_calc[kernels_calc.period == p]
+        kj = kernels_expected[kernels_expected.period == p]
+        plt.plot(ke.vsv, ke.z)
+        plt.plot(kj.vsv * card.vsv.values[::-1] / phv_calc[n], kj.z, '--')
+        plt.gca().set_ylim([400, 0])
+        maxk = 1.1 * max((kj.loc[kj.z < 400, 'vsv'].max(),
+                    ke.loc[ke.z < 400, 'vsv'].max()))
+        mink = min((kj.loc[kj.z < 400, 'vsv'].min(),
+                    ke.loc[ke.z < 400, 'vsv'].min()))
+        if mink < 0: mink *= 1.1;
+        else: mink *= 0.9
+        plt.gca().set_xlim([mink, maxk])
+        n += 1
+        """
 
         # All previously calculated test outputs should be saved in
         expected_output_dir = './files_for_testing/mineos/'
@@ -275,18 +298,15 @@ class PipelineTest(unittest.TestCase):
         kernels_expected['type'] = params.Rayleigh_or_Love
 
         np.testing.assert_allclose(phv_calc, phv_expected, rtol=1e-7)
-        # pd.testing.assert_frame_equal(kernels_calc, kernels_expected,
-        #     check_exact=False, check_less_precise=0,
-        # )
 
-        # n = 0
-        # p = periods[n]
-        # kke = ke[ke.period == p]
-        # kk = kj[kj.period == p]
-        # plt.plot(kke.vsv, kke.z)
-        # plt.plot(kk.vsv*1e3, kk.z)
-        # plt.gca().set_ylim([400, 0])
-        # n += 1
+        kernels_expected.drop(columns=['eta', 'rho'], inplace=True)
+        kernels_calc.drop(columns=['eta', 'rho'], inplace=True)
+        kernels_expected.loc[:, ['vsv', 'vpv', 'vsv', 'vph']] *= 1e3
+        # check_less_precise is the number of sig figs that must match
+        pd.testing.assert_frame_equal(kernels_calc, kernels_expected,
+            check_exact=False, check_less_precise=1,
+        )
+
 
 
 
@@ -364,6 +384,190 @@ class PipelineTest(unittest.TestCase):
         np.testing.assert_allclose(dv_mineos, dv_from_Gdm, rtol=0.25)
 
 
+    # ************************* #
+    #   partial_derivatives.py  #
+    # ************************* #
+    @parameterized.expand([
+        (
+            'simple',
+            pd.DataFrame({
+                'z': [0, 10, 20, 0, 10, 20],
+                'period': [10, 10, 10, 30, 30, 30],
+                'vsv': [0.11, 0.12, 0.13, 0.101, 0.102, 0.103],
+                'vpv': [0.21, 0.22, 0.23, 0.201, 0.202, 0.203],
+                'vsh': [0.31, 0.32, 0.33, 0.301, 0.302, 0.303],
+                'vph': [0.41, 0.42, 0.43, 0.401, 0.402, 0.403],
+                'eta': [0.51, 0.52, 0.53, 0.501, 0.502, 0.503],
+                'rho': [0.61, 0.62, 0.63, 0.601, 0.602, 0.603],
+                'type': ['Rayleigh'] * 6,
+            }),
+            np.array([
+                [0.11, 0.12, 0.13, 0, 0, 0, 0.21, 0.22, 0.23,
+                 0.41, 0.42, 0.43, 0.51, 0.52, 0.53],
+                [0.101, 0.102, 0.103, 0, 0, 0, 0.201, 0.202, 0.203,
+                 0.401, 0.402, 0.403, 0.501, 0.502, 0.503],
+            ])
+        ),
+    ])
+    def test_build_MINEOS_G_matrix(self, name, kernels, expected_G_MINEOS):
+        """
+        """
+
+        np.testing.assert_allclose(
+            partial_derivatives._build_MINEOS_G_matrix(kernels),
+            expected_G_MINEOS
+        )
+
+    # _convert_to_model_kernels(depth, model)
+
+
+    @parameterized.expand([
+        (
+            'Simple',
+            define_models.InversionModel(
+                vsv = np.array([[3.5, 4, 4.5, 4.6, 4.7]]).T,
+                thickness = np.array([[0, 30, 40, 50, 20]]).T,
+                boundary_inds = []
+            ),
+            np.arange(0, 150, 10),
+            np.array([
+                [1., 0., 0., 0.],
+                [2./3., 1./3., 0, 0],
+                [1./3., 2./3., 0, 0],
+                [0, 1., 0, 0],
+                [0, 3./4., 1./4., 0],
+                [0, 1./2., 1./2., 0],
+                [0, 1./4., 3./4., 0],
+                [0, 0, 1., 0],
+                [0, 0, 4./5., 1./5.],
+                [0, 0, 3./5., 2./5.],
+                [0, 0, 2./5., 3./5.],
+                [0, 0, 1./5., 4./5],
+                [0, 0, 0, 1.],
+                [0, 0, 0, 1./2.],
+                [0, 0, 0, 0],
+            ]),
+        ),
+        (
+            'Moho & LAB',
+            define_models.InversionModel(
+                vsv = np.array([[3.5, 3.6, 4., 4.2, 4.4, 4.3, 4.35, 4.4]]).T,
+                thickness = np.array([[0., 30., 10., 22., 22., 15., 22., 22.]]).T,
+                boundary_inds = np.array([1, 4])
+            ),
+            np.arange(0, 150, 10),
+            np.array([
+                [1., 0., 0., 0., 0., 0., 0.],
+                [2./3., 1./3., 0., 0., 0., 0., 0.],
+                [1./3., 2./3., 0., 0., 0., 0., 0.],
+                [0., 1., 0., 0., 0., 0., 0.],
+                [0., 0., 1., 0., 0., 0., 0.],
+                [0., 0., 12./22., 10./22., 0., 0., 0.],
+                [0., 0., 2./22., 20./22, 0., 0., 0.],
+                [0., 0., 0., 14./22., 8./22., 0., 0.],
+                [0., 0., 0., 4./22., 18./22., 0., 0.],
+                [0., 0., 0., 0., 9./15., 6./15., 0.],
+                [0., 0., 0., 0., 0., 21./22., 1./22.],
+                [0., 0., 0., 0., 0., 11./22., 11./22.],
+                [0., 0., 0., 0., 0., 1./22., 21./22.],
+                [0., 0., 0., 0., 0., 0., 13./22.],
+                [0., 0., 0., 0., 0., 0., 3./22.],
+            ]),
+        ),
+    ])
+    def test_calculate_dm_ds(self, name, model, depth, expected):
+        """
+        """
+
+        np.testing.assert_allclose(
+            partial_derivatives._calculate_dm_ds(model, depth),
+            expected
+        )
+
+    @parameterized.expand([
+        (
+            'Simple',
+            define_models.InversionModel(
+                vsv = np.array([[3.5, 4, 4.5, 4.6, 4.7]]).T,
+                thickness = np.array([[0, 30, 40, 50, 10]]).T,
+                boundary_inds = []
+            ),
+            np.arange(0, 150, 10),
+            np.array([
+                [0, 0, 0, 0],
+                [0, 10/30, 0, 0],
+                [0, 20/30, 0, 0],
+                [0, 30/30, 0, 0],
+                [0, 0, 10/40, 0],
+                [0, 0, 20/40, 0],
+                [0, 0, 30/40, 0],
+                [0, 0, 40/40, 0],
+                [0, 0, 0, 10/50],
+                [0, 0, 0, 20/50],
+                [0, 0, 0, 30/50],
+                [0, 0, 0, 40/50],
+                [0, 0, 0, 50/50],
+                [0, 0, 0, 0],
+                [0, 0, 0, 0],
+            ])
+
+        ),
+    ])
+    def test_convert_kernels_d_shallowerm_by_d_s(
+        self, name, model, depth, expected_dm_ds):
+        """
+        """
+        n_layers = model.vsv.size - 1
+        dm_ds_mat = np.zeros((depth.size, n_layers))
+        for i in range(1, n_layers):
+            dm_ds_mat = (
+                partial_derivatives._convert_kernels_d_shallowerm_by_d_s(
+                model, i, depth, dm_ds_mat
+                )
+            )
+        np.testing.assert_allclose(dm_ds_mat, expected_dm_ds)
+    @parameterized.expand([
+        (
+            'Simple',
+            define_models.InversionModel(
+                vsv = np.array([[3.5, 4, 4.5, 4.6, 4.7]]).T,
+                thickness = np.array([[0, 30, 40, 55, 10]]).T,
+                boundary_inds = []
+            ),
+            np.arange(0, 150, 10),
+            np.array([
+                [30/30, 0, 0, 0],
+                [20/30, 0, 0, 0],
+                [10/30, 0, 0, 0],
+                [0, 40/40, 0, 0],
+                [0, 30/40, 0, 0],
+                [0, 20/40, 0, 0],
+                [0, 10/40, 0, 0],
+                [0, 0, 55/55, 0],
+                [0, 0, 45/55, 0],
+                [0, 0, 35/55, 0],
+                [0, 0, 25/55, 0],
+                [0, 0, 15/55, 0],
+                [0, 0, 5/55, 0],
+                [0, 0, 0, 5/10],
+                [0, 0, 0, 0],
+            ])
+
+        ),
+    ])
+    def test_convert_kernels_d_deeperm_by_d_s(
+        self, name, model, depth, expected_dm_ds):
+        """
+        """
+        n_layers = model.vsv.size - 1
+        dm_ds_mat = np.zeros((depth.size, n_layers))
+        for i in range(n_layers):
+            dm_ds_mat = (
+                partial_derivatives._convert_kernels_d_deeperm_by_d_s(
+                model, i, depth, dm_ds_mat
+                )
+            )
+        np.testing.assert_allclose(dm_ds_mat, expected_dm_ds)
 
 
 
