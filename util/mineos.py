@@ -109,11 +109,11 @@ def run_mineos_and_kernels(parameters:RunParameters, periods:np.array,
                            card_name:str):
 
     ph_vel, n_runs = run_mineos(parameters, periods, card_name)
-    kernels = run_kernels(parameters, periods, card_name, n_runs)
+    kernels = run_kernels(parameters, periods, ph_vel, card_name, n_runs)
 
     return ph_vel, kernels
 
-def run_kernels(parameters:RunParameters, periods:np.array,
+def run_kernels(parameters:RunParameters, periods:np.array, ph_vel:np.array,
                 card_name:str, n_runs:int):
 
     save_name = 'output/{0}/{0}'.format(card_name)
@@ -121,6 +121,7 @@ def run_kernels(parameters:RunParameters, periods:np.array,
     _run_execfile(execfile)
 
     kernels = _read_kernels(save_name, periods)
+    kernels = _correct_kernels(kernels, save_name, ph_vel, periods)
     kernels['type'] = parameters.Rayleigh_or_Love
 
     return kernels
@@ -535,5 +536,54 @@ def _read_kernels(save_name, periods):
         kernels = kernels.append(kf)
 
     kernels = kernels[['z', 'period', 'vsv', 'vpv', 'vsh', 'vph', 'eta', 'rho']]
+
+    return kernels
+
+def _correct_kernels(kernels, save_name, phv_calc, periods):
+    """
+
+    Using MINEOS from Zach Eilon/Colleen Dalton, so the kernels
+    are output in units of % (dc/c, dVsv/Vsv)
+
+    To convert to units of km/s (dc, dVsv), need to divide the
+    kernels by Vsv/c (or Vpv/c, Vph/c, Vsh/c, Eta/c), where
+    the model parameters come from the model card used to
+    calculate the kernels, and c is the phase velocity at that
+    period, as calculated by MINEOS.
+
+    Note that card is ordered by radius (i.e. centre of the Earth
+    to the surface), whereas kernels are ordered by increasing
+    depth - so to multiply values, need to flip the card.  The
+    card is also in SI units, so need to * 1e-3 to convert to
+    km/s etc
+
+    Input phv_calc MUST have the same periods as input kernels.
+    """
+
+    card = pd.read_csv(save_name + '.card',
+                       skiprows=3, header=None, sep='\s+')
+    card.columns = ['r','rho', 'vpv', 'vsv', 'q_kappa', 'q_mu',
+                    'vph', 'vsh', 'eta']
+    card += 1e-7
+
+    n = 0
+    for period in periods:
+        kernels.loc[kernels.period == period, 'vsv'] *= (
+            phv_calc[n] / (card.vsv.values[::-1] * 1e-3)
+        )
+        kernels.loc[kernels.period == period, 'vsh'] *= (
+            phv_calc[n] / (card.vsh.values[::-1] * 1e-3)
+        )
+        kernels.loc[kernels.period == period, 'vpv'] *= (
+            phv_calc[n] / (card.vpv.values[::-1] * 1e-3)
+        )
+        kernels.loc[kernels.period == period, 'vph'] *= (
+            phv_calc[n] / (card.vph.values[::-1] * 1e-3)
+        )
+        kernels.loc[kernels.period == period, 'eta'] *= (
+            phv_calc[n] / (card.eta.values[::-1] * 1e-3)
+        )
+
+        n += 1
 
     return kernels
