@@ -412,7 +412,7 @@ def _calculate_dm_dt(model:define_models.InversionModel,
         We want to keep the width of the boundary layer, w_i, constant throughout
         a single inversion.  Otherwise, we want to pin the absolute depths, y, of
         all other points in s.  That is, other than y_ib and y_ib+1 for each t_i,
-        the depths, y, are immutable.  However, changing these depth points changes
+        the depths, y, are fixed.  However, changing these depth points changes
         the velocity gradient on either side of them.  Therefore, changing t_i will
         affect velocities between y_ib-1 < z_a < y_ib+2 (note not inclusive!).
 
@@ -727,6 +727,9 @@ def _convert_kernels_d_deeperm_by_d_t(model:define_models.InversionModel,
             d(v_a)/d(t_i) = ((s_ib+2 - s_ib+1) * (z_a - y_ib+2))
                             / (t_i - y_ib+2 + y_ib-1 + w_i)**2
 
+    As t_i = y_ib - y_ib-1;  w_i = y_ib+1 - y_ib, the denominator simplifies to
+                    (y_ib+1 - y_ib+2) ** 2 == (y_ib+2 - y_ib+1) **2
+
     DERIVATION BREAK
     For the purposes of deriving this, let's simplify terms a little bit.
         a = s_ib+2 - s_ib+1
@@ -802,6 +805,7 @@ def _convert_kernels_d_deeperm_by_d_t(model:define_models.InversionModel,
     ib = model.boundary_inds[i]
     t_i = model.thickness[ib]
     w_i = model.thickness[ib + 1]
+    t_i_plus_2 = model.thickness[ib + 2]
 
     y_ib_minus_1 = np.sum(model.thickness[:ib])
     y_ib_plus_1 = np.sum(model.thickness[:ib + 2])
@@ -812,7 +816,7 @@ def _convert_kernels_d_deeperm_by_d_t(model:define_models.InversionModel,
     for i_d in d_inds:
         dm_dt_mat[i_d, i] = (
             (model.vsv[ib + 2] - model.vsv[ib + 1]) * (depth[i_d] - y_ib_plus_2)
-            / ((t_i - (y_ib_plus_2 - y_ib_minus_1 - w_i)) ** 2)
+            / t_i_plus_2 ** 2
         )
 
     return dm_dt_mat

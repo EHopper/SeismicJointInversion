@@ -478,7 +478,6 @@ class PipelineTest(unittest.TestCase):
     def test_calculate_dm_ds(self, name, model, depth, expected):
         """
         """
-
         np.testing.assert_allclose(
             partial_derivatives._calculate_dm_ds(model, depth),
             expected
@@ -569,6 +568,130 @@ class PipelineTest(unittest.TestCase):
             )
         np.testing.assert_allclose(dm_ds_mat, expected_dm_ds)
 
+    @parameterized.expand([
+        (
+            'Moho & LAB',
+            define_models.InversionModel(
+                vsv = np.array([[3.5, 3.6, 4., 4.2, 4.4, 4.3, 4.35, 4.4]]).T,
+                thickness = np.array([[0., 30., 10., 22., 21., 15., 23., 24.]]).T,
+                boundary_inds = np.array([1, 4])
+            ),
+            np.arange(0, 150, 10),
+            np.array([
+                [0, 0], #   0 - pegged
+                [(3.5 - 3.6) * 10 / 30 ** 2, 0], #  10
+                [(3.5 - 3.6) * 20 / 30 ** 2, 0], #  20
+                [(3.6 - 4.) / 10, 0], #  30
+                [(4. - 4.2) * 22 / 22 ** 2, 0], #  40
+                [(4. - 4.2) * 12 / 22 ** 2, 0], #  50
+                [(4. - 4.2) * 2 / 22 ** 2, 0], #  60
+                [0, (4.2 - 4.4) * 8 / 21 ** 2], #  70
+                [0, (4.2 - 4.4) * 18 / 21 ** 2], #  80
+                [0, (4.4 - 4.3) / 15], #  90
+                [0, (4.3 - 4.35) * 21 / 23 ** 2 ], # 100
+                [0, (4.3 - 4.35) * 11 / 23 ** 2], # 110
+                [0, (4.3 - 4.35) * 1 / 23 ** 2], # 120
+                [0, 0], # 130 - pegged
+                [0, 0], # 140 - pegged
+            ])
+        ),
+    ])
+    def test_calculate_dm_dt(self, name, model, depth, expected):
+        """
+        """
+        np.testing.assert_allclose(
+            partial_derivatives._calculate_dm_dt(model, depth),
+            expected
+        )
+
+    @parameterized.expand([
+        (
+            'Moho & LAB',
+            define_models.InversionModel(
+                vsv = np.array([[3.5, 3.6, 4., 4.2, 4.4, 4.3, 4.35, 4.4]]).T,
+                thickness = np.array([[0., 30., 10., 22., 21., 15., 23., 24.]]).T,
+                boundary_inds = np.array([1, 4])
+            ),
+            np.arange(0, 150, 10),
+            np.array([
+                [1, 0, 0, 0, 0, 0, 0, 0, 0], #   0
+                [2/3, 1/3, 0, 0, 0, 0, 0, (3.5 - 3.6) * 10 / 30 ** 2, 0], #  10
+                [1/3, 2/3, 0, 0, 0, 0, 0, (3.5 - 3.6) * 20 / 30 ** 2, 0], #  20
+                [0, 1, 0, 0, 0, 0, 0, (3.6 - 4.) / 10, 0], #  30
+                [0, 0, 1, 0, 0, 0, 0, (4. - 4.2) * 22 / 22 ** 2, 0], #  40
+                [0, 0, 12/22, 10/22, 0, 0, 0, (4. - 4.2) * 12 / 22 ** 2, 0], #  50
+                [0, 0, 2/22, 20/22, 0, 0, 0, (4. - 4.2) * 2 / 22 ** 2, 0], #  60
+                [0, 0, 0, 13/21, 8/21, 0, 0, 0, (4.2 - 4.4) * 8 / 21 ** 2], #  70
+                [0, 0, 0, 3/21, 18/21, 0, 0, 0, (4.2 - 4.4) * 18 / 21 ** 2], #  80
+                [0, 0, 0, 0, 8/15, 7/15, 0, 0, (4.4 - 4.3) / 15], #  90
+                [0, 0, 0, 0, 0, 21/23, 2/23, 0, (4.3 - 4.35) * 21 / 23 ** 2 ], # 100
+                [0, 0, 0, 0, 0, 11/23, 12/21, 0, (4.3 - 4.35) * 11 / 23 ** 2], # 110
+                [0, 0, 0, 0, 0, 1/23, 22/23, 0, (4.3 - 4.35) * 1 / 23 ** 2], # 120
+                [0, 0, 0, 0, 0, 0, 15/24, 0, 0], # 130 - pegged
+                [0, 0, 0, 0, 0, 0, 5/24, 0, 0], # 140 - pegged
+            ])
+        )
+    ])
+    # def test_convert_to_model_kernels(self, name, setup_model, depth, expected):
+    #     """
+    #     """
+    #     np.testing.assert_allclose(
+    #         partial_derivatives
+    #     )
+
+    @parameterized.expand([
+        (
+            'Simple',
+            np.array([
+                [30/30, 0, 0, 0],
+                [20/30, 10/30, 0, 0],
+                [10/30, 20/30, 0, 0],
+                [0, 40/40, 0, 0],
+            ]),
+            define_models.SetupModel(
+                id = 'moho', boundary_depths = np.array([30.]),
+                boundary_depth_uncertainty = np.array([3.]),
+                boundary_widths = np.array([5.]),
+                boundary_vsv = np.array([3.5, 4.]),
+                depth_limits = np.array([0., 200.]),
+                boundary_names = ('Moho',), min_layer_thickness = 10.,
+                vsv_vsh_ratio = 1.1, vpv_vsv_ratio = 1.8,
+                vpv_vph_ratio = 0.9, ref_card_csv_name = 'prem.csv'
+            ),
+            np.array([
+                [1, 0, 0, 0],     # vsv
+                [2/3, 1/3, 0, 0],
+                [1/3, 2/3, 0, 0],
+                [0, 1, 0, 0],
+                [1/1.1, 0, 0, 0],     # vsh
+                [2/3/1.1, 1/3/1.1, 0, 0],
+                [1/3/1.1, 2/3/1.1, 0, 0],
+                [0, 1/1.1, 0, 0],
+                [1.8, 0, 0, 0],     # vpv
+                [2/3*1.8, 1/3*1.8, 0, 0],
+                [1/3*1.8, 2/3*1.8, 0, 0],
+                [0, 1.8, 0, 0],
+                [2, 0, 0, 0],     # vph
+                [4/3, 2/3, 0, 0],
+                [2/3, 4/3, 0, 0],
+                [0, 2, 0, 0],
+                [0, 0, 0, 0],    # eta
+                [0, 0, 0, 0],
+                [0, 0, 0, 0],
+                [0, 0, 0, 0],
+            ]),
+        ),
+    ])
+    def test_scale_dvsv_dp_to_other_variables(self, name, dvsv_dp,
+                                              setup_model, expected):
+        """
+        """
+        np.testing.assert_allclose(
+            partial_derivatives._scale_dvsv_dp_to_other_variables(
+                dvsv_dp, setup_model
+            ),
+            expected,
+        )
 
 
 
