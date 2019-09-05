@@ -418,8 +418,6 @@ class PipelineTest(unittest.TestCase):
             expected_G_MINEOS
         )
 
-    # _convert_to_model_kernels(depth, model)
-
 
     @parameterized.expand([
         (
@@ -525,6 +523,7 @@ class PipelineTest(unittest.TestCase):
                 )
             )
         np.testing.assert_allclose(dm_ds_mat, expected_dm_ds)
+
     @parameterized.expand([
         (
             'Simple',
@@ -625,19 +624,21 @@ class PipelineTest(unittest.TestCase):
                 [0, 0, 0, 3/21, 18/21, 0, 0, 0, (4.2 - 4.4) * 18 / 21 ** 2], #  80
                 [0, 0, 0, 0, 8/15, 7/15, 0, 0, (4.4 - 4.3) / 15], #  90
                 [0, 0, 0, 0, 0, 21/23, 2/23, 0, (4.3 - 4.35) * 21 / 23 ** 2 ], # 100
-                [0, 0, 0, 0, 0, 11/23, 12/21, 0, (4.3 - 4.35) * 11 / 23 ** 2], # 110
+                [0, 0, 0, 0, 0, 11/23, 12/23, 0, (4.3 - 4.35) * 11 / 23 ** 2], # 110
                 [0, 0, 0, 0, 0, 1/23, 22/23, 0, (4.3 - 4.35) * 1 / 23 ** 2], # 120
                 [0, 0, 0, 0, 0, 0, 15/24, 0, 0], # 130 - pegged
                 [0, 0, 0, 0, 0, 0, 5/24, 0, 0], # 140 - pegged
             ])
         )
     ])
-    # def test_convert_to_model_kernels(self, name, setup_model, depth, expected):
-    #     """
-    #     """
-    #     np.testing.assert_allclose(
-    #         partial_derivatives
-    #     )
+    def test_convert_to_model_kernels(self, name, setup_model, depth, expected):
+        """
+        """
+
+        np.testing.assert_allclose(
+            partial_derivatives._convert_to_model_kernels(depth, setup_model),
+            expected
+        )
 
     @parameterized.expand([
         (
