@@ -328,6 +328,7 @@ def _read_ascfiles(ascfiles:list):
     output.columns = ['n', 'mode', 'l', 'w_rad_per_s', 'w_mHz', 'T_sec',
                           'grV_km_per_s', 'Q', 'RaylQuo']
     output.drop(['mode', 'RaylQuo'], axis=1, inplace=True)
+    output.reset_index(drop=True, inplace=True)
 
 
     return output
@@ -410,6 +411,7 @@ def _read_qfile(qfile, periods):
                      'gr_vel', 'ph_vel_qcorrected', 'T_qcorrected', 'T_sec']
     qf = qf[::-1]
     qf = qf[qf['n'] == 0] # Fundamental mode only
+    qf.reset_index(drop=True, inplace=True)
 
     ph_vel = np.interp(periods, qf.T_qcorrected, qf.ph_vel_qcorrected)
 
@@ -536,6 +538,7 @@ def _read_kernels(save_name, periods):
         kernels = kernels.append(kf)
 
     kernels = kernels[['z', 'period', 'vsv', 'vpv', 'vsh', 'vph', 'eta', 'rho']]
+    kernels.reset_index(drop=True, inplace=True)
 
     return kernels
 
@@ -543,7 +546,8 @@ def _correct_kernels(kernels, save_name, phv_calc, periods):
     """
 
     Using MINEOS from Zach Eilon/Colleen Dalton, so the kernels
-    are output in units of % (dc/c, dVsv/Vsv)
+    are output in units of % (dc/c, dVsv/Vsv) where dc, dVsv, and c are
+    in km/s (as output by MINEOS) and Vsv is in m/s (as in the MINEOS card).
 
     To convert to units of km/s (dc, dVsv), need to divide the
     kernels by Vsv/c (or Vpv/c, Vph/c, Vsh/c, Eta/c), where
@@ -554,8 +558,10 @@ def _correct_kernels(kernels, save_name, phv_calc, periods):
     Note that card is ordered by radius (i.e. centre of the Earth
     to the surface), whereas kernels are ordered by increasing
     depth - so to multiply values, need to flip the card.  The
-    card is also in SI units, so need to * 1e-3 to convert to
-    km/s etc
+    card is also in SI units where phase velocity is in km/s.  However,
+    we do not need to convert to km/s by multiplying by 1e-3 because the
+    previous scaling done in Fortran divided by Vsv in m/s, so here we are
+    multiplying by Vsv in m/s.
 
     Input phv_calc MUST have the same periods as input kernels.
     """
@@ -564,24 +570,24 @@ def _correct_kernels(kernels, save_name, phv_calc, periods):
                        skiprows=3, header=None, sep='\s+')
     card.columns = ['r','rho', 'vpv', 'vsv', 'q_kappa', 'q_mu',
                     'vph', 'vsh', 'eta']
-    card += 1e-7
+    card += 1e-7 # to avoid dividing by 0 e.g. the ocean, the outer core
 
     n = 0
     for period in periods:
         kernels.loc[kernels.period == period, 'vsv'] *= (
-            phv_calc[n] / (card.vsv.values[::-1] * 1e-3)
+            phv_calc[n] / (card.vsv.values[::-1] * 1e-3) * 1e3
         )
         kernels.loc[kernels.period == period, 'vsh'] *= (
-            phv_calc[n] / (card.vsh.values[::-1] * 1e-3)
+            phv_calc[n] / (card.vsh.values[::-1] * 1e-3) * 1e3
         )
         kernels.loc[kernels.period == period, 'vpv'] *= (
-            phv_calc[n] / (card.vpv.values[::-1] * 1e-3)
+            phv_calc[n] / (card.vpv.values[::-1] * 1e-3) * 1e3
         )
         kernels.loc[kernels.period == period, 'vph'] *= (
-            phv_calc[n] / (card.vph.values[::-1] * 1e-3)
+            phv_calc[n] / (card.vph.values[::-1] * 1e-3) * 1e3
         )
         kernels.loc[kernels.period == period, 'eta'] *= (
-            phv_calc[n] / (card.eta.values[::-1] * 1e-3)
+            phv_calc[n] / (card.eta.values[::-1] * 1e-3) * 1e3
         )
 
         n += 1
