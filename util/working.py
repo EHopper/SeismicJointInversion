@@ -80,7 +80,7 @@ def test_G(setup_model, periods, model_perturbation):
     dc_mineos = ph_vel_perturbed - ph_vel_pred
     dc_from_Gdm = np.matmul(G, perturbation).flatten()
 
-    plt.figure(figsize=(10,5))
+    plt.figure(figsize=(10,8))
     a1 = plt.subplot(1, 3, 1)
     plt.plot(model.vsv, np.cumsum(model.thickness), 'b-o')
     plt.plot(model_perturbed.vsv, np.cumsum(model_perturbed.thickness), 'r-o')
@@ -88,10 +88,10 @@ def test_G(setup_model, periods, model_perturbation):
     plt.gca().set_ylim([200, 0])
     plt.xlabel('Vsv (km/s)')
     plt.ylabel('Depth (km)')
-    a2 = plt.subplot(1, 2, 2)
-    sc = 1.86
+    a2 = plt.subplot(2, 2, 2)
+    #sc = 1.86
     im = plt.scatter(dc_mineos, dc_from_Gdm, 10, periods)
-    plt.scatter(dc_mineos, dc_from_Gdm * sc, 2, periods)
+    #plt.scatter(dc_mineos, dc_from_Gdm * sc, 2, periods)
     allc = list(dc_mineos) + list(dc_from_Gdm)
     plt.plot([min(allc), max(allc)], [min(allc), max(allc)], 'k:')
     if min(allc) < 0 and max(allc) < 0:
@@ -104,9 +104,14 @@ def test_G(setup_model, periods, model_perturbation):
     plt.gca().set_ylim(lims)
     plt.xlabel('dc from MINEOS')
     plt.ylabel('dc from G calculation')
-    plt.title('Large dots: actual dc from Gdm'
-              + '\nSmall dots: dc from Gdm scaled by ' + str(sc))
     cbar = plt.gcf().colorbar(im)
     cbar.set_label('Periods (s)', rotation=90)
+    a3 = plt.subplot(2, 2, 4)
+    im = plt.scatter(periods, (dc_from_Gdm - dc_mineos) / dc_mineos, 10, dc_mineos)
+    plt.xlabel('Period (s)')
+    plt.ylabel('(Gdm - dc) / dc')
+    cbar2 = plt.gcf().colorbar(im)
+    cbar2.set_label('dc from MINEOS (km/s)', rotation=90)
+
 
     return dc_mineos, dc_from_Gdm

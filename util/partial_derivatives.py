@@ -138,7 +138,32 @@ def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
     # Frechet kernels cover Vsv, Vsh, Vpv, Vph, Eta.  We assume that eta is
     # kept constant, and all of the others are linearly dependent on Vsv.
     dm_dp_mat = _scale_dvsv_dp_to_other_variables(dvsv_dp_mat, setup_model)
-    G_inversion_model = np.matmul(G_MINEOS, dm_dp_mat)
+    G_inversion_model = _integrate_dvsv_indepth(G_MINEOS, depth, dm_dp_mat)
+
+    return G_inversion_model
+
+def _integrate_dvsv_indepth(G_MINEOS, depth, dm_dp_mat):
+    """
+    """
+
+    G_inversion_model = np.zeros((G_MINEOS.shape[0], dm_dp_mat.shape[1]))
+    for period in range(G_MINEOS.shape[0]):
+        for mod in range(dm_dp_mat.shape[1]):
+            for dep in range(G_MINEOS.shape[1]):
+                idep = dep % len(depth)
+                if idep == len(depth) - 1:
+                    continue
+
+                G_inversion_model[period, mod] += (
+                    1/2 * np.diff(depth[idep:idep + 2]) * 1e3
+                    * (
+                        G_MINEOS[period, dep] * dm_dp_mat[dep, mod]
+                        + G_MINEOS[period, dep + 1] * dm_dp_mat[dep + 1, mod]
+                    )
+                )
+
+
+
 
     return G_inversion_model
 
@@ -157,7 +182,7 @@ def _build_MINEOS_G_matrix(kernels:pd.DataFrame):
               T_Vsv_p2  T_Vsh_p2      0         0         0
         [     S_Vsv_p1     0      S_Vpv_p1  S_Vph_p1  S_eta_p1    ]
               S_Vsv_p2     0      S_Vpv_p2  S_Vph_p2  S_eta_p2
-              S_Vsv_p2     0      S_Vpv_p2  S_Vph_p2  S_eta_p2
+              S_Vsv_p3     0      S_Vpv_p3  S_Vph_p3  S_eta_p3
 
     where, e.g. T_Vsv_p1 is the Frechet kernel for Toroidal Vsv sensitivity
     for the first (Love) period. Frechet kernels are depth dependent, so each

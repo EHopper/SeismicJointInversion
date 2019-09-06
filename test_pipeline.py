@@ -308,7 +308,7 @@ class PipelineTest(unittest.TestCase):
         kernels_expected.drop(columns=['eta', 'rho'], inplace=True)
         kernels_calc.drop(columns=['eta', 'rho'], inplace=True)
         #kernels_expected.loc[:, ['vsv', 'vpv', 'vsh', 'vph']] *= 1e6
-        kernels_calc.loc[:, ['vsv', 'vpv', 'vsh', 'vph']] *= 1e-6
+        kernels_calc.loc[:, ['vsv', 'vpv', 'vsh', 'vph']] *= 1e-3
         # check_less_precise is the number of sig figs that must match
         pd.testing.assert_frame_equal(kernels_calc, kernels_expected,
             check_exact=False, check_less_precise=1,

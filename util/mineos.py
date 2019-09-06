@@ -575,19 +575,19 @@ def _correct_kernels(kernels, save_name, phv_calc, periods):
     n = 0
     for period in periods:
         kernels.loc[kernels.period == period, 'vsv'] *= (
-            phv_calc[n] / (card.vsv.values[::-1] * 1e-3) * 1e3
+            phv_calc[n] / (card.vsv.values[::-1] * 1e-3)
         )
         kernels.loc[kernels.period == period, 'vsh'] *= (
-            phv_calc[n] / (card.vsh.values[::-1] * 1e-3) * 1e3
+            phv_calc[n] / (card.vsh.values[::-1] * 1e-3)
         )
         kernels.loc[kernels.period == period, 'vpv'] *= (
-            phv_calc[n] / (card.vpv.values[::-1] * 1e-3) * 1e3
+            phv_calc[n] / (card.vpv.values[::-1] * 1e-3)
         )
         kernels.loc[kernels.period == period, 'vph'] *= (
-            phv_calc[n] / (card.vph.values[::-1] * 1e-3) * 1e3
+            phv_calc[n] / (card.vph.values[::-1] * 1e-3)
         )
         kernels.loc[kernels.period == period, 'eta'] *= (
-            phv_calc[n] / (card.eta.values[::-1] * 1e-3) * 1e3
+            phv_calc[n] / (card.eta.values[::-1] * 1e-3)
         )
 
         n += 1
