@@ -143,8 +143,10 @@ def _build_inversion_model_from_model_vector(
             - Units:    seismological (km/s, km)
             - Vs model with values updated from p.
     """
-    new_thickness = model.thickness
-    new_thickness[model.boundary_inds] = p[-2:]
+    new_thickness = model.thickness.copy()
+    dt = p[-2:] - model.thickness[model.boundary_inds]
+    new_thickness[model.boundary_inds] += dt
+    new_thickness[model.boundary_inds + 2] -= dt
 
     return define_models.InversionModel(
                 vsv = np.vstack((p[:-2], model.vsv[-1])),

@@ -133,7 +133,7 @@ def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
 
     # Convert to kernels for the model parameters we are inverting for
     periods = kernels['period'].unique()
-    depth = kernels.loc[kernels['period'] == periods[0], 'z']
+    depth = kernels.loc[kernels['period'] == periods[0], 'z'].values
     dvsv_dp_mat = _convert_to_model_kernels(depth, model)
     # Frechet kernels cover Vsv, Vsh, Vpv, Vph, Eta.  We assume that eta is
     # kept constant, and all of the others are linearly dependent on Vsv.
@@ -168,7 +168,7 @@ def _build_MINEOS_G_matrix(kernels:pd.DataFrame):
     n_Love_periods = 0, i.e. there are no rows in G for the T_*** kernels.
     """
 
-    periods = np.unique(kernels['period'])
+    periods = kernels['period'].unique()
 
     G_Rayleigh = _hstack_frechet_kernels(kernels, periods[0])
     # G_Love = _hstack_frechet_kernels(love, periods[0])

@@ -245,8 +245,8 @@ def setup_starting_model(setup_model):
     ref_vs = ref_model['vsv'] * 1e-3
     # Remove discontinuities and make depth increasing for purposes of interp
     ref_depth[np.append(np.diff(ref_depth), 0) == 0] += 0.01
-    ref_depth = ref_depth.iloc[::-1]
-    ref_vs = ref_vs.iloc[::-1]
+    ref_depth = ref_depth.iloc[::-1].values
+    ref_vs = ref_vs.iloc[::-1].values
 
     thickness = [setup_model.depth_limits[0]] # first point
     vsv = [np.interp(setup_model.depth_limits[0], ref_depth, ref_vs)]
