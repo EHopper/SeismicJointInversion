@@ -238,7 +238,7 @@ class PipelineTest(unittest.TestCase):
             [15.5556, 16.4706, 20, 25, 32, 40, 50, 60, 80, 100, 120, 140, 150],
         )
     ])
-    @unittest.skip("Skip this test because MINEOS is too slow to run every time")
+    #@unittest.skip("Skip this test because MINEOS is too slow to run every time")
     def test_mineos(self, name, model_id, periods):
         """
 
@@ -261,6 +261,12 @@ class PipelineTest(unittest.TestCase):
         if mink < 0: mink *= 1.1;
         else: mink *= 0.9
         plt.gca().set_xlim([mink, maxk])
+        n += 1
+
+        p = periods[n]
+        ke = kernels_calc[kernels_calc.period == p]
+        plt.plot(ke.vsv, ke.z)
+        plt.gca().set_ylim([400, 0])
         n += 1
         """
 
@@ -301,7 +307,8 @@ class PipelineTest(unittest.TestCase):
 
         kernels_expected.drop(columns=['eta', 'rho'], inplace=True)
         kernels_calc.drop(columns=['eta', 'rho'], inplace=True)
-        kernels_expected.loc[:, ['vsv', 'vpv', 'vsv', 'vph']] *= 1e3
+        #kernels_expected.loc[:, ['vsv', 'vpv', 'vsh', 'vph']] *= 1e6
+        kernels_calc.loc[:, ['vsv', 'vpv', 'vsh', 'vph']] *= 1e-6
         # check_less_precise is the number of sig figs that must match
         pd.testing.assert_frame_equal(kernels_calc, kernels_expected,
             check_exact=False, check_less_precise=1,
@@ -631,12 +638,12 @@ class PipelineTest(unittest.TestCase):
             ])
         )
     ])
-    def test_convert_to_model_kernels(self, name, setup_model, depth, expected):
+    def test_convert_to_model_kernels(self, name, model, depth, expected):
         """
         """
 
         np.testing.assert_allclose(
-            partial_derivatives._convert_to_model_kernels(depth, setup_model),
+            partial_derivatives._convert_to_model_kernels(depth, model),
             expected
         )
 
