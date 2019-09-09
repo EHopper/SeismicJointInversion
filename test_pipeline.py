@@ -307,7 +307,9 @@ class PipelineTest(unittest.TestCase):
 
         kernels_expected.drop(columns=['eta', 'rho'], inplace=True)
         kernels_calc.drop(columns=['eta', 'rho'], inplace=True)
-        #kernels_expected.loc[:, ['vsv', 'vpv', 'vsh', 'vph']] *= 1e6
+        # Make Josh's kernels into m/s units (from 1e-3 m/s)
+        kernels_expected.loc[:, ['vsv', 'vpv', 'vsh', 'vph']] *= 1e3
+        # Make calculated kernels into m/s units (from km/s)
         kernels_calc.loc[:, ['vsv', 'vpv', 'vsh', 'vph']] *= 1e-3
         # check_less_precise is the number of sig figs that must match
         pd.testing.assert_frame_equal(kernels_calc, kernels_expected,
@@ -332,9 +334,33 @@ class PipelineTest(unittest.TestCase):
             ),
             [10, 20, 30, 40, 60, 80, 100],
             [1.05] + [1] * 26,
-        )
+        ),
+        (
+            'more perturbed',
+            define_models.SetupModel(
+                'testcase', np.array([25., 120.]), np.array([5, 20]),
+                np.array([10, 30]), np.array([3.6, 4.0, 4.4, 4.3]),
+                np.array([0, 300])
+            ),
+            [5, 8, 10, 15, 20, 30, 40, 60, 80, 100, 120],
+            ([1.05] * 5 + [0.95] * 5 + [1.02] * 5 + [0.99] * 5
+            + [1.06] * 5 + [0.97] * 5 + [1.01] * 5 + [1]
+            + [1.1] * 2),
+        ),
+        (
+            'small perturbations',
+            define_models.SetupModel(
+                'testcase', np.array([35., 90.]), np.array([3, 10]),
+                np.array([5, 20]), np.array([3.5, 4.0, 4.2, 4.1]),
+                np.array([0, 200])
+            ),
+            [10, 20, 30, 40, 60, 80, 100],
+            ([1.005] * 5 + [0.995] * 5 + [1.01] * 5 + [0.997] * 5
+            + [1.01] * 4 + [1]
+            + [1.05] * 2),
+        ),
     ])
-    @unittest.skip("Skip this test because MINEOS is too slow to run every time")
+    #@unittest.skip("Skip this test because MINEOS is too slow to run every time")
     def test_G(self, name, setup_model, periods, model_perturbation):
         """ Test G by comparing the dV from G * dm to the dV output from MINEOS.
 
@@ -388,7 +414,9 @@ class PipelineTest(unittest.TestCase):
         dv_mineos = ph_vel_perturbed - ph_vel_pred
         dv_from_Gdm = np.matmul(G, perturbation).flatten()
 
-        np.testing.assert_allclose(dv_mineos, dv_from_Gdm, rtol=0.25)
+        np.testing.assert_allclose(
+            dv_mineos, dv_from_Gdm, atol=0.01, rtol=0.05,
+        )
 
 
     # ************************* #

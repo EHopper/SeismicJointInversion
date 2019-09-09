@@ -110,6 +110,7 @@ def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
                 - columns: ['z', 'period', 'vsv', 'vpv', 'vsh', 'vph',
                             'eta', 'rho', 'type']
             - Units:    assumes velocities in km/s
+                        depth column in km; period column in seconds
             - Rayleigh wave kernels calculated in MINEOS
         model:
             - define_models.InversionModel
@@ -138,32 +139,109 @@ def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
     # Frechet kernels cover Vsv, Vsh, Vpv, Vph, Eta.  We assume that eta is
     # kept constant, and all of the others are linearly dependent on Vsv.
     dm_dp_mat = _scale_dvsv_dp_to_other_variables(dvsv_dp_mat, setup_model)
-    G_inversion_model = _integrate_dvsv_indepth(G_MINEOS, depth, dm_dp_mat)
+    G_inversion_model = _integrate_dc_dvsv_dvsv_dp_indepth(
+        G_MINEOS, depth, dm_dp_mat
+    )
 
     return G_inversion_model
 
-def _integrate_dvsv_indepth(G_MINEOS, depth, dm_dp_mat):
-    """
+def _integrate_dc_dvsv_dvsv_dp_indepth(G_MINEOS, depth, dm_dp_mat):
+    """ Calcualte dc/dp by integrating over dc/dvsv * dvsv/dp in depth.
+
+    To convert from dc/dvsv to dc/dp, we can multiply dc/dvsv * dvsv/dp.
+    However, given that we are only taking discrete samples, we need to
+    integrate over the dc/dvsv kernels in depth.
+
+    Assuming a linear interpolation between points, the integral between
+    x = a and x = b
+            ∫ f(x) dx =  1/2 Σ_i [(x_i+1 - x_i) (f(x_i) + f(x_i+1))]
+                            for i between 0 and n-1
+    (This is easy to see if you break up the integral of f(x) between
+    two points in x graphically.  Say f(x=a) < f(x=b).  The area beneath the
+    line f(x=a) to f(x=b) is equal to the area of the rectangle up to the
+    height of f(x=a) plus the area of the triangle with height f(x=b) - f(x=a).
+    That is
+            (b - a) * f(x=a)   +  1/2 * (b - a) * (f(x=b) - f(x=a))
+        ==  1/2 (b - a) (f(x=b) + f(x=a))
+        ==  1/2 (x_i+1 - x_i) (f(x_i+1) + f(x_i))
+    Then the sum comes from just adding off of these pointwise integrals).
+
+    Note: this can be explicitly calculated in a (slow) loop.  Given that in the
+    depth range of interest (i.e. everywhere that dm/dp is non-zero), the
+    MINEOS card is sampled at a constant depth interval (if using the default
+    values, this is 2 km:  step = setup_model.min_layer_thickness / 3), this
+    integral is really close to (fast!) matrix multiplication, where every
+    value in the matrix just needs to be multipled by the change in depth
+    and have 1/2 * (f(x_0) + f(x_n)) subtracted from it.
+
+    Arguments:
+        G_MINEOS:
+            - (n_periods, n_card_depths * 5) np.array
+            - Units:    assumes seismological units, i.e. km/s, km
+            - MINEOS kernels rearranged to be useful for the calculations.
+        depth:
+            - (n_card_depths, ) np.array
+            - Units:    km
+            - Unique depths in the kernels used to generate G_MINEOS.
+        dm_dp_mat:
+            - (n_card_depths * 5,
+              n_inversion_model_depths + n_boundary_layers) np.array
+            - Units:    assumes seismological units, i.e. km/s, km
+            - Matrix giving the dependence of the MINEOS model variables of
+              interest (Vsv, Vpv, Vsh, Vph, Eta) on the inversion model
+              parameters (Vsv at various depths, variable depth of specified
+              boundary layers).
+            - Calculated from equations linking the inversion model, p, to the
+              Vsv structure as a function of depth, and assuming constant
+              scaling factors between Vsv and the other MINEOS model variables.
+
+    Returns:
+        G_inversion_model:
+            - (n_periods, n_inversion_model_depths + n_boundary_layers) np.array
+            - Units:    assumes seismological units, i.e. km/s, km
+            - Matrix of dc/dp, i.e. the integrated dependence of phase velocity
+              on the model parameters, p.
+
     """
 
-    G_inversion_model = np.zeros((G_MINEOS.shape[0], dm_dp_mat.shape[1]))
-    for period in range(G_MINEOS.shape[0]):
-        for mod in range(dm_dp_mat.shape[1]):
-            for dep in range(G_MINEOS.shape[1]):
-                idep = dep % len(depth)
-                if idep == len(depth) - 1:
-                    continue
+    # The explicit (slow) way
+    # G_inversion_model = np.zeros((G_MINEOS.shape[0], dm_dp_mat.shape[1]))
+    # for period in range(G_MINEOS.shape[0]):
+    #     for mod in range(dm_dp_mat.shape[1]):
+    #         for dep in range(G_MINEOS.shape[1]):
+    #             idep = dep % len(depth)
+    #             if idep == len(depth) - 1:
+    #                 continue
+    #
+    #             G_inversion_model[period, mod] += (
+    #                 1/2 * np.diff(depth[idep:idep + 2])
+    #                 * (
+    #                     G_MINEOS[period, dep] * dm_dp_mat[dep, mod]
+    #                     + G_MINEOS[period, dep + 1] * dm_dp_mat[dep + 1, mod]
+    #                 )
+    #             )
 
-                G_inversion_model[period, mod] += (
-                    1/2 * np.diff(depth[idep:idep + 2]) * 1e3
-                    * (
-                        G_MINEOS[period, dep] * dm_dp_mat[dep, mod]
-                        + G_MINEOS[period, dep + 1] * dm_dp_mat[dep + 1, mod]
-                    )
+    # Speeding things up, given dx is constant
+    G_inversion_model = np.matmul(G_MINEOS, dm_dp_mat)
+    G_inversion_model *= np.diff(depth[:2]) # multiply by depth step, dx
+    i_corr = []
+    for i_param in range(G_MINEOS.shape[1] // len(depth)):
+        param_inds = list(range(i_param * len(depth),
+                                (i_param + 1) * len(depth))
+                          )
+        i_corr += [param_inds[0], param_inds[-1]]
+
+    for period in range(G_inversion_model.shape[0]):
+        for mod_param in range(G_inversion_model.shape[1]):
+            G_inversion_model[period, mod_param] -= (
+                1/2 * np.diff(depth[:2])
+                * (
+                    sum(G_MINEOS[period, i_corr[::2]]
+                    * dm_dp_mat[i_corr[::2], mod_param])
+                    + sum(G_MINEOS[period, i_corr[1::2]]
+                    * dm_dp_mat[i_corr[1::2], mod_param])
                 )
-
-
-
+            )
 
     return G_inversion_model
 
@@ -191,6 +269,21 @@ def _build_MINEOS_G_matrix(kernels:pd.DataFrame):
 
     For now, we are only using Rayleigh waves, so in the above explanation,
     n_Love_periods = 0, i.e. there are no rows in G for the T_*** kernels.
+
+    Arguments:
+        kernels:
+            - (n_MINEOS_depth_points * n_periods, 9) pandas DataFrame
+                - columns: ['z', 'period', 'vsv', 'vpv', 'vsh', 'vph',
+                            'eta', 'rho', 'type']
+            - Units:    used for km/s
+                        depth column in km; period column in seconds
+            - Corrected kernels (i.e. in units of km/s) from MINEOS.
+
+    Returns:
+        G_MINEOS
+            - (n_periods, n_card_depths * 5) np.array
+            - Units:    used for km/s
+            - MINEOS kernels rearranged to be useful for the calculations.
     """
 
     periods = kernels['period'].unique()

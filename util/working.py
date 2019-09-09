@@ -115,3 +115,16 @@ def test_G(setup_model, periods, model_perturbation):
 
 
     return dc_mineos, dc_from_Gdm
+
+
+setup_model = define_models.SetupModel(
+    'testcase', np.array([25., 120.]), np.array([5, 20]),
+    np.array([10, 30]), np.array([3.6, 4.0, 4.4, 4.3]),
+    np.array([0, 300])
+)
+periods = [5, 8, 10, 15, 20, 30, 40, 60, 80, 100, 120]
+model_perturbation = ([1.05] * 5 + [0.95] * 5 + [1.02] * 5 + [0.99] * 5
++ [1.06] * 5 + [0.97] * 5 + [1.01] * 5 + [1]
++ [1.1] * 2)
+dc_mineos, dc_Gdm = test_G(setup_model, periods, model_perturbation)
+print(dc_mineos, dc_Gdm)
