@@ -1,12 +1,8 @@
 """ Wrapper for using Fortran MINEOS codes.
 
-This WILL BE a Python wrapper to calculate surface wave phase velocities
+This is a Python wrapper to calculate surface wave phase velocities & kernels
 from a given starting velocity model using MINEOS.  Basically a translation
 of Zach Eilon's MATLAB wrapper - https://github.com/eilonzach/matlab_to_mineos.
-
-For now, try and get everything running with some kind of arbitrary kernels
-calculated in MATLAB that we aren't going to update, and the surface wave
-code that is already working.
 
 Classes:
     RunParameters, with fields
@@ -20,7 +16,6 @@ import typing
 import numpy as np
 import subprocess
 import os
-import shutil
 import pandas as pd
 
 #import surface_waves
@@ -150,7 +145,7 @@ def run_mineos(parameters:RunParameters, periods:np.array,
         # Note l_run will only increase if the above run was at least
         # partially successful - c.f. n_runs which increments every time (below)
         min_calculated_period, l_min, l_run = _check_mineos_run(
-            save_name, l_run, l_min, parameters
+            save_name, l_run, l_min, parameters, min_calculated_period
         )
 
         n_runs += 1
@@ -171,7 +166,7 @@ def run_mineos(parameters:RunParameters, periods:np.array,
 
     phase_vel = _read_qfile(qfile, periods)
 
-    return phase_vel, n_runs
+    return phase_vel, l_run
 
 
 
@@ -190,10 +185,8 @@ def _write_run_mineos(parameters:RunParameters, save_name:str,
 
     _write_modefile(modefile, parameters, l_min)
 
-    try:
+    if os.path.exists(execfile):
         os.remove(execfile)
-    except:
-        pass
 
     fid = open(execfile, 'w')
     fid.write('{}/mineos_nohang << ! > {}\n'.format(
@@ -225,10 +218,9 @@ def _write_modefile(modefile, parameters, l_min):
     - N_[TS]modes are number of mode branches for Love and Rayleigh
       i.e. 0 if just fundamental mode
     """
-    try:
+    if os.path.exists(modefile):
         os.remove(modefile)
-    except:
-        pass
+
 
     m_codes = ['quit', 'radial', 'toroidal', 'spheroidal', 'inner core']
     wave_to_mode = {
@@ -266,7 +258,7 @@ def _run_execfile(execfile:str):
 
 
 def _check_mineos_run(save_name:str, l_run:int, l_min:int,
-    parameters:RunParameters):
+                      parameters:RunParameters, min_period:float):
     """ Load in MINEOS output file and work out parameters to rerun if needed.
 
     Read in ascfile to give the maximum achieved angular order, l (and
@@ -279,21 +271,25 @@ def _check_mineos_run(save_name:str, l_run:int, l_min:int,
     """
 
     ascfile = '{0}_{1}.asc'.format(save_name, l_run)
+    eigfile = '{0}_{1}.eig'.format(save_name, l_run)
     modes = _read_ascfiles([ascfile])
 
     if modes.empty:
-        l_last = l_min + parameters.l_increment_failed
-        os.remove(eigfile)
-        os.remove(ascfile)
+        last_fundamental_l = l_min + parameters.l_increment_failed
+        if os.path.exists(ascfile):
+            os.remove(ascfile)
+        if os.path.exists(eigfile):
+            os.remove(eigfile)
+
     else:
         l_run += 1
         last_fundamental_l = max(modes[(modes['n'] == 0)]['l'])
-        lowest_fundamental_period = min(modes[(modes['n'] == 0)]['T_sec'])
+        min_period = min(modes[(modes['n'] == 0)]['T_sec'])
 
 
     new_l_min = last_fundamental_l + parameters.l_increment_standard
 
-    return lowest_fundamental_period, new_l_min, l_run
+    return min_period, new_l_min, l_run
 
 
 def _read_ascfiles(ascfiles:list):
@@ -325,6 +321,9 @@ def _read_ascfiles(ascfiles:list):
         except:
             print(ascfile, ' is empty.')
 
+    if output.empty:
+        return output
+
     output.columns = ['n', 'mode', 'l', 'w_rad_per_s', 'w_mHz', 'T_sec',
                           'grV_km_per_s', 'Q', 'RaylQuo']
     output.drop(['mode', 'RaylQuo'], axis=1, inplace=True)
@@ -342,10 +341,8 @@ def _write_eig_recover(params, save_name, l_run):
     execfile ='{0}_{1}.eig_recover'.format(save_name, l_run)
     eigfile = '{0}_{1}.eig'.format(save_name, l_run)
 
-    try:
-        os.remove(eigrecoverfile)
-    except:
-        pass
+    if os.path.exists(execfile):
+        os.remove(execfile)
 
     ascfile = '{0}_{1}.asc'.format(save_name, l_run)
     modes = _read_ascfiles([ascfile])
@@ -376,10 +373,8 @@ def _write_q_correction(params, save_name, l_run):
     qfile = '{}.q'.format(save_name)
     logfile = '{}.log'.format(save_name)
 
-    try:
+    if os.path.exists(execfile):
         os.remove(execfile)
-    except:
-        pass
 
 
     fid = open(execfile, 'w')

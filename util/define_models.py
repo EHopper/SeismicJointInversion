@@ -234,9 +234,9 @@ def setup_starting_model(setup_model):
             - Model primed for use in the inversion.
     """
     # Set up directory to save to
-    try:
+    if not os.path.exists('output/' + setup_model.id):
         os.mkdir('output/' + setup_model.id)
-    except:
+    else:
         print('This model ID has already been used!')
 
     n_bounds = setup_model.boundary_depths.size
@@ -342,11 +342,10 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model,
             - Units:    km
             - Depth of the Moho - needed to define density structure
     """
-    try:
+    if not os.path.exists('output/' + setup_model.id):
         os.mkdir('output/' + setup_model.id)
         print("This test ID hasn't been used before!")
-    except:
-        pass
+
     # Load PREM (http://ds.iris.edu/ds/products/emc-prem/)
     # Slightly edited to remove the water layer and give the model point
     # at 24 km depth lower crustal parameter values.
