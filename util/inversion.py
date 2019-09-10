@@ -82,7 +82,9 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
         kernels, model, setup_model
     )
     p = _build_model_vector(model)
-    d = _build_data_misfit_matrix(data, ph_vel_pred, p, G)
+    d = _build_data_misfit_matrix(
+        data.surface_waves.Phase_vel.values, ph_vel_pred, p, G
+    )
 
     # Build all of the weighting functions for damped least squares
     layer_indices = define_models._set_model_indices(setup_model, model)
@@ -214,7 +216,7 @@ def _build_data_misfit_matrix(data:np.array, prediction:np.array,
 
     forward_problem_predictions = np.matmul(G, m0).flatten()
 
-    data_misfit = forward_problem_predictions + (data - predictions)
+    data_misfit = forward_problem_predictions + (data - prediction)
 
     return data_misfit
 
