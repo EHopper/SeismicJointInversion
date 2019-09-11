@@ -46,6 +46,7 @@ class ModelLayerValues(typing.NamedTuple):
 
 
 def build_weighting_damping(data:constraints.Observations, p:np.array,
+                            model:define_models.InversionModel,
                             layer_indices:define_models.ModelLayerIndices):
     """
     """
@@ -53,18 +54,21 @@ def build_weighting_damping(data:constraints.Observations, p:np.array,
     W = _build_error_weighting_matrix(data.surface_waves['std'].values)
 
     # Minimise second derivative within layers - roughness
-    damping = ModelLayerValues() # of some description!
+    damping = _set_layer_values(layer_indices, (1,)) # of some description!
     roughness_mat, roughness_vec = _build_smoothing_constraints(model)
     roughness_mat, roughness_vec = _damp_constraints(
-        roughness_mat, roughness_vec, layers, damping
+        roughness_mat, roughness_vec, layer_indices, damping
     )
 
-    a_priori_mat, a_priori_vec = _build_weighting_matrices(data, layer_indices)
+    a_priori_mat, a_priori_vec = _build_weighting_matrices(
+        data, p, model, layer_indices
+    )
 
     return W, roughness_mat, roughness_vec, a_priori_mat, a_priori_vec
 
 
 def _build_weighting_matrices(data:constraints.Observations, m0:np.array,
+                              model:define_models.InversionModel,
                               layers:define_models.ModelLayerIndices):
     """ Build all of the weighting matrices.
 
@@ -93,13 +97,13 @@ def _build_weighting_matrices(data:constraints.Observations, m0:np.array,
 
     # Linear constraint equations
     # Damp towards starting model
-    damping = _set_layer_values(layers, 0) # of some description!
+    damping = _set_layer_values(layers, (1,)) # of some description!
     damp_to_m0_mat, damp_to_m0_vec = _build_constraint_damp_to_m0(m0)
     damp_to_m0_mat, damp_to_m0_vec = _damp_constraints(
         damp_to_m0_mat, damp_to_m0_vec, layers, damping
     )
     # Damp towards starting model gradients in Vs
-    damping = ModelLayerValues()
+    damping = _set_layer_values(layers, (1,)) # of some description!
     damp_to_m0_grad_mat, damp_to_m0_grad_vec = (
         _build_constraint_damp_original_gradient(model)
     )
@@ -122,14 +126,17 @@ def _build_weighting_matrices(data:constraints.Observations, m0:np.array,
 
 
 def _set_layer_values(layers, vals):
+    print(layers)
 
     if len(vals) == 1:
         val, = vals
         vals = ModelLayerValues(
-            upper_crust = val * np.ones(shape(layers.upper_crust)),
-            lower_crust = val * np.ones(shape(layers.lower_crust)),
-            lithospheric_mantle = val * np.ones(shape(layers.lithospheric_mantle)),
-            asthenosphere = val * np.ones(shape(layers.asthenosphere)),
+            upper_crust = val * np.ones(layers.upper_crust.shape),
+            lower_crust = val * np.ones(layers.lower_crust.shape),
+            lithospheric_mantle = (
+                val * np.ones(layers.lithospheric_mantle.shape)
+            ),
+            asthenosphere = val * np.ones(layers.asthenosphere.shape),
         )
 
     return vals
@@ -202,7 +209,7 @@ def _damp_constraints(H, h, layers, damping):
 
     # Loop through all layers
     for layer_name in layers.layer_names:
-        layer_inds = getattr(layers, layer_name)
+        layer_inds = getattr(layers, layer_name).astype(int)
         layer_damping = getattr(damping, layer_name)
 
         # (n_constraint_equations, n_depth_points_in_layer) slice of H
@@ -241,6 +248,7 @@ def _build_error_weighting_matrix(obs_std):
     """
 
     # If standard deviation of data is missing (= 0), fill in with guess
+    obs_std = obs_std.copy()
     obs_std[obs_std == 0] = 0.15
 
 
@@ -296,14 +304,14 @@ def _build_smoothing_constraints(
     # set the roughness_matrix to zero
     # NOTE: given that layer thickness is not equal everywhere, this
     # version of smoothing is not going to be equal everywhere!
-    do_not_smooth = np.concantenate(
+    do_not_smooth = np.concatenate(
         (np.array([0, -1]), model.boundary_inds, model.boundary_inds + 1)
     )
     banded_matrix[do_not_smooth, :] = 0
     # Add columns to roughness_matrix to get it into the right shape
     # These columns can be filled with zeros as they will be mutlipliers
     # for the parameters controlling layer size
-    roughness_matrix = np.concatenate(
+    roughness_matrix = np.hstack(
         (banded_matrix, np.zeros((n_depth_points, model.boundary_inds.size)))
     )
 
@@ -354,7 +362,7 @@ def _make_banded_matrix(matrix_size:int, central_values:tuple):
     return banded_matrix
 
 
-def _build_constraint_damp_to_m(m:np.array) -> (np.array, np.array):
+def _build_constraint_damp_to_m0(m:np.array) -> (np.array, np.array):
     """ Damp towards starting model.
 
     In H * m = h, we want to end up with
@@ -388,7 +396,7 @@ def _build_constraint_damp_to_m(m:np.array) -> (np.array, np.array):
     return H, h
 
 def _build_constraint_damp_original_gradient(
-        arguments:tuple) -> (np.array, np.array):
+        model:define_models.InversionModel):
     """ Damp Vsv gradients between layers to starting model values.
 
     In H * m = h, we want to end up with
@@ -426,14 +434,14 @@ def _build_constraint_damp_original_gradient(
 
     H = np.zeros((n_depth_points - 1,
                   n_depth_points + model.boundary_inds.size))
-    for i_d in range(n_depth_point):
+    for i_d in range(n_depth_points - 1):
         # Need to transpose slice of m0 (2, 1) to fit in H (1, 2) gap,
         # because in H, depth increases with column not row.
         H[i_d, [i_d, i_d+1]] = 1 / model.vsv[[i_d+1, i_d]].T
 
 
     # Remove constraints around discontinuities between layers.
-    do_not_damp = np.concantenate(
+    do_not_damp = np.concatenate(
         (np.array([0, -1]), model.boundary_inds, model.boundary_inds + 1)
     )
     for d in do_not_damp:

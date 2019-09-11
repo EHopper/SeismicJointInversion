@@ -87,7 +87,7 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     # Build all of the weighting functions for damped least squares
     layer_indices = define_models._set_model_indices(setup_model, model)
     W, D_mat, d_vec, H_mat, h_vec = (
-        weights.build_weighting_damping(data, layer_indices, p)
+        weights.build_weighting_damping(data, p, model, layer_indices)
     )
 
     # Perform inversion
@@ -161,7 +161,7 @@ def _build_data_misfit_matrix(data:np.array, prediction:np.array,
 
     This is the difference between the observed and calculated phase velocities.
     To allow the inversion to invert for the model directly (as opposed to
-    the model perturbation), we add this to the forward model prediction, Gm.
+    the model perturbation), we add this to G * m0.
 
     Gm = d              Here, G = d(phase vel)/d(model),
                               m = change in model, m - m0
@@ -176,7 +176,7 @@ def _build_data_misfit_matrix(data:np.array, prediction:np.array,
 
     d is still the misfit between observed (data.c) and predicted phase
     velocities (predictions.c), so we find the full RHS of this equation
-    as (data.c - predictions.c) + G * m0 (aka forward_problem_predictions).
+    as (data.c - predictions.c) + G * m0 (aka Gm0).
 
     See Russell et al., 2019 (10.1029/2018JB016598), eq. 7 to 8.
 
@@ -204,7 +204,7 @@ def _build_data_misfit_matrix(data:np.array, prediction:np.array,
 
     Returns:
         data_misfit:
-            - (n_periods, ) np.array
+            - (n_periods, 1) np.array
             - Units:    km/s
             - The misfit of the data to the predictions, altered to account
               for the inclusion of G * m0.
@@ -212,9 +212,10 @@ def _build_data_misfit_matrix(data:np.array, prediction:np.array,
 
     """
 
-    forward_problem_predictions = np.matmul(G, m0).flatten()
+    Gm0 = np.matmul(G, m0)
+    dc = data - prediction
 
-    data_misfit = forward_problem_predictions + (data - predictions)
+    data_misfit = Gm0 + dc[:, np.newaxis]
 
     return data_misfit
 
