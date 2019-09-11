@@ -217,11 +217,7 @@ def _build_data_misfit_matrix(data:np.array, prediction:np.array,
     Gm0 = np.matmul(G, m0)
     dc = data - prediction
 
-<<<<<<< HEAD
-    data_misfit = forward_problem_predictions + (data - prediction)
-=======
     data_misfit = Gm0 + dc[:, np.newaxis]
->>>>>>> 0c1a09a3755a6c37091673e0a0b9d5fad2bd4d2a
 
     return data_misfit
 
