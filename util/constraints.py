@@ -87,13 +87,15 @@ def extract_observations(lat:float, lon:float):
     phv, rfs = _load_observed_constraints()
 
     surface_waves = pd.DataFrame()
-    for period in phv['Period'].unique():
+    for period in phv['period'].unique():
         ind = _find_closest_lat_lon(
-            phv[phv['Period'] == period].copy(), lat, lon
+            phv[phv['period'] == period].copy(), lat, lon
         )
         surface_waves = surface_waves.append(phv.loc[ind])
-    surface_waves = (surface_waves.sort_values(by=['Period'], ascending=True)
+    surface_waves = (surface_waves.sort_values(by=['period'], ascending=True)
         .reset_index(drop=True))
+    # Should actually load in some std!!!!  Will be set to 0.15 if  == 0 later
+    surface_waves['std'] = 0.
 
     ind = _find_closest_lat_lon(rfs.copy(), lat, lon)
 
@@ -124,6 +126,7 @@ def _load_observed_constraints():
     phvel.reset_index(drop=True, inplace=True)
     # Load in receiver function constraints
     rfs = pd.read_csv('data/RFconstraints/a_priori_constraints.csv')
+    rfs.rename(columns = {'Lat': 'lat', 'Lon': 'lon'}, inplace=True)
 
     return phvel, rfs
 
@@ -146,18 +149,18 @@ def _load_ambient_noise(data_dir:str, file:str):
     # data structure: 1. geocentric latitude, longitude, pixel size, deviation
     ambient_noise = pd.read_csv(data_dir + file, header=None,
         skiprows=11, sep='\s+')
-    ambient_noise.columns = ['geocentric_lat', 'Lon', 'size', 'dV']
-    ambient_noise['Phase_vel'] = (1 + ambient_noise['dV'] / 100) * ref_vel
+    ambient_noise.columns = ['geocentric_lat', 'lon', 'size', 'dV']
+    ambient_noise['ph_vel'] = (1 + ambient_noise['dV'] / 100) * ref_vel
     # convert to geodetic latitude,
     #       tan(geocentric_lat) = (1 - f)**2 * tan(geodesic_lat)
     # https://en.wikipedia.org/wiki/Latitude#Geocentric_latitude
     WGS84_f = 1 / 298.257223563  # flattening for WGS84 ellipsoid
-    ambient_noise['Lat'] = np.degrees(np.arctan(
+    ambient_noise['lat'] = np.degrees(np.arctan(
         np.tan(np.radians(ambient_noise['geocentric_lat'])) / (1 - WGS84_f)**2
     ))
-    ambient_noise['Period'] = period
+    ambient_noise['period'] = period
 
-    return ambient_noise[['Period', 'Lat', 'Lon', 'Phase_vel']]
+    return ambient_noise[['period', 'lat', 'lon', 'ph_vel']]
 
 def _load_earthquake_sw(data_dir:str, file:str):
     """
@@ -167,10 +170,10 @@ def _load_earthquake_sw(data_dir:str, file:str):
     period = float(re.split('_|\.', file)[-2])
 
     surface_waves = pd.read_csv(data_dir + file, sep='\s+', header=None)
-    surface_waves.columns = ['Lat', 'Lon', 'Phase_vel']
-    surface_waves['Period'] = period
+    surface_waves.columns = ['lat', 'lon', 'ph_vel']
+    surface_waves['period'] = period
 
-    return surface_waves[['Period', 'Lat', 'Lon', 'Phase_vel']]
+    return surface_waves[['period', 'lat', 'lon', 'ph_vel']]
 
 def _find_closest_lat_lon(df:pd.DataFrame, lat:float, lon:float):
     """ Find index in dataframe of closest point to lat, lon.
@@ -182,13 +185,13 @@ def _find_closest_lat_lon(df:pd.DataFrame, lat:float, lon:float):
     # Make sure all longitudes are in range -180 to 180
     if lon > 180:
         lon -= 360
-    df.loc[df['Lon'] > 180, 'Lon'] -= 360
+    df.loc[df['lon'] > 180, 'lon'] -= 360
 
-    df['distance_squared'] = (df['Lon'] - lon)**2 + (df['Lat'] - lat)**2
+    df['distance_squared'] = (df['lon'] - lon)**2 + (df['lat'] - lat)**2
     min_ind = df['distance_squared'].idxmin()
 
     if df.loc[min_ind, 'distance_squared'] > 1:
         print('!!!!!! Closest observation at {}°N, {}°E !!!!!!'.format(
-            df.loc[min_ind, 'Lat'], df.loc[min_ind, 'Lon']))
+            df.loc[min_ind, 'lat'], df.loc[min_ind, 'lon']))
 
     return min_ind

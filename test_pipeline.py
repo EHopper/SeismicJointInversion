@@ -14,6 +14,7 @@ from util import mineos
 from util import inversion
 from util import partial_derivatives
 from util import weights
+from util import constraints
 
 
 class PipelineTest(unittest.TestCase):
@@ -276,10 +277,9 @@ class PipelineTest(unittest.TestCase):
         actual_output_dir = 'output/testcase/'
 
         # Copy the test card into the right directory for the workflow
-        try:
+        if os.path.exists(actual_output_dir):
             shutil.rmtree(actual_output_dir)
-        except:
-            pass
+
         os.mkdir(actual_output_dir)
         shutil.copyfile(expected_output_dir + model_id + '.card',
                         actual_output_dir + 'testcase.card')
@@ -359,6 +359,19 @@ class PipelineTest(unittest.TestCase):
             + [1.01] * 4 + [1]
             + [1.05] * 2),
         ),
+        (
+            'sharp LAB',
+            define_models.SetupModel(
+                'testcase', np.array([35., 90.]), np.array([3, 10]),
+                np.array([5, 10]), np.array([3.5, 4.0, 4.2, 4.1]),
+                np.array([0, 200])
+            ),
+            [10, 20, 30, 40, 60, 80, 100],
+            ([1.005] * 5 + [0.995] * 5 + [1.01] * 5 + [0.997] * 5
+            + [1.01] * 5 + [1]
+            + [1.05] * 2),
+        ),
+
     ])
     #@unittest.skip("Skip this test because MINEOS is too slow to run every time")
     def test_G(self, name, setup_model, periods, model_perturbation):
@@ -388,7 +401,9 @@ class PipelineTest(unittest.TestCase):
         _ = define_models.convert_inversion_model_to_mineos_model(
             model, setup_model
         )
-        params = mineos.RunParameters(freq_max = 1000 / min(periods) + 1)
+        params = mineos.RunParameters(
+            freq_max = 1000 / min(periods) + 1, max_run_N = 5,
+        )
         ph_vel_pred, kernels = mineos.run_mineos_and_kernels(
             params, periods, setup_model.id
         )
