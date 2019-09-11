@@ -72,9 +72,10 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     )
     # Can vary other parameters in MINEOS by putting them as inputs to this call
     # e.g. defaults include l_min, l_max; qmod_path; phase_or_group_velocity
+    periods = data.surface_waves.period.values
     params = mineos.RunParameters(freq_max = 1000 / min(periods) + 1)
     ph_vel_pred, kernels = mineos.run_mineos_and_kernels(
-        params, data.surface_waves.Period.values, setup_model.id
+        params, periods, setup_model.id
     )
     kernels = kernels[kernels['z'] <= setup_model.depth_limits[1]]
 
@@ -83,7 +84,7 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     )
     p = _build_model_vector(model)
     d = _build_data_misfit_matrix(
-        data.surface_waves.Phase_vel.values, ph_vel_pred, p, G
+        data.surface_waves.ph_vel.values, ph_vel_pred, p, G
     )
 
     # Build all of the weighting functions for damped least squares
@@ -93,9 +94,9 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     )
 
     # Perform inversion
-    model_new = _damped_least_squares(p, G, d, W, D_mat, d_vec, H_mat, h_vec)
+    p_new = _damped_least_squares(p, G, d, W, D_mat, d_vec, H_mat, h_vec)
 
-    return _build_inversion_model_from_model_vector(model_new)
+    return _build_inversion_model_from_model_vector(p_new, model)
 
 
 def _build_model_vector(model:define_models.InversionModel,
@@ -249,20 +250,36 @@ def _damped_least_squares(m0, G, d, W, D_mat, d_vec, H_mat, h_vec):
                     (n_data_points x 1)
         - <m>:  old (a priori) model
                     (n_model_points x 1)
+                    Note that in our final inversion, we do not use this
+                    explicitly as in the notation below, but is included here
+                    to work forwards from the Menke (2012) formulation.
     Where
         - D:    roughness matrix
                     (n_smoothing_equations x n_model_points)
 
     This is formulated in Menke (2012; eq. 3.46) as
         F * m_est  = f
-        F  	=   [    sqrt(We) * G ;    εD   ]
-        f 	=   [    sqrt(We) * d ;    εD<m>   ]
+        F  =  [[  sqrt(We) * G  ]       f   =  [[    sqrt(We) * d    ]
+               [      εD        ]]              [       εD<m>        ]]
+
 
         i.e. m_est = (F' * F)^-1 * F' * f
                    = [(G' * We * G) + (ε^2 * D' * D)]^-1
                      * [(G' * We * d) + (ε^2 * D' * D * <m>) ]
 
-    Then add in any a priori constraints, formulated by Menke (2012; eq. 3.55)
+    Note that here the old model, <m>, is just standing in for the constraints
+    on the smoothness, here explicitly picked out as εD * m_est = εD * <m>.
+    In this formulation, we can just sweep this smoothing constraint in with
+    all of the other a priori constraints.  To damp towards a perfectly smooth
+    model (as coded in weights.py), D approximates the second derivative of
+    the model with D * m_est and is set equal to zero instead of εD * <m>.
+        F  =  [[  sqrt(We) * G  ]       f   =  [[    sqrt(We) * d    ]
+               [      εD        ]]              [  [[0],[0],...,[0]] ]]
+
+        i.e. m_est = (F' * F)^-1 * F' * f
+                   = [(G' * We * G) + (ε^2 * D' * D)]^-1 * [(G' * We * d)]
+
+    Any other a priori constraints, formulated by Menke (2012; eq. 3.55)
     as linear constraint equations:
         H * m = h
 
@@ -270,10 +287,17 @@ def _damped_least_squares(m0, G, d, W, D_mat, d_vec, H_mat, h_vec):
     and h would be the original model.
 
     These are combined as vertical stacks:
-        all damping matrices = [εD; H]
-        all damping results = [εD<m>; h]
-
-
+        F * m_est = f
+        F  =  [[  sqrt(We) * G  ]       f   =  [[    sqrt(We) * d    ]
+               [      εD        ]               [  [[0],[0],...,[0]] ]
+               [      εH        ]]              [         h          ]]
+               ((n_data_points                  ((n_data_points
+                + n_smoothing_equations          + n_smoothing_equations
+                + n_a_priori_constraints),       + n_a_priori_constraints),
+                n_model_params) np.array         1) np.array
+        i.e. m_est = (F' * F)^-1 * F' * f
+                   = [(G' * We * G) + (ε^2 * D' * D) + (H' * H)]^-1
+                     * [(G' * We * d) + (H' * h)]
     """
 
     H = np.vstack((D_mat, H_mat))

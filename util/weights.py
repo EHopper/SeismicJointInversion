@@ -126,7 +126,6 @@ def _build_weighting_matrices(data:constraints.Observations, m0:np.array,
 
 
 def _set_layer_values(layers, vals):
-    print(layers)
 
     if len(vals) == 1:
         val, = vals
@@ -209,6 +208,7 @@ def _damp_constraints(H, h, layers, damping):
 
     # Loop through all layers
     for layer_name in layers.layer_names:
+
         layer_inds = getattr(layers, layer_name).astype(int)
         layer_damping = getattr(damping, layer_name)
 
@@ -220,7 +220,7 @@ def _damp_constraints(H, h, layers, damping):
         # wrong orientation - have to add an axis (cannot transpose as
         # it starts off as 1D)
         H[:, layer_inds] *= layer_damping
-        h[layer_inds] *= layer_damping[:, np.newaxis]
+        #h[layer_inds] *= layer_damping[:, np.newaxis]
 
     return H, h
 
@@ -279,13 +279,13 @@ def _build_smoothing_constraints(
 
     Returns:
         roughness_mat
-            - (n_depth_points, n_depth_points) np.array
+            - (n_smoothing_equations, n_model_params) np.array
             - Roughness matrix, D, in D * m = d.
             - In Menke (2012)'s notation, this is D and Wm is D^T * D.
             - This is the matrix that we multiply by the model to find the
               roughness of the model (i.e. the second derivative of the model).
         - roughness_vec
-            - (n_depth_points, 1) np.array
+            - (n_smoothing_equations, 1) np.array
             - Roughness vector, d, in D * m = d.
             - This is the permitted roughness of the model.
             - Actual roughness is calculated as roughness_matrix * model, and
@@ -296,7 +296,7 @@ def _build_smoothing_constraints(
               roughness is set to zero always.
 
     """
-    n_depth_points = model.vsv.size
+    n_depth_points = model.vsv.size - 1
 
     # Make and edit the banded matrix (roughness equations)
     banded_matrix = _make_banded_matrix(n_depth_points, (1, -2, 1))
@@ -430,15 +430,15 @@ def _build_constraint_damp_original_gradient(
             - Set to zero always.
     """
 
-    n_depth_points = model.vsv.size
+    n_depth_points = model.vsv.size - 1
 
     H = np.zeros((n_depth_points - 1,
                   n_depth_points + model.boundary_inds.size))
+
     for i_d in range(n_depth_points - 1):
         # Need to transpose slice of m0 (2, 1) to fit in H (1, 2) gap,
         # because in H, depth increases with column not row.
         H[i_d, [i_d, i_d+1]] = 1 / model.vsv[[i_d+1, i_d]].T
-
 
     # Remove constraints around discontinuities between layers.
     do_not_damp = np.concatenate(
