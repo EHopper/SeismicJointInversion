@@ -68,7 +68,7 @@ class PipelineTest(unittest.TestCase):
     #      define_models.py     #
     # ************************* #
 
-    # Test SetupModel class
+    # test_SetupModel
     @parameterized.expand([
             (
                 "Using default values",
@@ -121,6 +121,7 @@ class PipelineTest(unittest.TestCase):
             expected
         )
 
+    # test_setup_starting_model
     @parameterized.expand([
         (
             'basic model',
@@ -232,6 +233,7 @@ class PipelineTest(unittest.TestCase):
     #         mineos.py         #
     # ************************* #
 
+    # test_mineos
     @parameterized.expand([
         (
             'NoMelt models and results, courtesy Josh Russell, 2019',
@@ -323,7 +325,7 @@ class PipelineTest(unittest.TestCase):
     #       inversion.py        #
     # ************************* #
 
-
+    # test_G
     @parameterized.expand([
         (
             'basic model',
@@ -451,6 +453,8 @@ class PipelineTest(unittest.TestCase):
     # ************************* #
     #   partial_derivatives.py  #
     # ************************* #
+
+    # test_build_MINEOS_G_matrix
     @parameterized.expand([
         (
             'simple',
@@ -482,7 +486,7 @@ class PipelineTest(unittest.TestCase):
             expected_G_MINEOS
         )
 
-
+    # test_calculate_dm_ds
     @parameterized.expand([
         (
             'Simple',
@@ -545,6 +549,7 @@ class PipelineTest(unittest.TestCase):
             expected
         )
 
+    # test_convert_kernels_d_shallowerm_by_d_s
     @parameterized.expand([
         (
             'Simple',
@@ -588,6 +593,7 @@ class PipelineTest(unittest.TestCase):
             )
         np.testing.assert_allclose(dm_ds_mat, expected_dm_ds)
 
+    # test_convert_kernels_d_deeperm_by_d_s
     @parameterized.expand([
         (
             'Simple',
@@ -631,6 +637,7 @@ class PipelineTest(unittest.TestCase):
             )
         np.testing.assert_allclose(dm_ds_mat, expected_dm_ds)
 
+    # test_calculate_dm_dt
     @parameterized.expand([
         (
             'Moho & LAB',
@@ -667,6 +674,7 @@ class PipelineTest(unittest.TestCase):
             expected
         )
 
+    # test_convert_to_model_kernels
     @parameterized.expand([
         (
             'Moho & LAB',
@@ -704,6 +712,7 @@ class PipelineTest(unittest.TestCase):
             expected
         )
 
+    # test_scale_dvsv_dp_to_other_variables
     @parameterized.expand([
         (
             'Simple',
@@ -763,6 +772,7 @@ class PipelineTest(unittest.TestCase):
     #         weights.py        #
     # ************************* #
 
+    # test_set_layer_values
     @parameterized.expand([
         (
             'simple',
@@ -791,6 +801,7 @@ class PipelineTest(unittest.TestCase):
         pd.testing.assert_frame_equal(damp_s, expected_s)
         pd.testing.assert_frame_equal(damp_t, expected_t)
 
+    # test_damp_constraints
     @parameterized.expand([
         (
             'simple_square',
@@ -849,6 +860,100 @@ class PipelineTest(unittest.TestCase):
         np.testing.assert_array_equal(H, expected_H)
         np.testing.assert_array_equal(h, expected_h)
 
+    # test_build_constraint_damp_to_m0
+    @parameterized.expand([
+        (
+            'simple',
+            define_models.InversionModel(
+                vsv = np.array([3] * 13)[:, np.newaxis],
+                thickness = np.array([6] * 13)[:, np.newaxis],
+                boundary_inds = np.array([4, 8])
+            ),
+            np.array([
+                [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
+                [1, -2,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
+                [0,  1, -2,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
+                [0,  0,  1, -2,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0],
+                [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
+                [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
+                [0,  0,  0,  0,  0,  1, -2,  1,  0,  0,  0,  0,  0,  0],
+                [0,  0,  0,  0,  0,  0,  1, -2,  1,  0,  0,  0,  0,  0],
+                [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
+                [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
+                [0,  0,  0,  0,  0,  0,  0,  0,  0,  1, -2,  1,  0,  0],
+                [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
+            ]),
+            np.array([0] * 12)[:, np.newaxis],
+        ),
+    ])
+    def test_build_smoothing_constraints(self, name, model,
+                                         expected_H, expected_h):
+
+        H, h, label = weights._build_smoothing_constraints(model)
+
+        self.assertEqual(label, 'roughness')
+        np.testing.assert_array_equal(H, expected_H)
+        np.testing.assert_array_equal(h, expected_h)
+
+        damp_s = pd.DataFrame({'Depth': np.cumsum(model.thickness[:-1])})
+        damp_t = pd.DataFrame({'Depth': [35., 80.]})
+        n_layers = expected_h.shape[0]
+        n_bls = model.boundary_inds.shape[0]
+        layers = define_models.ModelLayerIndices(
+            np.arange(2), np.arange(2, 3), np.arange(3, 4),
+            np.arange(4, n_layers), np.arange(n_layers, n_layers + n_bls),
+            np.arange(0, 10)
+        )
+        weights._set_layer_values(
+            'roughness', (1, 1, 1, 1, 10), layers, damp_s, damp_t
+        )
+        H_sc, h_sc = weights._damp_constraints((H, h, label), damp_s, damp_t)
+        self.assertEqual(label, 'roughness')
+        np.testing.assert_array_equal(H_sc, expected_H)
+        np.testing.assert_array_equal(h_sc, expected_h)
+
+    # test_build_constraint_damp_to_m0
+    @parameterized.expand([
+        (
+            'simple',
+            np.array([1, 2, 3, 4, 5])[:, np.newaxis],
+            np.array([
+                [1, 0, 0, 0, 0],
+                [0, 1, 0, 0, 0],
+                [0, 0, 1, 0, 0],
+                [0, 0, 0, 1, 0],
+                [0, 0, 0, 0, 1],
+            ]),
+            np.array([1, 2, 3, 4, 5])[:, np.newaxis],
+        ),
+    ])
+    def test_build_constraint_damp_to_m0(self, name, p, expected_H, expected_h):
+        H, h, label = weights._build_constraint_damp_to_m0(p)
+        self.assertEqual(label, 'to_m0')
+        np.testing.assert_array_equal(H, expected_H)
+        np.testing.assert_array_equal(h, expected_h)
+
+    # test_build_constraint_damp_to_m0
+    # @parameterized.expand([
+    #     (
+    #         'simple',
+    #         np.array([1, 2, 3, 4, 5])[:, np.newaxis],
+    #         np.array([
+    #             [1, 0, 0, 0, 0],
+    #             [0, 1, 0, 0, 0],
+    #             [0, 0, 1, 0, 0],
+    #             [0, 0, 0, 1, 0],
+    #             [0, 0, 0, 0, 1],
+    #         ]),
+    #         np.array([1, 2, 3, 4, 5])[:, np.newaxis],
+    #     ),
+    # ])
+    # def test_build_constraint_damp_to_m0_grad(self, name, model,
+    #                                           expected_H, expected_h):
+    #     H, h, label = weights._build_constraint_damp_to_m0_grad(model)
+    #     self.assertEqual(label, 'to_m0_grad')
+    #     np.testing.assert_array_equal(H, expected_H)
+    #     np.testing.assert_array_equal(h, expected_h)
 
 
 

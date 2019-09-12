@@ -301,7 +301,8 @@ def _build_smoothing_constraints(
     # NOTE: given that layer thickness is not equal everywhere, this
     # version of smoothing is not going to be equal everywhere!
     do_not_smooth = np.concatenate(
-        (np.array([0, -1]), model.boundary_inds, model.boundary_inds + 1)
+        (np.array([0, -1]), model.boundary_inds, model.boundary_inds + 1,
+        model.boundary_inds + 2, model.boundary_inds - 1)
     )
     banded_matrix[do_not_smooth, :] = 0
     # Add columns to roughness_matrix to get it into the right shape
