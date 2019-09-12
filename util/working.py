@@ -11,6 +11,8 @@ from util import mineos
 from util import inversion
 from util import partial_derivatives
 from util import weights
+from util import constraints
+from util import plots
 
 
 
@@ -117,14 +119,64 @@ def test_G(setup_model, periods, model_perturbation):
     return dc_mineos, dc_from_Gdm
 
 
-setup_model = define_models.SetupModel(
-    'testcase', np.array([25., 120.]), np.array([5, 20]),
-    np.array([10, 30]), np.array([3.6, 4.0, 4.4, 4.3]),
-    np.array([0, 300])
-)
-periods = [5, 8, 10, 15, 20, 30, 40, 60, 80, 100, 120]
-model_perturbation = ([1.05] * 5 + [0.95] * 5 + [1.02] * 5 + [0.99] * 5
-+ [1.06] * 5 + [0.97] * 5 + [1.01] * 5 + [1]
-+ [1.1] * 2)
-dc_mineos, dc_Gdm = test_G(setup_model, periods, model_perturbation)
-print(dc_mineos, dc_Gdm)
+def run_test_G():
+    setup_model = define_models.SetupModel(
+        'testcase', np.array([25., 120.]), np.array([5, 20]),
+        np.array([10, 30]), np.array([3.6, 4.0, 4.4, 4.3]),
+        np.array([0, 300])
+    )
+    periods = [5, 8, 10, 15, 20, 30, 40, 60, 80, 100, 120]
+    model_perturbation = ([1.05] * 5 + [0.95] * 5 + [1.02] * 5 + [0.99] * 5
+    + [1.06] * 5 + [0.97] * 5 + [1.01] * 5 + [1]
+    + [1.1] * 2)
+    dc_mineos, dc_Gdm = test_G(setup_model, periods, model_perturbation)
+    print(dc_mineos, dc_Gdm)
+
+
+def test_damping(n_iter):
+    setup_model = define_models.SetupModel(
+        'testcase', np.array([35., 100.]), np.array([5, 20]),
+        np.array([10, 30]), np.array([3.6, 4.0, 4.4, 4.3]),
+        np.array([0, 300])
+    )
+    data = constraints.extract_observations(35, -104)
+    # To speed things up, remove some data
+    data = data._replace(surface_waves =
+        data.surface_waves.iloc[[3, 7, 9, 11, 12, 13], :].reset_index()
+    )
+    periods = data.surface_waves.period.values
+    save_name = 'output/{0}/{0}.q'.format(setup_model.id)
+
+    f = plt.figure()
+    f.set_size_inches((15,7))
+    ax_m = f.add_axes([0.35, 0.1, 0.2, 0.8])
+    ax_c = f.add_axes([0.6, 0.2, 0.35, 0.5])
+    line, = ax_c.plot(periods, data.surface_waves.ph_vel.values,
+                      'k-', linewidth=3)
+    line.set_label('data')
+
+    m = define_models.setup_starting_model(setup_model)
+    plots.plot_model(m, 'm0', ax_m)
+    for n in range(n_iter):
+        m = inversion._inversion_iteration(setup_model, m, data)
+        c = mineos._read_qfile(save_name, periods)
+        plots.plot_model(m, 'm' + str(n + 1), ax_m)
+        plots.plot_ph_vel(periods, c, 'm' + str(n), ax_c)
+    # Run MINEOS on final model
+    params = mineos.RunParameters(freq_max = 1000 / min(periods) + 1)
+    _ = define_models.convert_inversion_model_to_mineos_model(m, setup_model)
+    c, _ = mineos.run_mineos(params, periods, setup_model.id)
+    plots.plot_ph_vel(periods, c, 'm' + str(n + 1), ax_c)
+
+    save_name = 'output/{0}/{0}'.format(setup_model.id)
+    damp_s = pd.read_csv(save_name + 'damp_s.csv')
+    damp_t = pd.read_csv(save_name + 'damp_t.csv')
+    n = 0
+    for label in ['roughness', 'to_m0', 'to_m0_grad']:
+        ax_d = f.add_axes([0.05 + 0.1 * n, 0.1, 0.05, 0.8])
+        ax_d.plot(damp_s[label], damp_s.Depth, 'ko-', markersize=3)
+        ax_d.plot(damp_t[label], damp_t.Depth, 'ro', markersize=2)
+        ax_d.set(title=label)
+        ax_d.set_ylim([np.cumsum(m.thickness)[-1], 0])
+        ax_d.xaxis.tick_top()
+        n += 1

@@ -193,7 +193,6 @@ def _write_run_mineos(parameters:RunParameters, save_name:str,
         parameters.bin_path, logfile))
     fid.write('{0}.card\n{0}_{1}.asc\n{0}_{1}.eig\n{0}_{1}.mode\n!'.format(
                 save_name, l_run))
-    fid.write
     fid.close()
 
     return execfile

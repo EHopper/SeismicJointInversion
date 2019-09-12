@@ -16,9 +16,9 @@ from util import partial_derivatives
 from util import weights
 from util import constraints
 
+skipMINEOS = True
 
 class PipelineTest(unittest.TestCase):
-
 
     # =========================================================================
     # Set up specific assertions for locally defined classes
@@ -239,7 +239,7 @@ class PipelineTest(unittest.TestCase):
             [15.5556, 16.4706, 20, 25, 32, 40, 50, 60, 80, 100, 120, 140, 150],
         )
     ])
-    #@unittest.skip("Skip this test because MINEOS is too slow to run every time")
+    @unittest.skipIf(skipMINEOS, "MINEOS runs too slow to test every time")
     def test_mineos(self, name, model_id, periods):
         """
 
@@ -373,7 +373,7 @@ class PipelineTest(unittest.TestCase):
         ),
 
     ])
-    #@unittest.skip("Skip this test because MINEOS is too slow to run every time")
+    @unittest.skipIf(skipMINEOS, "MINEOS runs too slow to test every time")
     def test_G(self, name, setup_model, periods, model_perturbation):
         """ Test G by comparing the dV from G * dm to the dV output from MINEOS.
 
@@ -387,13 +387,27 @@ class PipelineTest(unittest.TestCase):
         As G is dV/dm, then G * dm == mineos(m_perturbed) - mineos(m0).
 
         Plot this comparison:
-        im = plt.scatter(dv_mineos, dv_from_Gdm, 10, periods)
-        allv = list(dv_mineos) + list(dv_from_Gdm)
-        plt.plot([min(allv), max(allv)], [min(allv), max(allv)], 'k:')
-        plt.xlabel('dV from MINEOS')
-        plt.ylabel('dV from G calculation')
+        plt.figure(figsize=(10,8))
+        a1 = plt.subplot(1, 3, 1)
+        plt.plot(model.vsv, np.cumsum(model.thickness), 'b-o')
+        plt.plot(model_perturbed.vsv, np.cumsum(model_perturbed.thickness), 'r-o')
+        plt.title('Vsv Models\nblue: original; red: perturbed')
+        plt.gca().set_ylim([200, 0])
+        plt.xlabel('Vsv (km/s)')
+        plt.ylabel('Depth (km)')
+        a2 = plt.subplot(2, 2, 2)
+        im = plt.scatter(dc_mineos, dc_from_Gdm, 10, periods)
+        plt.xlabel('dc from MINEOS')
+        plt.ylabel('dc from G calculation')
         cbar = plt.gcf().colorbar(im)
         cbar.set_label('Periods (s)', rotation=90)
+        a3 = plt.subplot(2, 2, 4)
+        im = plt.scatter(periods,
+                         (dc_from_Gdm - dc_mineos) / dc_mineos, 10, dc_mineos)
+        plt.xlabel('Period (s)')
+        plt.ylabel('(Gdm - dc) / dc')
+        cbar2 = plt.gcf().colorbar(im)
+        cbar2.set_label('dc from MINEOS (km/s)', rotation=90)
         """
         # Calculate the G matrix from a starting model
         model = define_models.setup_starting_model(setup_model)
@@ -745,6 +759,95 @@ class PipelineTest(unittest.TestCase):
         )
 
 
+    # ************************* #
+    #         weights.py        #
+    # ************************* #
+
+    @parameterized.expand([
+        (
+            'simple',
+            define_models.ModelLayerIndices(
+                np.arange(2), np.arange(2, 5), np.arange(5, 10),
+                np.arange(10, 16), np.arange(16, 20),
+                np.arange(0, 16 * 3, 3)
+            ),
+            (1, 2, [3, 4, 5, 6, 7], 2, [1, 2, 3, 4]),
+            pd.DataFrame({
+                'Depth': np.arange(0, 16 * 3, 3),
+                'simple': [1, 1, 2, 2, 2, 3, 4, 5, 6, 7, 2, 2, 2, 2, 2, 2]
+            }),
+            pd.DataFrame({
+                'Depth': [0, 1, 2, 3],
+                'simple': [1, 2, 3, 4]
+            })
+        )
+    ])
+    def test_set_layer_values(self, name, layers, damping,
+                                  expected_s, expected_t):
+        damp_s = pd.DataFrame({'Depth': layers.depth})
+        damp_t = pd.DataFrame({'Depth': np.arange(len(layers.boundary_layers))})
+        weights._set_layer_values(name, damping, layers, damp_s, damp_t)
+
+        pd.testing.assert_frame_equal(damp_s, expected_s)
+        pd.testing.assert_frame_equal(damp_t, expected_t)
+
+    @parameterized.expand([
+        (
+            'simple_square',
+            np.array([
+                [1, 2, 3, 1, 2, 3, 1, 2, 3],
+                [0, 1, 2, 0, 1, 2, 0, 1, 2],
+                [1, 8, 3, 1, 2, 3, 1, 2, 3],
+                [0, 1, 2, 0, 1, 2, 0, 1, 2],
+                [1, 2, 2, 1, 2, 3, 1, 2, 3],
+                [1, 2, 3, 1, 2, 3, 1, 2, 3],
+                [0, 1, 2, 0, 1, 2, 0, 1, 2],
+                [1, 2, 3, 1, 2, 3, 1, 2, 3],
+                [0, 8, 2, 0, 1, 2, 0, 1, 2]
+            ]),
+            np.array([10, 20, 10, 20, 10, 30, 10, 40, 10])[:, np.newaxis],
+            pd.DataFrame({'simple_square': [1] * 2 + [2] + [4, 5, 6, 7]}),
+            pd.DataFrame({'simple_square': [1, 2]}),
+            np.array([
+                [1, 2, 6, 4, 10, 18, 7, 2, 6],
+                [0, 1, 4, 0, 5, 12, 0, 1, 4],
+                [1, 8, 6, 4, 10, 18, 7, 2, 6],
+                [0, 1, 4, 0, 5, 12, 0, 1, 4],
+                [1, 2, 4, 4, 10, 18, 7, 2, 6],
+                [1, 2, 6, 4, 10, 18, 7, 2, 6],
+                [0, 1, 4, 0, 5, 12, 0, 1, 4],
+                [1, 2, 6, 4, 10, 18, 7, 2, 6],
+                [0, 8, 4, 0, 5, 12, 0, 1, 4]
+            ]),
+            np.array([10, 20, 20, 80, 50, 180, 70, 40, 20])[:, np.newaxis],
+        ),
+        (
+            'fewer_constraints',
+            np.array([
+                [1, 2, 3, 1, 2, 3, 1, 2, 3],
+                [0, 1, 2, 0, 1, 2, 0, 1, 2],
+            ]),
+            np.array([10, 20])[:, np.newaxis],
+            pd.DataFrame({'fewer_constraints': [1] * 2 + [2] + [4, 5, 6, 7]}),
+            pd.DataFrame({'fewer_constraints': [1, 2]}),
+            np.array([
+                [1, 2, 6, 4, 10, 18, 7, 2, 6],
+                [0, 1, 4, 0, 5, 12, 0, 1, 4],
+            ]),
+            np.array([10, 20])[:, np.newaxis], # Note that this is the expected
+                                               # behaviour (h unchanged), but
+                                               # it will cause issues unless
+                                               # h == 0 always OR it has
+                                               # already been damped
+        ),
+    ])
+    def test_damp_constraints(self, name, H, h, damp_s, damp_t,
+                              expected_H, expected_h):
+
+        H, h = weights._damp_constraints((H, h, name), damp_s, damp_t)
+
+        np.testing.assert_array_equal(H, expected_H)
+        np.testing.assert_array_equal(h, expected_h)
 
 
 

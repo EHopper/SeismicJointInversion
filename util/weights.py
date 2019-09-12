@@ -47,100 +47,87 @@ class ModelLayerValues(typing.NamedTuple):
 
 def build_weighting_damping(data:constraints.Observations, p:np.array,
                             model:define_models.InversionModel,
-                            layer_indices:define_models.ModelLayerIndices):
+                            setup_model:define_models.SetupModel):
     """
     """
 
+    # Calculate data error matrix
     W = _build_error_weighting_matrix(data.surface_waves['std'].values)
 
+    # Record level of damping on the Vsv model parameters
+    layers = define_models._set_model_indices(setup_model, model)
+    damp_s = pd.DataFrame({
+        'Depth': np.mean(
+            np.vstack(
+                (layers.depth,
+                layers.depth[1:] + [np.sum(model.thickness)])
+                ),
+            0),
+        })
+    # Record level of damping on the boundary layer depth parameters
+    damp_t = pd.DataFrame({
+        'Depth': np.cumsum(model.thickness)[model.boundary_inds],
+    })
+
+
     # Minimise second derivative within layers - roughness
-    damping = _set_layer_values(layer_indices, (1,)) # of some description!
-    roughness_mat, roughness_vec = _build_smoothing_constraints(model)
+    _set_layer_values('roughness', (1, 1, 1, 1, 1), layers, damp_s, damp_t)
     roughness_mat, roughness_vec = _damp_constraints(
-        roughness_mat, roughness_vec, layer_indices, damping
+        _build_smoothing_constraints(model), damp_s, damp_t
     )
-
-    a_priori_mat, a_priori_vec = _build_weighting_matrices(
-        data, p, model, layer_indices
-    )
-
-    return W, roughness_mat, roughness_vec, a_priori_mat, a_priori_vec
-
-
-def _build_weighting_matrices(data:constraints.Observations, m0:np.array,
-                              model:define_models.InversionModel,
-                              layers:define_models.ModelLayerIndices):
-    """ Build all of the weighting matrices.
-
-    Arguments:
-        data:
-            - constraints.Observations
-            - Observed phase velocity data
-            - data.c is (n_periods, ) np.array
-        m0:
-            - (n_model_points, 1) np.array
-            - n_model points = n_depth points + n_boundary_layers [s; t]
-            - Units: seismological units, i.e. km/s for velocities
-            - Column vector containing parameters to invert for
-        layers:
-            - ModelLayerIndices
-
-    Returns:
-        a_priori_mat:
-            - (n_constraint_equations, n_model_points) np.array
-        a_priori_vec:
-            - (n_constraint_equations, 1) np.array
-
-
-    """
-
 
     # Linear constraint equations
     # Damp towards starting model
-    damping = _set_layer_values(layers, (1,)) # of some description!
-    damp_to_m0_mat, damp_to_m0_vec = _build_constraint_damp_to_m0(m0)
+    _set_layer_values('to_m0', (0, 0, 0, 0, 0), layers, damp_s, damp_t)
     damp_to_m0_mat, damp_to_m0_vec = _damp_constraints(
-        damp_to_m0_mat, damp_to_m0_vec, layers, damping
+        _build_constraint_damp_to_m0(p), damp_s, damp_t
     )
     # Damp towards starting model gradients in Vs
-    damping = _set_layer_values(layers, (1,)) # of some description!
-    damp_to_m0_grad_mat, damp_to_m0_grad_vec = (
-        _build_constraint_damp_original_gradient(model)
-    )
+    _set_layer_values('to_m0_grad', (0, 0, 0, 0, 0), layers, damp_s, damp_t)
     damp_to_m0_grad_mat, damp_to_m0_grad_vec = _damp_constraints(
-        damp_to_m0_grad_mat, damp_to_m0_grad_vec, layers, damping
+        _build_constraint_damp_original_gradient(model), damp_s, damp_t
     )
+
+    # Record damping parameters
+    save_name = 'output/{0}/{0}'.format(setup_model.id)
+    damp_s.to_csv(save_name + 'damp_s.csv', index=False)
+    damp_t.to_csv(save_name + 'damp_t.csv', index=False)
 
     # Put all a priori constraints together
     a_priori_mat = np.vstack((
+        roughness_mat,
         damp_to_m0_mat,
         damp_to_m0_grad_mat,
     ))
     a_priori_vec = np.vstack((
+        roughness_vec,
         damp_to_m0_vec,
         damp_to_m0_grad_vec,
     ))
 
+    return W, a_priori_mat, a_priori_vec
 
-    return a_priori_mat, a_priori_vec
+
+def _set_layer_values(label, damping, layers, damp_s, damp_t):
+
+    damp_s[label] = 0
+    damp_t[label] = damping[-1]
+
+    # Loop through all layers in depth
+    n = 0
+    for layer_name in layers.layer_names:
+        if layer_name == 'boundary_layers':
+            continue
+        layer_inds = getattr(layers, layer_name).astype(int)
+        damp_s.loc[layer_inds, label] =  damping[n]
+        n += 1
+
+    return
 
 
-def _set_layer_values(layers, vals):
-
-    if len(vals) == 1:
-        val, = vals
-        vals = ModelLayerValues(
-            upper_crust = val * np.ones(layers.upper_crust.shape),
-            lower_crust = val * np.ones(layers.lower_crust.shape),
-            lithospheric_mantle = (
-                val * np.ones(layers.lithospheric_mantle.shape)
-            ),
-            asthenosphere = val * np.ones(layers.asthenosphere.shape),
-        )
-
-    return vals
-
-def _damp_constraints(H, h, layers, damping):
+def _damp_constraints(
+        H_h_label:tuple, damping_s:pd.DataFrame, damping_t:pd.DataFrame
+    ):
     """ Apply layer specific damping to H and h.
 
     This is done one model parameter at a time - i.e. assumes that H is only
@@ -149,21 +136,28 @@ def _damp_constraints(H, h, layers, damping):
     Damping parameters are set for individual layers.
 
     Arguments:
-        H:
-            - (n_constraint_equations, n_model_points) np.array
-            - Constraints matrix in H * m = h.
-            - Note that this is only n_depth_points NOT n_model_points wide!
-              It is assumed that H is input one model parameter at a time.
-        h:
-            - (n_constraint_equations, 1) np.array
-            - Constraints vector in H * m = h.
-        layers:
-            - ModelLayerIndices
-        damping:
-            - ModelLayerValues
-            - This has the damping coefficients for this constraint.
-            - Component arrays are (n_values_in_layer, ), so can vary with
-              depth across a layer (or have a constant value for that layer).
+        H_h_label:
+            - tuple of (H, h, label)
+            H:
+                - (n_constraint_equations, n_model_points) np.array
+                - Constraints matrix in H * m = h.
+            h:
+                - (n_constraint_equations, 1) np.array
+                - Constraints vector in H * m = h.
+            label:
+                - str
+                - Name for this constraint, used as column name in DataFrame.
+        damping_s:
+            - pd.DataFrame
+                columns include Depth and [label]
+                n_model_depths rows (depth corresponds to centre of layers)
+            - Scaling for the damping constraint equations for model Vsv
+        damping_t:
+            - pd.DataFrame
+                columns include Depth and [label]
+                n_boundary_layers rows (depth corresponds to top of BL)
+            - Scaling for the damping constraint equations for model boundary
+              layer depths
 
         Returns:
             H:
@@ -205,22 +199,21 @@ def _damp_constraints(H, h, layers, damping):
     #               i.e. row vector acts the same as 1D array
     #       ** This is to show commutative behaviour with example in row above.
 
+    H, h, label = H_h_label
 
-    # Loop through all layers
-    for layer_name in layers.layer_names:
-
-        layer_inds = getattr(layers, layer_name).astype(int)
-        layer_damping = getattr(damping, layer_name)
-
-        # (n_constraint_equations, n_depth_points_in_layer) slice of H
-        #   * (n_depth_points_in_layer, ) layer_damping
-        # As depth increases by column in H, it will do element-wise
-        # multiplication with layer_damping (which is treated as a row vector)
-        # For h, depth increases by row, so layer_damping is the
-        # wrong orientation - have to add an axis (cannot transpose as
-        # it starts off as 1D)
-        H[:, layer_inds] *= layer_damping
-        #h[layer_inds] *= layer_damping[:, np.newaxis]
+    # (n_constraint_equations, n_depth_points_in_layer) H
+    #   * (n_depth_points_in_layer, ) layer_damping
+    # As depth increases by column in H, it will do element-wise
+    # multiplication with layer_damping (which is treated as a row vector)
+    # For h, depth increases by row, so layer_damping is the
+    # wrong orientation - have to add an axis (cannot transpose as
+    # it starts off as 1D)
+    all = np.concatenate((damping_s[label].values, damping_t[label].values))
+    H *= all
+    # h is assumed to either have n_constraints = n_model_params
+    # or to be 0 always
+    if h.shape[0] == H.shape[1]:
+        h *= all[:, np.newaxis]
 
     return H, h
 
@@ -294,6 +287,9 @@ def _build_smoothing_constraints(
               this permitted roughness (i.e. smoothness)
             - Because we want as smooth a model as possible, permitted
               roughness is set to zero always.
+        - 'roughness'
+            - str
+            - Label for this constraint.
 
     """
     n_depth_points = model.vsv.size - 1
@@ -317,7 +313,7 @@ def _build_smoothing_constraints(
 
     roughness_vector = np.zeros((n_depth_points, 1))
 
-    return roughness_matrix, roughness_vector
+    return roughness_matrix, roughness_vector, 'roughness'
 
 
 def _make_banded_matrix(matrix_size:int, central_values:tuple):
@@ -387,13 +383,16 @@ def _build_constraint_damp_to_m0(m:np.array) -> (np.array, np.array):
             - Constraints vector, h, in H * m = h.
             - As we are damping towards the starting model, this is the
               just the starting model.
+        'to_m0'
+            - str
+            - Label for this constraint.
     """
 
     H = np.diag(np.ones(len(m)))
     # m is already a column vector, so can just pull relevant indices from it
     h = m
 
-    return H, h
+    return H, h, 'to_m0'
 
 def _build_constraint_damp_original_gradient(
         model:define_models.InversionModel):
@@ -428,6 +427,9 @@ def _build_constraint_damp_original_gradient(
             - (n_depth_points - 1, 1) np.array
             - Constraints vector, h, in H * m = h.
             - Set to zero always.
+        'to_m0_grad'
+            - str
+            - Label for this constraint.
     """
 
     n_depth_points = model.vsv.size - 1
@@ -451,4 +453,4 @@ def _build_constraint_damp_original_gradient(
 
     h = np.zeros((n_depth_points - 1, 1))
 
-    return H, h
+    return H, h, 'to_m0_grad'

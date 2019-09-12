@@ -195,10 +195,11 @@ class ModelLayerIndices(typing.NamedTuple):
     lower_crust: np.array
     lithospheric_mantle: np.array
     asthenosphere: np.array
-    discontinuties: np.array
+    boundary_layers: np.array
     depth: np.array
     layer_names: list = ['upper_crust', 'lower_crust',
-                         'lithospheric_mantle', 'asthenosphere']
+                         'lithospheric_mantle', 'asthenosphere',
+                         'boundary_layers']
 
 
 # =============================================================================
@@ -564,7 +565,6 @@ def _set_model_indices(setup_model, model, **kwargs):
         lower_crust = np.arange(round(moho_ind/2), moho_ind),
         lithospheric_mantle = np.arange(moho_ind, lab_ind),
         asthenosphere = np.arange(lab_ind, len(depth)),
-        discontinuties = np.array([moho_ind // 2, moho_ind,
-                                   lab_ind, len(depth) - 1]),
+        boundary_layers = len(depth) + np.arange(len(model.boundary_inds)),
         depth = depth
     )

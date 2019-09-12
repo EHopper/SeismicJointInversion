@@ -60,8 +60,7 @@ def run_inversion(setup_model:define_models.SetupModel,
 
 def _inversion_iteration(setup_model:define_models.SetupModel,
                          model:define_models.InversionModel,
-                         data:constraints.Observations
-                         ) -> define_models.InversionModel:
+                         data:constraints.Observations) -> define_models.InversionModel:
     """ Run a single iteration of the least squares
     """
 
@@ -88,13 +87,12 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     )
 
     # Build all of the weighting functions for damped least squares
-    layer_indices = define_models._set_model_indices(setup_model, model)
-    W, D_mat, d_vec, H_mat, h_vec = (
-        weights.build_weighting_damping(data, p, model, layer_indices)
+    W, H_mat, h_vec = (
+        weights.build_weighting_damping(data, p, model, setup_model)
     )
 
     # Perform inversion
-    p_new = _damped_least_squares(p, G, d, W, D_mat, d_vec, H_mat, h_vec)
+    p_new = _damped_least_squares(p, G, d, W, H_mat, h_vec)
 
     return _build_inversion_model_from_model_vector(p_new, model)
 
@@ -223,7 +221,7 @@ def _build_data_misfit_matrix(data:np.array, prediction:np.array,
     return data_misfit
 
 
-def _damped_least_squares(m0, G, d, W, D_mat, d_vec, H_mat, h_vec):
+def _damped_least_squares(m0, G, d, W, H_mat, h_vec):
     """ Calculate the damped least squares, after Menke (2012).
 
     Least squares (Gauss-Newton solution):
@@ -300,11 +298,8 @@ def _damped_least_squares(m0, G, d, W, D_mat, d_vec, H_mat, h_vec):
                      * [(G' * We * d) + (H' * h)]
     """
 
-    H = np.vstack((D_mat, H_mat))
-    h = np.vstack((d_vec, h_vec))
-
-    F = np.vstack((np.matmul(np.sqrt(W), G), H))
-    f = np.vstack((np.matmul(np.sqrt(W), d), h))
+    F = np.vstack((np.matmul(np.sqrt(W), G), H_mat))
+    f = np.vstack((np.matmul(np.sqrt(W), d), h_vec))
 
     Finv_denominator = np.matmul(F.T, F)
     # x = np.linalg.lstsq(a, b) solves for x: ax = b, i.e. x = a \ b in MATLAB
