@@ -56,14 +56,7 @@ def build_weighting_damping(data:constraints.Observations, p:np.array,
 
     # Record level of damping on the Vsv model parameters
     layers = define_models._set_model_indices(setup_model, model)
-    damp_s = pd.DataFrame({
-        'Depth': np.mean(
-            np.vstack(
-                (layers.depth,
-                layers.depth[1:] + [np.sum(model.thickness)])
-                ),
-            0),
-        })
+    damp_s = pd.DataFrame({'Depth': layers.depth})
     # Record level of damping on the boundary layer depth parameters
     damp_t = pd.DataFrame({
         'Depth': np.cumsum(model.thickness)[list(model.boundary_inds)],
@@ -71,19 +64,32 @@ def build_weighting_damping(data:constraints.Observations, p:np.array,
 
 
     # Minimise second derivative within layers - roughness
-    _set_layer_values('roughness', (1, 1, 1, 1, 1), layers, damp_s, damp_t)
+    # Note that because we are smoothing across upper-crust to lower-crust,
+    # having different values for those two layers messes with things, as does
+    # having variable damping within a layer
+    # Already built into roughness_mat is that we do not smooth around BLs
+    _set_layer_values((1, 1, 1, 2, 0), layers, damp_s, damp_t, 'roughness')
     roughness_mat, roughness_vec = _damp_constraints(
         _build_smoothing_constraints(model), damp_s, damp_t
     )
 
     # Linear constraint equations
     # Damp towards starting model
-    _set_layer_values('to_m0', (0, 0, 0, 0, 0), layers, damp_s, damp_t)
+    _set_layer_values(
+        (
+            [0.5] * len(layers.upper_crust),
+            [0.5] * (len(layers.lower_crust) - 1) + [0.5],
+            [0.5] * (len(layers.lithospheric_mantle) - 1) + [0.5],
+            [0.5] * len(layers.asthenosphere),
+            [0.5] * len(layers.boundary_layers)
+        ),
+        layers, damp_s, damp_t, 'to_m0'
+    )
     damp_to_m0_mat, damp_to_m0_vec = _damp_constraints(
         _build_constraint_damp_to_m0(p), damp_s, damp_t
     )
     # Damp towards starting model gradients in Vs
-    _set_layer_values('to_m0_grad', (0, 0, 0, 0, 0), layers, damp_s, damp_t)
+    _set_layer_values((1, 1, 1, 1, 0), layers, damp_s, damp_t, 'to_m0_grad')
     damp_to_m0_grad_mat, damp_to_m0_grad_vec = _damp_constraints(
         _build_constraint_damp_original_gradient(model), damp_s, damp_t
     )
@@ -108,7 +114,7 @@ def build_weighting_damping(data:constraints.Observations, p:np.array,
     return W, a_priori_mat, a_priori_vec
 
 
-def _set_layer_values(label, damping, layers, damp_s, damp_t):
+def _set_layer_values(damping, layers, damp_s, damp_t, label):
 
     damp_s[label] = 0
     damp_t[label] = damping[-1]
@@ -117,6 +123,7 @@ def _set_layer_values(label, damping, layers, damp_s, damp_t):
     n = 0
     for layer_name in layers.layer_names:
         if layer_name == 'boundary_layers':
+            n += 1
             continue
         layer_inds = getattr(layers, layer_name).astype(int)
         damp_s.loc[layer_inds, label] =  damping[n]
@@ -449,16 +456,14 @@ def _build_constraint_damp_original_gradient(
     for i_d in range(n_depth_points - 1):
         # Need to transpose slice of m0 (2, 1) to fit in H (1, 2) gap,
         # because in H, depth increases with column not row.
-        H[i_d, [i_d, i_d+1]] = 1 / model.vsv[[i_d+1, i_d]].T
+        H[i_d, [i_d, i_d+1]] = np.hstack((
+            1 / model.vsv[i_d], -1 / model.vsv[i_d + 1]
+        ))
+    H[-1, -1] = 1 / model.vsv[-2] - 1
 
-    # Remove constraints around discontinuities between layers.
-    do_not_damp = np.concatenate(
-        (np.array([0, -1]), model.boundary_inds, model.boundary_inds + 1)
-    ).astype(int)
-    for d in do_not_damp:
-        H[d,:] *= 0
-        if d > 0:
-            H[d-1, :] *= 0
+    # Remove constraints around discontinuities
+    do_not_damp = list(model.boundary_inds)
+    H[do_not_damp, :] = 0
 
     h = np.zeros((n_depth_points - 1, 1))
 

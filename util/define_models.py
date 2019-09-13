@@ -562,9 +562,9 @@ def _set_model_indices(setup_model, model, **kwargs):
 
     return ModelLayerIndices(
         upper_crust = np.arange(moho_ind/2),
-        lower_crust = np.arange(round(moho_ind/2), moho_ind),
-        lithospheric_mantle = np.arange(moho_ind, lab_ind),
-        asthenosphere = np.arange(lab_ind, len(depth)),
+        lower_crust = np.arange(round(moho_ind/2), moho_ind + 1),
+        lithospheric_mantle = np.arange(moho_ind + 1, lab_ind + 1),
+        asthenosphere = np.arange(lab_ind + 1, len(depth)),
         boundary_layers = len(depth) + np.arange(len(model.boundary_inds)),
         depth = list(depth)
     )

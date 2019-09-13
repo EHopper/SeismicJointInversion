@@ -796,7 +796,7 @@ class PipelineTest(unittest.TestCase):
                                   expected_s, expected_t):
         damp_s = pd.DataFrame({'Depth': layers.depth})
         damp_t = pd.DataFrame({'Depth': np.arange(len(layers.boundary_layers))})
-        weights._set_layer_values(name, damping, layers, damp_s, damp_t)
+        weights._set_layer_values(damping, layers, damp_s, damp_t, name)
 
         pd.testing.assert_frame_equal(damp_s, expected_s)
         pd.testing.assert_frame_equal(damp_t, expected_t)
@@ -866,21 +866,24 @@ class PipelineTest(unittest.TestCase):
             'simple',
             define_models.InversionModel(
                 vsv = np.array([3] * 13)[:, np.newaxis],
-                thickness = np.array([6] * 13)[:, np.newaxis],
+                thickness = np.array(
+                    [0] + [6] * 3
+                    + [7, 5, 4] + [6] * 1
+                    + [10, 15, 12] + [6] * 1)[:, np.newaxis],
                 boundary_inds = np.array([4, 8])
             ),
             np.array([
                 [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
                 [1, -2,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
                 [0,  1, -2,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
-                [0,  0,  1, -2,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0],
+                [0,  0,  1, -13/7,  6/7,  0,  0,  0,  0,  0,  0,  0,  0,  0],
                 [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
                 [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
-                [0,  0,  0,  0,  0,  1, -2,  1,  0,  0,  0,  0,  0,  0],
-                [0,  0,  0,  0,  0,  0,  1, -2,  1,  0,  0,  0,  0,  0],
+                [0,  0,  0,  0,  0,  6/4, -10/4,  1,  0,  0,  0,  0,  0,  0],
+                [0,  0,  0,  0,  0,  0,  1, -16/10,  6/10,  0,  0,  0,  0,  0],
                 [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
                 [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
-                [0,  0,  0,  0,  0,  0,  0,  0,  0,  1, -2,  1,  0,  0],
+                [0,  0,  0,  0,  0,  0,  0,  0,  0,  6/12, -18/12,  1,  0,  0],
                 [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
             ]),
             np.array([0] * 12)[:, np.newaxis],
@@ -895,17 +898,17 @@ class PipelineTest(unittest.TestCase):
         np.testing.assert_array_equal(H, expected_H)
         np.testing.assert_array_equal(h, expected_h)
 
-        damp_s = pd.DataFrame({'Depth': np.cumsum(model.thickness[:-1])})
-        damp_t = pd.DataFrame({'Depth': [35., 80.]})
         n_layers = expected_h.shape[0]
         n_bls = model.boundary_inds.shape[0]
+        damp_s = pd.DataFrame({'Depth': np.cumsum(model.thickness)})
+        damp_t = pd.DataFrame({'Depth': [0] * n_bls})
         layers = define_models.ModelLayerIndices(
             np.arange(2), np.arange(2, 3), np.arange(3, 4),
             np.arange(4, n_layers), np.arange(n_layers, n_layers + n_bls),
-            np.arange(0, 10)
+            np.arange(0)
         )
         weights._set_layer_values(
-            'roughness', (1, 1, 1, 1, 10), layers, damp_s, damp_t
+            (1, 1, 1, 1, 10), layers, damp_s, damp_t, 'roughness',
         )
         H_sc, h_sc = weights._damp_constraints((H, h, label), damp_s, damp_t)
         self.assertEqual(label, 'roughness')
