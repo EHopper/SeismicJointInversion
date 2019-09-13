@@ -87,8 +87,16 @@ import pandas as pd
 
 from util import define_models
 
-
 def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
+                                      model:define_models.InversionModel,
+                                      setup_model:define_models.SetupModel,
+                                      data:constraints.observations):
+    """ Make partial derivative matrix, G, for phase velocities and RFs
+
+
+
+
+def _build_partial_derivatives_matrix_sw(kernels:pd.DataFrame,
                                       model:define_models.InversionModel,
                                       setup_model:define_models.SetupModel):
     """ Make partial derivative matrix, G, from the Frechet kernels.
@@ -139,9 +147,10 @@ def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
     # Frechet kernels cover Vsv, Vsh, Vpv, Vph, Eta.  We assume that eta is
     # kept constant, and all of the others are linearly dependent on Vsv.
     dm_dp_mat = _scale_dvsv_dp_to_other_variables(dvsv_dp_mat, setup_model)
-    G_inversion_model = _integrate_dc_dvsv_dvsv_dp_indepth(
+    G_inversion_model_sw = _integrate_dc_dvsv_dvsv_dp_indepth(
         G_MINEOS, depth, dm_dp_mat
     )
+
 
     return G_inversion_model
 
