@@ -66,7 +66,7 @@ def build_weighting_damping(data:constraints.Observations, p:np.array,
         })
     # Record level of damping on the boundary layer depth parameters
     damp_t = pd.DataFrame({
-        'Depth': np.cumsum(model.thickness)[model.boundary_inds],
+        'Depth': np.cumsum(model.thickness)[list(model.boundary_inds)],
     })
 
 
@@ -296,14 +296,22 @@ def _build_smoothing_constraints(
 
     # Make and edit the banded matrix (roughness equations)
     banded_matrix = _make_banded_matrix(n_depth_points, (1, -2, 1))
+    t = model.thickness
+    # NOTE: around the boundary layers, layer thickness isn't equal
+    for ib in model.boundary_inds:
+        # Smooth layers above and below BL assuming that variable thickness
+        # layers won't been perturbed that much
+        banded_matrix[ib - 1, ib - 1:ib + 1] = (
+              [-model.thickness[ib - 1] / model.thickness[ib] - 1,
+              model.thickness[ib - 1] / model.thickness[ib]])
+        banded_matrix[ib + 2, ib + 1:ib + 3] = (
+              [model.thickness[ib + 3] / model.thickness[ib + 2],
+               -model.thickness[ib + 3] / model.thickness[ib + 2] - 1])
+
     # At all discontinuities (and the first and last layers of the model),
     # set the roughness_matrix to zero
-    # NOTE: given that layer thickness is not equal everywhere, this
-    # version of smoothing is not going to be equal everywhere!
-    do_not_smooth = np.concatenate(
-        (np.array([0, -1]), model.boundary_inds, model.boundary_inds + 1,
-        model.boundary_inds + 2, model.boundary_inds - 1)
-    )
+    do_not_smooth = ([0, -1]
+                    + list(model.boundary_inds) + list(model.boundary_inds + 1))
     banded_matrix[do_not_smooth, :] = 0
     # Add columns to roughness_matrix to get it into the right shape
     # These columns can be filled with zeros as they will be mutlipliers
@@ -446,7 +454,7 @@ def _build_constraint_damp_original_gradient(
     # Remove constraints around discontinuities between layers.
     do_not_damp = np.concatenate(
         (np.array([0, -1]), model.boundary_inds, model.boundary_inds + 1)
-    )
+    ).astype(int)
     for d in do_not_damp:
         H[d,:] *= 0
         if d > 0:

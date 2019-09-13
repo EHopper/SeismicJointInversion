@@ -144,6 +144,7 @@ def test_damping(n_iter):
     data = data._replace(surface_waves =
         data.surface_waves.iloc[[3, 7, 9, 11, 12, 13], :].reset_index()
     )
+    setup_model = setup_model._replace(boundary_names = [])
     periods = data.surface_waves.period.values
     save_name = 'output/{0}/{0}.q'.format(setup_model.id)
 
@@ -156,6 +157,8 @@ def test_damping(n_iter):
     line.set_label('data')
 
     m = define_models.setup_starting_model(setup_model)
+    m = m._replace(boundary_inds =  np.array([]))
+    m = m._replace(thickness=np.array([0.] + [6.] * (len(m.vsv) - 1))[:, np.newaxis])
     plots.plot_model(m, 'm0', ax_m)
     for n in range(n_iter):
         m = inversion._inversion_iteration(setup_model, m, data)

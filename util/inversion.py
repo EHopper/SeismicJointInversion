@@ -122,7 +122,8 @@ def _build_model_vector(model:define_models.InversionModel,
               for - it is not a complete description of vs(z)!
     """
 
-    return np.vstack((model.vsv[:-1], model.thickness[model.boundary_inds]))
+    return np.vstack((model.vsv[:-1],
+                      model.thickness[list(model.boundary_inds)]))
 
 def _build_inversion_model_from_model_vector(
         p:np.array, model:define_models.InversionModel):
@@ -145,12 +146,16 @@ def _build_inversion_model_from_model_vector(
             - Vs model with values updated from p.
     """
     new_thickness = model.thickness.copy()
-    dt = p[-2:] - model.thickness[model.boundary_inds]
-    new_thickness[model.boundary_inds] += dt
-    new_thickness[model.boundary_inds + 2] -= dt
+    if model.boundary_inds.size > 0:
+        dt = p[-len(model.boundary_inds):] - model.thickness[model.boundary_inds]
+        new_thickness[model.boundary_inds] += dt
+        new_thickness[model.boundary_inds + 2] -= dt
+        new_vsv = p[:-len(model.boundary_inds)].copy()
+    else:
+        new_vsv = p.copy()
 
     return define_models.InversionModel(
-                vsv = np.vstack((p[:-2], model.vsv[-1])),
+                vsv = np.vstack((new_vsv, model.vsv[-1])),
                 thickness = new_thickness,
                 boundary_inds = model.boundary_inds,
     )
