@@ -90,9 +90,16 @@ from util import define_models
 def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
                                       model:define_models.InversionModel,
                                       setup_model:define_models.SetupModel,
-                                      data:constraints.observations):
+                                      data:constraints.Observations):
     """ Make partial derivative matrix, G, for phase velocities and RFs
+    """
 
+    G_sw = _build_partial_derivatives_matrix_sw(kernels, model,
+                                                setup_model)
+
+    G_RFs = _build_partial_derivatives_matrix_rf(model, setup_model, data)
+
+    return np.vstack((G_sw, G_RFs))
 
 
 
@@ -976,3 +983,15 @@ def _scale_dvsv_dp_to_other_variables(dvsv_dp_mat:np.array,
                     * setup_model.vpv_vsv_ratio / setup_model.vpv_vph_ratio,
                 np.zeros_like(dvsv_dp_mat)
     ))
+
+
+def _build_partial_derivatives_matrix_rf(model, setup_model, data):
+    """
+    We have two bits of data for each model boundary layer:
+       - travel time
+       - size of velocity contrast (can be as phase amplitude)
+
+    Travel time = piecewise sum of thickness / average layer velocity
+    Velocity contrast = v_base_of_layer / v_top_of_layer
+
+    """
