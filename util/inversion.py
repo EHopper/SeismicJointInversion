@@ -60,7 +60,8 @@ def run_inversion(setup_model:define_models.SetupModel,
 
 def _inversion_iteration(setup_model:define_models.SetupModel,
                          model:define_models.InversionModel,
-                         data:constraints.Observations) -> define_models.InversionModel:
+                         data:constraints.Observations
+                         ) -> define_models.InversionModel:
     """ Run a single iteration of the least squares
     """
 
@@ -79,7 +80,7 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     kernels = kernels[kernels['z'] <= setup_model.depth_limits[1]]
 
     G = partial_derivatives._build_partial_derivatives_matrix(
-        kernels, model, setup_model
+        kernels, model, setup_model, data
     )
     p = _build_model_vector(model)
     d = _build_data_misfit_matrix(

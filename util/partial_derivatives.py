@@ -86,6 +86,7 @@ import numpy.matlib as npmatlib
 import pandas as pd
 
 from util import define_models
+from util import constraints
 
 def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
                                       model:define_models.InversionModel,
@@ -97,9 +98,10 @@ def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
     G_sw = _build_partial_derivatives_matrix_sw(kernels, model,
                                                 setup_model)
 
-    G_RFs = _build_partial_derivatives_matrix_rf(model, setup_model, data)
+    #G_RFs = _build_partial_derivatives_matrix_rf(model, setup_model, data)
 
-    return np.vstack((G_sw, G_RFs))
+    #return np.vstack((G_sw, G_RFs))
+    return G_sw
 
 
 
@@ -159,7 +161,7 @@ def _build_partial_derivatives_matrix_sw(kernels:pd.DataFrame,
     )
 
 
-    return G_inversion_model
+    return G_inversion_model_sw
 
 def _integrate_dc_dvsv_dvsv_dp_indepth(G_MINEOS, depth, dm_dp_mat):
     """ Calcualte dc/dp by integrating over dc/dvsv * dvsv/dp in depth.
@@ -985,7 +987,9 @@ def _scale_dvsv_dp_to_other_variables(dvsv_dp_mat:np.array,
     ))
 
 
-def _build_partial_derivatives_matrix_rf(model, setup_model, data):
+def _build_partial_derivatives_matrix_rf(model:define_models.InversionModel,
+                                         setup_model:define_models.SetupModel,
+                                         data:constraints.Observations):
     """
     We have two bits of data for each model boundary layer:
        - travel time
@@ -993,5 +997,7 @@ def _build_partial_derivatives_matrix_rf(model, setup_model, data):
 
     Travel time = piecewise sum of thickness / average layer velocity
     Velocity contrast = v_base_of_layer / v_top_of_layer
+
+
 
     """
