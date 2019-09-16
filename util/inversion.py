@@ -83,8 +83,9 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
         kernels, model, setup_model, data
     )
     p = _build_model_vector(model)
-    d = _build_data_misfit_matrix(
-        data.surface_waves.ph_vel.values, ph_vel_pred, p, G
+    data_vector = surface_waves.phase_vel.values
+    d = _build_data_misfit_vector(
+        data_vector, ph_vel_pred, p, G
     )
 
     # Build all of the weighting functions for damped least squares
@@ -162,7 +163,7 @@ def _build_inversion_model_from_model_vector(
     )
 
 
-def _build_data_misfit_matrix(data:np.array, prediction:np.array,
+def _build_data_misfit_vector(data:np.array, prediction:np.array,
         m0:np.array, G:np.array):
     """ Calculate data misfit.
 

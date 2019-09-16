@@ -996,8 +996,127 @@ def _build_partial_derivatives_matrix_rf(model:define_models.InversionModel,
        - size of velocity contrast (can be as phase amplitude)
 
     Travel time = piecewise sum of thickness / average layer velocity
-    Velocity contrast = v_base_of_layer / v_top_of_layer
-
-
+    Velocity contrast = v_base_of_layer / v_top_of_layer - 1
 
     """
+
+    n_boundary_layers = model.boundary_inds.size
+    G_rf = np.zeros((n_boundary_layers * 2,
+                     model.vsv.size - 1 + n_boundary_layers))
+
+    i_bl = 0
+    for bl in setup_model.boundary_names:
+        # Calculate partials for travel time constraint
+        _calculate_travel_time_partial(model, i_bl, G_rf)
+        # Calculate partials for velocity contrast constraint
+        _calculate_dv_rf_partial(model, i_bl, G_rf)
+        i_bl += 1
+
+    return G_rf
+
+def _calculate_dv_rf_partial(model, i_bl, G_rf):
+    """
+
+    Change in shear velocity across a boundary layer is given as a fractional
+    change in velocity.
+
+    For the ith boundary layer, the index of the velocity at the top of the
+    boundary layer is model.vsv[model.boundary_inds[i]] (v_b[i]) and at the base
+    of the boundary layer is model.vsv[model.boundary_inds[i] + 1] (v_b[i]+1).
+    Within an inversion, the thickness of the boundary layer is assumed
+    constant - only its depth can change (i.e. the thickness of the layer above
+    it), which does not affect the velocity gradient across it.
+            velocity contrast = (v_b[i]+1 / v_b[i]) - 1
+
+    As such, the non-zero partial derivatives are
+        d(velocity contrast) / d (v_b[i]) = - v_b[i]+1 * v_b[i] ** -2
+        d(velocity contrast) / d (v_b[i]+1) =  v_b[i] ** -1
+    """
+
+    bound_ind = model.boundary_inds[i_bl]
+
+    G_rf[i_bl * 2 + 1, bound_ind] = (
+        - model.vsv[bound_ind + 1] * model.vsv[bound_ind] ** -2
+    )
+    G_rf[i_bl * 2 + 1, bound_ind + 1] = 1 / model.vsv[bound_ind]
+
+    return
+
+def _calculate_travel_time_partial(model, i_bl, G_rf):
+    """
+
+    Travel time is the piecewise sum of distance / velocity.
+
+    The travel time to the centre of the boundary layer, BL
+        tt = t_1 / (v_0 + v_1) / 2 + ... + t_BL / (v_BL-1 + v_BL) / 2
+                + (t_BL+1 / 2) / (3 * V_BL + V_BL+1) / 4
+    Remember that t_i is the thickness of the layer between v_i-1 & v_i.
+    Therefore, the variable thicknesses are t_BL (thickness of layer where the
+    velocity at the base is v_BL).
+
+    Note that the last term comes from the travel time being to the centre of
+    the boundary layer, i.e. 1/2 * boundary layer thickness divided by the
+    average velocity in the upper half of the boundary layer.
+
+    The travel time to the ith boundary layer is dependent on the velocities
+    to the base of it, and the variable layer thicknesses directly above it
+    and any other boundary layers shallower than it.  For the ith boundary
+    layer, the index of the velocity at the top of the boundary layer is
+    model.vsv[model.boundary_inds[i]] (or v_b[i]) and at the base of the
+    boundary layer is model.vsv[model.boundary_inds[i] + 1] (or v_b[i]+1).
+
+    The (variable) thickness of the layer above the boundary layer is
+    model.thickness[model.boundary_inds[i]] (or t_b[i]), and the variable
+    thickness layers associated with any shallower boundary layers are at
+    model.thickness[model.boundary_inds[0:i]] (or t_b[i-1]).
+
+    As such, the non-zero partial derivatives are as follows.
+    For the shallowest and deepest relevant velocities:
+        d(tt) / d(v_0) = - 2 * t_1 * (v_0 + v_1) ** -2
+        d(tt) / d(v_b[i]+1) = - 2 * t_b[i]+1 * (3 * v_b[i] + v_b[i]+1) ** -2
+    For the velocity at the top of the boundary layer:
+        d(tt) / d(v_b[i]) = -2 * t_b[i] * (v_b[i]-1 + v_b[i]) ** -2
+                            + -6 * t_b[i]+1 * (3 * v_b[i] + v_b[i]+1) ** -2
+    For all other velocities above the boundary layer:
+        d(tt) / d(v_k) = -2 * t_k * (v_k-1 + v_k) ** 2
+                         + -2 * t_k+1 * (v_k + v_k+1) ** 2
+
+    For any variable model thickness above the boundary layer that is being
+    constrained by this travel time:
+        d(tt) / d(t_k) = 2 / (v_k-1 + v_k)
+            (where k is model.boundary_inds[range(0, i_bl)])
+
+    """
+
+    ib = model.boundary_inds[i_bl]
+    # Calculate partials for central layers
+    for i in range(1, ib):
+        G_rf[i_bl * 2, i] = (
+            -2 * model.thickness[i] * (model.vsv[i - 1] + model.vsv[i]) ** -2
+            + (-2 * model.thickness[i + 1]
+               * (model.vsv[ib] + model.vsv[i + 1]) ** -2)
+        )
+
+    # Calculate partials for edge cases of velocity model points
+    G_rf[i_bl * 2, 0] = (
+        -2 * model.thickness[1] * (model.vsv[0] + model.vsv[1]) ** -2
+    )
+    G_rf[i_bl * 2, ib] = (
+        (-2 * model.thickness[ib] * (model.vsv[ib - 1] + model.vsv[ib]) ** -2)
+        + (-6 * model.thickness[ib + 1]
+           * (3 * model.vsv[ib] + model.vsv[ib + 1]) ** -2)
+    )
+    G_rf[i_bl * 2, ib + 1] = (
+        -2 * model.thickness[ib + 1]
+         * (3 * model.vsv[ib] + model.vsv[ib + 1]) ** -2
+    )
+
+    # Calculate partials for thicknesses
+    n_depth_points = model.vsv.size - 1
+    for i_t in range(i_bl):
+        ib = model.boundary_inds[i_t]
+        G_rf[i_bl * 2, n_depth_points + i_t] = (
+            2 / (model.vsv[ib - 1] + model.vsv[ib])
+        )
+
+    return
