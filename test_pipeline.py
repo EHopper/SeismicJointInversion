@@ -376,7 +376,7 @@ class PipelineTest(unittest.TestCase):
 
     ])
     @unittest.skipIf(skipMINEOS, "MINEOS runs too slow to test every time")
-    def test_G(self, name, setup_model, periods, model_perturbation):
+    def test_G_sw(self, name, setup_model, periods, model_perturbation):
         """ Test G by comparing the dV from G * dm to the dV output from MINEOS.
 
         From a given starting model, calculate phase velocities and kernels
@@ -423,8 +423,8 @@ class PipelineTest(unittest.TestCase):
         ph_vel_pred, kernels = mineos.run_mineos_and_kernels(
             params, periods, setup_model.id
         )
-        G = partial_derivatives._build_partial_derivatives_matrix(
-            kernels, model, setup_model
+        G = partial_derivatives._build_partial_derivatives_matrix_sw(
+            kernels, model, setup_model,
         )
 
         # Apply the perturbation

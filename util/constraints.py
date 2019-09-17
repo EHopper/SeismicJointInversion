@@ -10,6 +10,8 @@ import pandas as pd
 import re
 import os
 
+from util import define_models
+
 
 # =============================================================================
 # Set up classes for commonly used variables
@@ -80,11 +82,93 @@ class Observations(typing.NamedTuple):
 #       Extract the observations of interest for a given location
 # =============================================================================
 
-def extract_observations(lat:float, lon:float):
+def extract_observations(lat:float, lon:float,
+                         setup_model:define_models.SetupModel):
     """ Make an Observations object.
     """
 
-    phv, rfs = _load_observed_constraints()
+    surface_waves = _extract_phase_vels(lat, lon)
+    rfs = _extract_rf_constraints(lat, lon, setup_model)
+    # Write to file
+    surface_waves.to_csv(
+        'output/{0}/{0}_surface_wave_constraints.csv'.format(setup_model.id)
+    )
+    rfs.to_csv(
+        'output/{0}/{0}_RF_constraints.csv'.format(setup_model.id)
+    )
+
+    d = np.vstack((surface_waves['ph_vel'][:, np.newaxis],
+                   rfs['tt'][:, np.newaxis],
+                   rfs['dv'][:, np.newaxis]))
+    std = np.vstack((surface_waves['std'][:, np.newaxis],
+                   rfs['ttstd'][:, np.newaxis],
+                   rfs['dvstd'][:, np.newaxis]))
+    periods = surface_waves['period']
+    rf_data = rfs['type']
+
+    return
+
+def _extract_rf_constraints(lat:float, lon:float,
+                            setup_model:define_models.SetupModel):
+
+    # Load in receiver function constraints
+    all_rfs = pd.read_csv('data/RFconstraints/a_priori_constraints.csv')
+    ind = _find_closest_lat_lon(all_rfs.copy(), lat, lon)
+    obs = all_rfs.loc[ind]
+    cols = list(obs.index)
+
+    rfs = pd.DataFrame(
+        columns = ['lat', 'lon', 'tt', 'ttstd', 'dv', 'dvstd', 'type']
+    )
+    ib = 0
+    for bound in setup_model.boundary_names:
+        try:
+            type = obs['type' + bound]
+        except:
+            type = 'Ps'
+            print('RF type unspecified for ' + bound + ' - assuming Ps')
+        try:
+            tt = obs['tt' + bound]
+            ttstd = obs['tt' + bound + 'std']
+        except:
+            tt = 0
+            ttstd = 0
+            print('No RF constraints on travel time for ' + bound)
+
+        try:
+            dv = obs['dv' + bound]
+            dvstd = obs['dv' + bound + 'std']
+        except:
+            try:
+                amp = obs['amp' + bound]
+                ampstd = obs['amp' + bound + 'std']
+                type = obs['type' + bound]
+                dv, dvstd = _convert_amplitude_to_dv(
+                    amp, ampstd, type, setup_model.boundary_widths[ib]
+                )
+            except:
+                dv = 0
+                dvstd = 0
+                print('No RF constraints on dV for ' + bound)
+
+        rfs = rfs.append(
+            df.Series([lat, lon, tt, ttstd, dv, dvstd, type], index=rfs.columns),
+            ignore_index=True,
+        )
+
+    ib += 1
+
+
+    return rfs
+
+def _convert_amplitude_to_dv(amp, ampstd, type, boundary_width):
+
+    pass
+
+
+def _extract_phase_vels(lat:float, lon:float):
+
+    phv = _load_observed_sw_constraints()
 
     surface_waves = pd.DataFrame()
     for period in phv['period'].unique():
@@ -97,17 +181,10 @@ def extract_observations(lat:float, lon:float):
     # Should actually load in some std!!!!  Will be set to 0.15 if  == 0 later
     surface_waves['std'] = 0.
 
-    ind = _find_closest_lat_lon(rfs.copy(), lat, lon)
+    return surface_waves.reset_index(drop=True)
 
-
-    return Observations(
-        latitude=lat, longitude=lon,
-        surface_waves=surface_waves.reset_index(drop=True),
-        receiver_functions=rfs.loc[[ind]].reset_index(drop=True)
-    )
-
-def _load_observed_constraints():
-    """ Load surface wave and RF constraints into pandas.
+def _load_all_observed_sw_constraints():
+    """ Load surface wave constraints into pandas.
 
     Very specific to the way the data is currently stored!  See READMEs in the
     relevent directories.
@@ -124,11 +201,8 @@ def _load_observed_constraints():
         if 'helmholtz' in file: # ASWMS data
             phvel = phvel.append(_load_earthquake_sw(data_dir, file))
     phvel.reset_index(drop=True, inplace=True)
-    # Load in receiver function constraints
-    rfs = pd.read_csv('data/RFconstraints/a_priori_constraints.csv')
-    rfs.rename(columns = {'Lat': 'lat', 'Lon': 'lon'}, inplace=True)
 
-    return phvel, rfs
+    return phvel
 
 
 def _load_ambient_noise(data_dir:str, file:str):

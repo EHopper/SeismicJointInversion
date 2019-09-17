@@ -139,11 +139,11 @@ def test_damping(n_iter):
         np.array([10, 30]), np.array([3.6, 4.0, 4.4, 4.3]),
         np.array([0, 300])
     )
-    data = constraints.extract_observations(35, -104)
+    data = constraints.extract_observations(35, -112)
     # To speed things up, remove some data
-    # data = data._replace(surface_waves =
-    #     data.surface_waves.iloc[[3, 7, 9, 11, 12, 13], :].reset_index()
-    # )
+    data = data._replace(surface_waves =
+        data.surface_waves.iloc[[3, 7, 9, 11, 12, 13], :].reset_index()
+    )
     #setup_model = setup_model._replace(boundary_names = [])
     periods = data.surface_waves.period.values
     save_name = 'output/{0}/{0}.q'.format(setup_model.id)

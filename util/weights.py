@@ -68,7 +68,7 @@ def build_weighting_damping(data:constraints.Observations, p:np.array,
     # having different values for those two layers messes with things, as does
     # having variable damping within a layer
     # Already built into roughness_mat is that we do not smooth around BLs
-    _set_layer_values((1, 1, 1, 2, 0), layers, damp_s, damp_t, 'roughness')
+    _set_layer_values((0.5, 0.5, 1, 2, 0), layers, damp_s, damp_t, 'roughness')
     roughness_mat, roughness_vec = _damp_constraints(
         _build_smoothing_constraints(model), damp_s, damp_t
     )
@@ -89,10 +89,11 @@ def build_weighting_damping(data:constraints.Observations, p:np.array,
         _build_constraint_damp_to_m0(p), damp_s, damp_t
     )
     # Damp towards starting model gradients in Vs
-    _set_layer_values((1, 1, 1, 1, 0), layers, damp_s, damp_t, 'to_m0_grad')
+    _set_layer_values((1, 1, 1, 2, 0), layers, damp_s, damp_t, 'to_m0_grad')
     damp_to_m0_grad_mat, damp_to_m0_grad_vec = _damp_constraints(
         _build_constraint_damp_original_gradient(model), damp_s, damp_t
     )
+
 
     # Record damping parameters
     save_name = 'output/{0}/{0}'.format(setup_model.id)
@@ -468,3 +469,115 @@ def _build_constraint_damp_original_gradient(
     h = np.zeros((n_depth_points - 1, 1))
 
     return H, h, 'to_m0_grad'
+
+def _build_constraint_rf_moho(model, rfs):
+    """
+
+    Returns:
+        H:
+            - (n_constraints, n_model_params) np.array
+
+    """
+    # Assuming that the receiver function Moho constraints come from Ps
+    # i.e. travel time is for an SV wave.
+
+
+
+    return H, h, 'rf_moho'
+
+def _travel_time_constraint(model, boundary_ind, travel_time,
+                            type, setup_model):
+    """
+
+    Travel time is the piecewise sum of distance / velocity.
+
+    The travel time to the centre of the boundary layer, BL
+        tt = t_1 / (v_0 + v_1) / 2 + ... + t_BL / (v_BL-1 + v_BL) / 2
+                + (t_BL+1 / 2) / (3 * V_BL + V_BL+1) / 4
+    Remember that t_i is the thickness of the layer between v_i-1 & v_i.
+
+    If H is the identity matrix, then h is this equation solved for the
+    model parameter of interest (i.e. v_0 through v_BL+1, t_BL)
+
+    For the model parameters that only appear once, this is easy!
+    (In the notation below, e.g. 2:BL is inclusive of 2 and BL!)
+        v_0 = (2 * t_1
+              / (tt - 2 * ∑[(n = 2:BL) t_n / (v_n-1 + v_n)]
+                 - 2 * t_BL+1 / (3 * V_BL + V_BL+1))
+              - v_1)
+        v_BL+1 = (2 * t_BL+1
+                 / (tt - 2 * ∑[(n = 1:BL+1) t_n / (v_n-1 + v_n)])
+                 - 3 * v_BL
+        t_BL = (tt - 2 * ∑[(n = 1:BL - 1) t_n / (v_n-1 + v_n)])
+                - 2 * t_BL+1 / (3 * V_BL + V_BL+1))
+                * (v_BL-1 + v_BL)
+
+    For the model paramters that appear multiple times, this is tricker.
+        ((2 * t_i) / (v_i-1 + v_i)  +  (2 * t_i+1) / (v_i + v_i+1)
+            = (tt - 2 * ∑[(n = 1:i-1, i+2:BL) t_n / (v_n-1 + v_n)]
+               - 2 * t_BL+1 / (3 * V_BL + V_BL+1)))
+
+        Let's simplify:
+            a = 2 * t_i
+            b = v_i-1
+            c = 2 * t_i+1
+            d = v_i+1
+            e = (tt - 2 * ∑[(n = 1:i-1, i+2:BL) t_n / (v_n-1 + v_n)]
+                 - 2 * t_BL+1 / (3 * V_BL + V_BL+1)))
+
+            a / (b + x) + c / (d + x) = e
+            a * (d + x) + c * (b + x) = e * (d + x) * (b + x)
+            e * x **2  - (a - be + c - de) * x - da - cv + bde = 0
+
+        Let's simplify again!
+            m * x ** 2 - n * x - p = 0
+
+        Time for the quadratic formula:
+            x = (-(-n) + ((-n) ** 2 - 4 * m * (-p)) ** 0.5) / 2 * m
+            x = (n + ((n ** 2 + 4 * m * p) ** 0.5) / 2 * m
+
+        Go back to a, b, c, d, e
+            x = ((a - be + c - de
+                + ((a - be + c - de)**2 + 4 * e * (da + cv - bde)) ** 0.5)
+                / 2 * e)
+        And I'm not going to write that out in terms of tt, t_i, v_i here!
+
+    """
+
+    i = model.boundary_inds[boundary_ind]
+    n_depth_layers = model.vsv.shape[0] - 1
+    n_boundary_layers = len(model.boundary_inds)
+    n_relevent_params = (i + 2) + (boundary_ind + 1)
+
+    H = np.identity(n_depth_layers + n_boundary_layers)
+    t = model.thickness
+    if type == 'Ps':
+        v = model.vsv
+    elif type == 'Sp':
+        v = model.vsv * setup_model.vpv_vsv_ratio
+
+    # First, deal with the easy variables - v_0, v_BL+1, t_BL
+    v_0 = (2 * t[1]
+          / (
+                travel_time
+                - _sum_RF_travel_times(range(2, i + 1), t, v)
+                - 2 * t[i + 1] / (3 * v[i] + v[i + 1])
+            )
+          - v[1])
+    v_BLp1 = (2 * t[1]
+             / (
+                travel_time
+                - _sum_RF_travel_times(range(2, i + 1), t, v)
+                - 2 * t[i + 1] / (3 * v[i] + v[i + 1])
+              )
+              - v[1])
+
+
+
+    return h
+
+def _sum_RF_travel_times(inds, t, v):
+    total = 0
+    for i in inds:
+        total += 2 * t[i] / (v[i-1] + v[i])
+    return total
