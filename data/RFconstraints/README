@@ -17,12 +17,16 @@
   than the variation between bootstraps.
 - LAB amplitude rather than estimated dVs is reported, as this is
   highly dependent on the width of the LAB boundary layer.
-- Note that even though LAB measurements are Sp, I have converted the travel
-  time as if it were Vs.  This is probably not the best thing to do, but given
-  that none of the velocity models involved in this process have particularly
-  good constraints on Vp, all it is really doing is taking the Vp/Vs scaling
-  assumptions implicitly rather than explicitly.
-- Also note, dv is defined as 1 - v_above/v_below.
+- Note that because LAB measurements are Sp (as noted in column type[bound]),
+  the travel times are for P waves!  This is somewhat pointless because the
+  only constraints on Vp in the RF migration model are body waves below about
+  60 km (so that basically this is a simple scaling of 1.75 everywhere outside
+  Yellowstone, where the body waves show a very high Vp/Vs, so on average, the
+  travel time is scaled by more like 1.85 between Vp and Vs).  However, it means
+  that the scaling between Vs to Vp is done explicitly rather than implicitly,
+  which is better. (And, in places like Yellowstone, takes account of the
+  non-average Vp/Vs that went into the RF migration!)
+- Also note, dv is defined as v_below/v_above - 1.
 
 Columns in csv are
 Lat,Lon,
@@ -31,9 +35,6 @@ ttLAB,ttLABstd,ampLAB,ampLABstd,typeLAB
 
 
 **************************************************************************
-
-
-
 
 
 % Convert CCP depths to times
@@ -50,7 +51,7 @@ lons = CPlatlons(3):grid_spacing:CPlatlons(4);
 [glon, glat] = meshgrid(lons, lats);
 basedir = 'C:/Users/Emily/OneDrive/Documents/WORK/MATLAB/Scattered_Waves/';
 load([basedir 'Data\Velocity_Models\Mantle\Vs\SchmandtComboMoho.mat'])
-
+%%
 % inds = find((NVG > CPlatlons(1)) & (NVG < CPlatlons(2)) & ...
 %             (NVG > CPlatlons(3)) & (NVG < CPlatlons(4)));
 %
@@ -88,7 +89,7 @@ for k = 1:numel(glat)
     [~, i_vlat] = min(abs(Vs_Model.Latitude - glat(k)));
     [~, i_vlon] = min(abs(Vs_Model.Longitude - glon(k)));
     vels = interp1(Vs_Model.Depth, ...
-        reshape(Vs_Model.Vs(i_vlat, i_vlon, :), size(Vs_Model.Depth)), deps);
+        reshape(Vs_Model.Vp(i_vlat, i_vlon, :), size(Vs_Model.Depth)), deps);
     i_dep_m = find(deps < dep_m, 1, 'last');
     i_dep = find(deps < dep, 1, 'last');
     travel_time_p = 0; travel_time_m = 0;
@@ -105,7 +106,7 @@ for k = 1:numel(glat)
         (travel_time_p - travel_times(k))]);
 end
 
-
+%%
 
 % Get Moho values from Shen et al., 2012 WUS model
 
@@ -126,8 +127,11 @@ Moho_times = zeros(size(glat));
 Moho_times_std = zeros(size(glat));
 Moho_dv = zeros(size(glat));
 Moho_dv_std = zeros(size(glat));
+Moho_deps = Moho_dv; Moho_dep_stds = Moho_dv;
+v_aboves = Moho_dv; v_belows = Moho_dv;
 
 for k = 1:numel(glat)
+    disp(k)
 
     [~, i_vlat] = min(abs(shen_lats - glat(k)));
     [~, i_vlon] = min(abs((shen_lons - 360) - glon(k)));
@@ -173,6 +177,8 @@ for k = 1:numel(glat)
     end
     Moho_times_std(k) = mean([(Moho_times(k) - travel_time_m), ...
         (travel_time_p - Moho_times(k))]);
+    Moho_dep_stds(k) = Moho_dep_std;
+    Moho_deps(k) = Moho_dep;
 
 
     ind = find(vel_model(1,:) == Moho_dep, 1);
@@ -180,9 +186,27 @@ for k = 1:numel(glat)
     v_above_std = vel_model(3, ind);
     v_below = vel_model(2, ind+1);
     v_below_std = vel_model(3, ind+1);
+    v_belows(k) = v_below;
+    v_aboves(k) = v_above;
+    %median(vel_model(3, 1:end -1) ./ vel_model(3, 2:end));
 
-    Moho_dv(k) = 1 - v_above/v_below;
-    Moho_dv_std(k) = mean([v_above_std, v_below_std]);
+    Moho_dv(k) = v_below/v_above - 1;
+    % std for the division of two real variables A, B
+    %   f = A/B
+    % sigma_f = |f| * sqrt((sigma_A/A)^2) + (sigma_B/B)^2 - 2(sigma_AB/A/B))
+    % from https://en.wikipedia.org/wiki/Propagation_of_uncertainty
+    % covariance, sigma_AB, actually expected to be pretty high (i.e. the
+    % adjacent velocity values will be highly correlated), but unknown here
+    % Perfectly correlated would be sigma_AB = sigma_A * sigma_B, which
+    % is on average about 0.016.  Here, I've taken the covmat(2,1) value
+    % from calculating the covariance of v_below and v_above across the
+    % model space.
+    Moho_dv_std(k) = v_below / v_above ...
+        * sqrt(...
+            (v_below_std / v_below) ^ 2 ...
+            + (v_above_std / v_above) ^ 2 ...
+            - (0.0079 / (v_below * v_above)) ... # 0.0079 from cov(v_belows, v_aboves)
+        );
     fclose(fid);
 
 
@@ -190,20 +214,23 @@ for k = 1:numel(glat)
 
 end
 
+covmat = cov(v_belows, v_aboves);
+disp(covmat(2,1));
+
 clearvars -except glat glon travel_times travel_times_std amplitudes amplitudes_std Moho_times Moho_times_std Moho_dv Moho_dv_std
 
 
-
+%%
 % Print to .csv file
-fid = fopen('C:\Users\Emily\VM Shared\a_priori_constraints.csv', 'w');
+fid = fopen('D:\VM_shared\a_priori_constraints.csv', 'w'); % C:\Users\Emily\VM Shared\
 fprintf(fid, ...
-    'Lat,Lon,ttMoho,ttMohostd,dvMoho,dvMohostd,ttLAB,ttLABstd,ampLAB,ampLABstd');
+    'lat,lon,ttMoho,ttMohostd,dvMoho,dvMohostd,typeMoho,ttLAB,ttLABstd,ampLAB,ampLABstd,typeLAB');
 for k = 1:numel(glat)
     if isnan(travel_times(k)); continue; end
-    fprintf(fid, '\n%g,%g,%g,%g,%g,%g,%g,%g,%g,%g', ...
+    fprintf(fid, '\n%g,%g,%g,%g,%g,%g,%s,%g,%g,%g,%g,%s', ...
        glat(k), glon(k), Moho_times(k), Moho_times_std(k), Moho_dv(k), ...
-       Moho_dv_std(k), travel_times(k), travel_times_std(k), ...
-       amplitudes(k), amplitudes_std(k));
+       Moho_dv_std(k), 'Ps', travel_times(k), travel_times_std(k), ...
+       amplitudes(k), amplitudes_std(k), 'Sp');
 
 end
 
