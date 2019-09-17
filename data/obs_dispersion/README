@@ -1,0 +1,42 @@
+Observed phase velocity data, downloaded 2019.08.19
+
+Ambient noise from Ekstrom, 2017, PEPI, doi:/10.1016/j.pepi.2017.07.010
+  - Vertical component Rayleigh wave observations at 5, 6, 8, 10, 12, 15s
+  - Other periods are available at >= 20s, but this overlaps with ASWMS
+  - Data from www.ldeo.columbia.edu/~ekstrom/Projects/ANT/USANT15
+  - The files contain phase-velocity maps of Love and Rayleigh waves
+    derived from USArray data for the period 2006-2015 using
+    noise-tomography techniques. This set of phase-velocity maps are
+    referred to as "USANT15".
+  - Each file contains a line close to the beginning that looks like
+      #PVELREF: x.xxxx
+    This line gives the reference phase velocity for the anomaly
+    values that follow.
+  - The files contain values of phase velocity for latitude-longitude
+    pixels. Variations are given in percent. The format of the data is
+    latitude, longitude, pixel size in degrees, percent deviation.
+    The latitude and longitude refer to the center of the pixel.
+  - The pixel map is referenced to geocentric coordinates.  Therefore
+    the latitude should be corrected to the ellipsoid if maps are
+    plotted in geographic coordinates.
+
+Surface wave data from the USArray, using ASWMS
+
+ASWMS observations from USArray, as hosted by IRIS.
+  - To cite the IRIS DMC Data Products effort:
+      Hutko et al., 2017, SRL, doi:/10.1785/0220160190.
+  - To cite the IRIS DMC ASWMS Data Product:
+      IRIS DMC, 2014, doi://10.17611/DP/ASWMS.1.
+  - To cite the Automated Surface Wave Phase Velocity Measuring System:
+      Jin & Gaherty, GJI, doi://10.1093/gji/ggv079.
+  - Data from https://ds.iris.edu/ds/products/aswms/
+  - Use the Helmholtz (corrected) measurements for Rayleigh waves
+  - Periods available: 20, 25, 32, 40, 50, 60, 80, 100 s
+  - File name format: 'helmholtz_stack_LHZ_[dd].xyz', where [dd] is 20, ..., 100
+  - Each line in the files contains one phase-velocity observation.
+    The columns:
+      1. Latitude
+      2. Longitude
+      3. Phase velocity
+
+I assume that these lat/lons are geographic.

@@ -1,0 +1,210 @@
+**********  MATLAB CODE USED TO GENERATE a_priori_constraints.txt ********
+
+- The a_priori_constraints.txt that is in data/RFconstraints
+  contains constraints on the Moho (dVs and depth, and standard
+  deviation of each) from Shen et al., 2012 WUS model
+      - ciei.colorado.edu/Models/US_4/Model_Description.pdf
+  Depth is converted to travel time using their velocity model.
+- The constraints on the LAB come from Hopper and Fischer, 2018,
+  and are pulled from the StrongestNVG reported in the SI file,
+  then converted to travel time using the combined model of Schamndt
+  et al., 2015; Schmandt and Lin, 2014 used by Hopper & Fischer,
+  2018 for their original migration.
+- LAB standard deviation is calculated within a 0.25 degree circle
+  around the reported lat/lon.  I did recalculate the area around
+  the Colorado Plateau to bootstrap and find standard deviation
+  that way, but the lateral variation was much more significant
+  than the variation between bootstraps.
+- LAB amplitude rather than estimated dVs is reported, as this is
+  highly dependent on the width of the LAB boundary layer.
+- Note that even though LAB measurements are Sp, I have converted the travel
+  time as if it were Vs.  This is probably not the best thing to do, but given
+  that none of the velocity models involved in this process have particularly
+  good constraints on Vp, all it is really doing is taking the Vp/Vs scaling
+  assumptions implicitly rather than explicitly.
+- Also note, dv is defined as 1 - v_above/v_below.
+
+Columns in csv are
+Lat,Lon,
+ttMoho,ttMohostd,dvMoho,dvMohostd,typeMoho,
+ttLAB,ttLABstd,ampLAB,ampLABstd,typeLAB
+
+
+**************************************************************************
+
+
+
+
+
+% Convert CCP depths to times
+clearvars; close all; clc
+load('USA\Final Draft\Final Revision\GUI\USA_NVG_parameters.mat')
+
+CPlatlons = [30, 45, -119, -101];
+grid_spacing = 0.25;
+NVG = StrongestNVG; % LAB;
+
+
+lats = CPlatlons(1):grid_spacing:CPlatlons(2);
+lons = CPlatlons(3):grid_spacing:CPlatlons(4);
+[glon, glat] = meshgrid(lons, lats);
+basedir = 'C:/Users/Emily/OneDrive/Documents/WORK/MATLAB/Scattered_Waves/';
+load([basedir 'Data\Velocity_Models\Mantle\Vs\SchmandtComboMoho.mat'])
+
+% inds = find((NVG > CPlatlons(1)) & (NVG < CPlatlons(2)) & ...
+%             (NVG > CPlatlons(3)) & (NVG < CPlatlons(4)));
+%
+cmap=[83 94 173; 165 186 232; 193 226 247;213 227 148; ...
+    233 229 48; 229 150 37; 200 30 33]./255;
+
+deps_all = zeros(size(glat));
+deps_p = deps_all; deps_m = deps_all;
+
+
+travel_times = zeros(size(glat));
+travel_times_std = zeros(size(glat));
+amplitudes = zeros(size(glat));
+amplitudes_std = zeros(size(glat));
+for k = 1:numel(glat)
+    dists = sqrt((NVG(:,1) - glat(k)).^2 + (NVG(:,2) - glon(k)).^2);
+    iloc = find(dists<0.25);
+    if isempty(iloc)
+        travel_times(k) = nan;
+        travel_times_std(k) = nan;
+        amplitudes(k) = nan;
+        amplitudes_std(k) = nan;
+        continue
+    end
+    dep = median(NVG(iloc, 3));
+    dep_p = dep + std(NVG(iloc, 3));
+    dep_m = dep - std(NVG(iloc, 3));
+
+    amplitudes(k) = median(NVG(iloc, 4));
+    amplitudes_std(k) = std(NVG(iloc,4));
+
+    % convert to time
+    dep_spacing = 0.5;
+    deps = 0:dep_spacing:dep_p;
+    [~, i_vlat] = min(abs(Vs_Model.Latitude - glat(k)));
+    [~, i_vlon] = min(abs(Vs_Model.Longitude - glon(k)));
+    vels = interp1(Vs_Model.Depth, ...
+        reshape(Vs_Model.Vs(i_vlat, i_vlon, :), size(Vs_Model.Depth)), deps);
+    i_dep_m = find(deps < dep_m, 1, 'last');
+    i_dep = find(deps < dep, 1, 'last');
+    travel_time_p = 0; travel_time_m = 0;
+    for i_d = 1:length(deps)
+        travel_time_p = travel_time_p + dep_spacing/vels(i_d);
+        if i_d == i_dep_m
+            travel_time_m = travel_time_p;
+        end
+        if i_d == i_dep
+            travel_times(k) = travel_time_p;
+        end
+    end
+    travel_times_std(k) = mean([(travel_times(k) - travel_time_m), ...
+        (travel_time_p - travel_times(k))]);
+end
+
+
+
+% Get Moho values from Shen et al., 2012 WUS model
+
+% http://ciei.colorado.edu/Models/US_4/Model_Description.pdf
+% These are saved as individual text files, named '(lon E)_(lat N).mod.1'
+% where lon E = 235.5:0.25:260; lat N = 28.5:0.25:49
+% From their description:
+% The first line is formatted:
+% lon lat Crustal_thickness (km) Error_crustal_thickness (km)
+% Then each line thereafter is: depth (km), Vsv (km/s), Error_Vsv (km/s).
+% At layer boundaries (base of the sediments, base of the crust) there is
+% a repeated knot so the model can take a discrete jump.
+
+shen_lats = 28.5:0.25:49;
+shen_lons = 235.5:0.25:260;
+
+Moho_times = zeros(size(glat));
+Moho_times_std = zeros(size(glat));
+Moho_dv = zeros(size(glat));
+Moho_dv_std = zeros(size(glat));
+
+for k = 1:numel(glat)
+
+    [~, i_vlat] = min(abs(shen_lats - glat(k)));
+    [~, i_vlon] = min(abs((shen_lons - 360) - glon(k)));
+
+    fname = [num2str(shen_lons(i_vlon)), '_', ...
+        num2str(shen_lats(i_vlat)), '.mod.1'];
+    fid = fopen([basedir '/Data/Velocity_Models/WUSA/' fname]);
+    fid1 = fid;
+    while fid < 0
+        i_vlat = i_vlat + 1;
+        i_vlon = i_vlon + 1;
+        fname = [num2str(shen_lons(i_vlon)), '_', ...
+            num2str(shen_lats(i_vlat)), '.mod.1'];
+        fid = fopen([basedir '/Data/Velocity_Models/WUSA/' fname]);
+    end
+    %     if fid1 < 0
+    %         fprintf('\nOriginal lat/lon: %.2f, %.2f;\t\t difference: %.2f, %.2f', ...
+    %             glat(k), glon(k), shen_lats(i_vlat)-glat(k), (shen_lons(i_vlon)-360)-glon(k));
+    %     end
+
+    Moho_data = strsplit(fgetl(fid));
+    Moho_dep = str2double(Moho_data{3});
+    Moho_dep_std = str2double(Moho_data{4});
+
+    vel_model = fscanf(fid, '%g %g %g', [3 Inf]);
+    % convert to time
+    discs = find(diff(vel_model(1,:)) == 0);
+    vel_model(1, discs+1) = vel_model(1, discs+1) + 0.01;
+    dep_spacing = 0.5;
+    deps = 0:dep_spacing:Moho_dep + Moho_dep_std;
+    vels = interp1(vel_model(1,:), vel_model(2,:), deps);
+    i_dep_m = find(deps < Moho_dep - Moho_dep_std, 1, 'last');
+    i_dep = find(deps < Moho_dep, 1, 'last');
+    travel_time_p = 0; travel_time_m = 0;
+    for i_d = 1:length(deps)
+        travel_time_p = travel_time_p + dep_spacing/vels(i_d);
+        if i_d == i_dep_m
+            travel_time_m = travel_time_p;
+        end
+        if i_d == i_dep
+            Moho_times(k) = travel_time_p;
+        end
+    end
+    Moho_times_std(k) = mean([(Moho_times(k) - travel_time_m), ...
+        (travel_time_p - Moho_times(k))]);
+
+
+    ind = find(vel_model(1,:) == Moho_dep, 1);
+    v_above = vel_model(2,ind);
+    v_above_std = vel_model(3, ind);
+    v_below = vel_model(2, ind+1);
+    v_below_std = vel_model(3, ind+1);
+
+    Moho_dv(k) = 1 - v_above/v_below;
+    Moho_dv_std(k) = mean([v_above_std, v_below_std]);
+    fclose(fid);
+
+
+
+
+end
+
+clearvars -except glat glon travel_times travel_times_std amplitudes amplitudes_std Moho_times Moho_times_std Moho_dv Moho_dv_std
+
+
+
+% Print to .csv file
+fid = fopen('C:\Users\Emily\VM Shared\a_priori_constraints.csv', 'w');
+fprintf(fid, ...
+    'Lat,Lon,ttMoho,ttMohostd,dvMoho,dvMohostd,ttLAB,ttLABstd,ampLAB,ampLABstd');
+for k = 1:numel(glat)
+    if isnan(travel_times(k)); continue; end
+    fprintf(fid, '\n%g,%g,%g,%g,%g,%g,%g,%g,%g,%g', ...
+       glat(k), glon(k), Moho_times(k), Moho_times_std(k), Moho_dv(k), ...
+       Moho_dv_std(k), travel_times(k), travel_times_std(k), ...
+       amplitudes(k), amplitudes_std(k));
+
+end
+
+fclose(fid);
