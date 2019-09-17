@@ -90,18 +90,16 @@ from util import constraints
 
 def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
                                       model:define_models.InversionModel,
-                                      setup_model:define_models.SetupModel,
-                                      data:constraints.Observations):
+                                      setup_model:define_models.SetupModel):
     """ Make partial derivative matrix, G, for phase velocities and RFs
     """
 
     G_sw = _build_partial_derivatives_matrix_sw(kernels, model,
                                                 setup_model)
 
-    #G_RFs = _build_partial_derivatives_matrix_rf(model, setup_model, data)
+    G_RFs = _build_partial_derivatives_matrix_rf(model, setup_model)
 
-    #return np.vstack((G_sw, G_RFs))
-    return G_sw
+    return np.vstack((G_sw, G_RFs))
 
 
 
@@ -988,8 +986,7 @@ def _scale_dvsv_dp_to_other_variables(dvsv_dp_mat:np.array,
 
 
 def _build_partial_derivatives_matrix_rf(model:define_models.InversionModel,
-                                         setup_model:define_models.SetupModel,
-                                         data:constraints.Observations):
+                                         setup_model:define_models.SetupModel):
     """
     We have two bits of data for each model boundary layer:
        - travel time
@@ -1113,7 +1110,7 @@ def _calculate_travel_time_partial(model, i_bl, G_rf):
 
     # Calculate partials for thicknesses
     n_depth_points = model.vsv.size - 1
-    for i_t in range(i_bl):
+    for i_t in range(i_bl + 1):
         ib = model.boundary_inds[i_t]
         G_rf[i_bl * 2, n_depth_points + i_t] = (
             2 / (model.vsv[ib - 1] + model.vsv[ib])

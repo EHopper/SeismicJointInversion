@@ -104,12 +104,17 @@ def extract_observations(lat:float, lon:float,
                    rfs['ttstd'][:, np.newaxis],
                    rfs['dvstd'][:, np.newaxis]))
     periods = surface_waves['period']
-    rf_data = rfs['type']
 
-    return
+    return d, std, periods
 
 def _extract_rf_constraints(lat:float, lon:float,
                             setup_model:define_models.SetupModel):
+    """
+
+    Note that some of the reported standard deviation on values are
+    unrealistically low (i.e. zero), so we will assume the minimum standard
+    deviation on a value is the 10% quantile of the total data set.
+    """
 
     # Load in receiver function constraints
     all_rfs = pd.read_csv('data/RFconstraints/a_priori_constraints.csv')
@@ -118,30 +123,48 @@ def _extract_rf_constraints(lat:float, lon:float,
     cols = list(obs.index)
 
     rfs = pd.DataFrame(
-        columns = ['lat', 'lon', 'tt', 'ttstd', 'dv', 'dvstd', 'type']
+        columns = ['lat', 'lon', 'tt', 'ttstd', 'dv', 'dvstd']
     )
     ib = 0
     for bound in setup_model.boundary_names:
-        try:
-            type = obs['type' + bound]
-        except:
-            type = 'Ps'
-            print('RF type unspecified for ' + bound + ' - assuming Ps')
+        # Extract travel time information
         try:
             tt = obs['tt' + bound]
             ttstd = obs['tt' + bound + 'std']
+
+            min_allowed_ttstd = all_rfs['tt' + bound + 'std'].quantile(0.1)
+            ttstd = max((ttstd, min_allowed_ttstd))
         except:
             tt = 0
             ttstd = 0
             print('No RF constraints on travel time for ' + bound)
 
+        # If necessary, scale to Vs travel time
+        try:
+            rftype = obs['type' + bound]
+        except:
+            rftype = 'Ps'
+            print('RF type unspecified for ' + bound + ' - assuming Ps')
+        if rftype == 'Sp': # Scale travel time from travelling at Vp to at Vs
+            tt *= setup_model.vpv_vsv_ratio
+            # for constant a, variable A: sigma_aA = |a| * sigma_A
+            ttstd *= setup_model.vpv_vsv_ratio
+
+        # Extract velocity contrast information
         try:
             dv = obs['dv' + bound]
             dvstd = obs['dv' + bound + 'std']
+
+            min_allowed_dvstd = all_rfs['dv' + bound + 'std'].quantile(0.1)
+            ampstd = max((dvstd, min_allowed_dvstd))
         except:
             try:
                 amp = obs['amp' + bound]
                 ampstd = obs['amp' + bound + 'std']
+
+                min_allowed_amstd = all_rfs['amp' + bound + 'std'].quantile(0.1)
+                ampstd = max((ampstd, min_allowed_amstd))
+
                 type = obs['type' + bound]
                 dv, dvstd = _convert_amplitude_to_dv(
                     amp, ampstd, type, setup_model.boundary_widths[ib]
@@ -152,19 +175,46 @@ def _extract_rf_constraints(lat:float, lon:float,
                 print('No RF constraints on dV for ' + bound)
 
         rfs = rfs.append(
-            df.Series([lat, lon, tt, ttstd, dv, dvstd, type], index=rfs.columns),
+            pd.Series([lat, lon, tt, ttstd, dv, dvstd], index=rfs.columns),
             ignore_index=True,
         )
 
-    ib += 1
+        ib += 1
 
 
     return rfs
 
-def _convert_amplitude_to_dv(amp, ampstd, type, boundary_width):
+def _convert_amplitude_to_dv(amp, ampstd, rftype, boundary_width):
+    """
 
-    pass
+    Calculated the Sp synthetics in MATLAB for a variety of dV (where
+    dV = (1 - v_bottom / v_top) * 100 given the width of the boundary
+    layer (here labelled 'breadth').  These are saved as individual .csv
+    files, where the breadth of the synthetic layer is in the file name,
+    and each row represents a different input dV and output phase amplitude.
 
+    synthvals = pd.DataFrame(columns = ['breadth', 'dv', 'amplitude'])
+    for b in range(0, 51, 5):
+        a = pd.read_csv('synthvals_' + str(b) + '.0.csv', header=None,
+                        names = ['dv', 'amplitude'])
+        a['breadth'] = b
+        a['dv'] *= -1 / 100
+        synthvals = synthvals.append(a, ignore_index=True, sort=False)
+    synthvals.to_csv('data/RFconstraints/synthvals_Sp.csv', index=False)
+    """
+
+    try:
+        synth = pd.read_csv('data/RFconstraints/synthvals_' + rftype +'.csv')
+    except:
+        print('No synthetic amplitudes calculated for ' + rftype + '!')
+        return
+
+    synth = synth[synth.breadth == boundary_width]
+    # Note that numpy default for interpolation is x < x[0] returns y[0]
+    dv = np.round(np.interp(amp, synth.amplitude, synth.dv), 3)
+    dvstd = abs(np.round(np.interp(ampstd, synth.amplitude, synth.dv), 3))
+
+    return dv, dvstd
 
 def _extract_phase_vels(lat:float, lon:float):
 
@@ -183,7 +233,7 @@ def _extract_phase_vels(lat:float, lon:float):
 
     return surface_waves.reset_index(drop=True)
 
-def _load_all_observed_sw_constraints():
+def _load_observed_sw_constraints():
     """ Load surface wave constraints into pandas.
 
     Very specific to the way the data is currently stored!  See READMEs in the
