@@ -18,76 +18,17 @@ from util import define_models
 # =============================================================================
 
 
-class Observations(typing.NamedTuple):
-    """ Observed constraints from surface wave dispersion & receiver functions
-
-    Fields:
-        - surface_waves
-            - pd.DataFrame with columns:
-                - period
-                    - Units:    s
-                    - Dominant period of dispersion measurement
-                - c
-                    - Units:    km/s
-                    - Phase velocity
-                - std
-                    - Units:    km/s
-                    - Standard deviation of measurement at each period
-            - At time of writing, data/obs_dispersion files come from
-              ASWMS estimates from IRIS (long periods) and Ekstrom et al., 2017
-              (ambient noise; periods < 20s).  See README in that directory
-              for more information on origin & format.
-        - receiver_functions
-            - pd.DataFrame with columns:
-                - ttMoho
-                    - Units:    s
-                    - Travel time to the Moho (average)
-                - ttMohostd
-                    - Units:    s
-                    - Standard deviation of travel time to the Moho
-                - dvMoho
-                    - Units:    km/s
-                    - Velocity change at the Moho (average)
-                - dvMohostd
-                    - Units:    km/s
-                    - Standard deviation of velocity change at the Moho
-                - ttLAB
-                    - Units:    s
-                    - Travel time to the LAB (average)
-                - ttLABstd
-                    - Units:    s
-                    - Standard deviation of travel time to the LAB
-                - ampLAB
-                    - Units:    none
-                    - Amplitude of LAB phase
-                - ampLABstd
-                    - Units:    none
-                    - Standard deviation of LAB amplitude
-            - At time of writing, data/RFconstraints/a_prior_constraints.txt
-              come from Shen et al., 2012 (Moho); Hopper & Fischer, 2018 (LAB).
-              See README in that directory for more information on origin.
-        - latitude
-            - Units:    °N
-        - longitude
-            - Units:    °E
-            - Assumes -180 to +180, not 0 to 360
-    """
-    surface_waves: pd.DataFrame
-    receiver_functions: pd.DataFrame
-    latitude: float
-    longitude: float
-
-
 # =============================================================================
 #       Extract the observations of interest for a given location
 # =============================================================================
 
-def extract_observations(lat:float, lon:float,
+def extract_observations(location:tuple,
                          setup_model:define_models.SetupModel):
     """ Make an Observations object.
     """
-
+    lat, lon = location
     surface_waves = _extract_phase_vels(lat, lon)
+    #surface_waves = surface_waves.iloc[[3, 5, 7, 11, 12, 13], :]
     rfs = _extract_rf_constraints(lat, lon, setup_model)
     # Write to file
     surface_waves.to_csv(
@@ -103,7 +44,7 @@ def extract_observations(lat:float, lon:float,
     std = np.vstack((surface_waves['std'][:, np.newaxis],
                    rfs['ttstd'][:, np.newaxis],
                    rfs['dvstd'][:, np.newaxis]))
-    periods = surface_waves['period']
+    periods = surface_waves['period'].values
 
     return d, std, periods
 
@@ -135,9 +76,8 @@ def _extract_rf_constraints(lat:float, lon:float,
             min_allowed_ttstd = all_rfs['tt' + bound + 'std'].quantile(0.1)
             ttstd = max((ttstd, min_allowed_ttstd))
         except:
-            tt = 0
-            ttstd = 0
             print('No RF constraints on travel time for ' + bound)
+            return
 
         # If necessary, scale to Vs travel time
         try:
@@ -170,9 +110,8 @@ def _extract_rf_constraints(lat:float, lon:float,
                     amp, ampstd, type, setup_model.boundary_widths[ib]
                 )
             except:
-                dv = 0
-                dvstd = 0
                 print('No RF constraints on dV for ' + bound)
+                return
 
         rfs = rfs.append(
             pd.Series([lat, lon, tt, ttstd, dv, dvstd], index=rfs.columns),

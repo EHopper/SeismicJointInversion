@@ -45,14 +45,14 @@ class ModelLayerValues(typing.NamedTuple):
     asthenosphere: np.array
 
 
-def build_weighting_damping(data:constraints.Observations, p:np.array,
+def build_weighting_damping(std_obs:np.array, p:np.array,
                             model:define_models.InversionModel,
                             setup_model:define_models.SetupModel):
     """
     """
 
     # Calculate data error matrix
-    W = _build_error_weighting_matrix(data.surface_waves['std'].values)
+    W = _build_error_weighting_matrix(std_obs)
 
     # Record level of damping on the Vsv model parameters
     layers = define_models._set_model_indices(setup_model, model)
@@ -81,7 +81,7 @@ def build_weighting_damping(data:constraints.Observations, p:np.array,
             [0.5] * (len(layers.lower_crust) - 1) + [0.5],
             [0.5] * (len(layers.lithospheric_mantle) - 1) + [0.5],
             [0.5] * len(layers.asthenosphere),
-            [0.5] * len(layers.boundary_layers)
+            [0.01, 0.01]
         ),
         layers, damp_s, damp_t, 'to_m0'
     )
@@ -89,7 +89,7 @@ def build_weighting_damping(data:constraints.Observations, p:np.array,
         _build_constraint_damp_to_m0(p), damp_s, damp_t
     )
     # Damp towards starting model gradients in Vs
-    _set_layer_values((1, 1, 1, 2, 0), layers, damp_s, damp_t, 'to_m0_grad')
+    _set_layer_values((1, 1, 1, 1, 0), layers, damp_s, damp_t, 'to_m0_grad')
     damp_to_m0_grad_mat, damp_to_m0_grad_vec = _damp_constraints(
         _build_constraint_damp_original_gradient(model), damp_s, damp_t
     )
@@ -249,7 +249,7 @@ def _build_error_weighting_matrix(obs_std):
     """
 
     # If standard deviation of data is missing (= 0), fill in with guess
-    obs_std = obs_std.copy()
+    obs_std = obs_std.flatten().copy()
     obs_std[obs_std == 0] = 0.15
 
 
@@ -470,114 +470,11 @@ def _build_constraint_damp_original_gradient(
 
     return H, h, 'to_m0_grad'
 
-def _build_constraint_rf_moho(model, rfs):
-    """
+def _build_constraint_damp_min_thickness(setup_model, p):
+    """ Damp thickness of variable layers to pre-set minimum.
 
-    Returns:
-        H:
-            - (n_constraints, n_model_params) np.array
-
-    """
-    # Assuming that the receiver function Moho constraints come from Ps
-    # i.e. travel time is for an SV wave.
-
-
-
-    return H, h, 'rf_moho'
-
-def _travel_time_constraint(model, boundary_ind, travel_time,
-                            type, setup_model):
-    """
-
-    Travel time is the piecewise sum of distance / velocity.
-
-    The travel time to the centre of the boundary layer, BL
-        tt = t_1 / (v_0 + v_1) / 2 + ... + t_BL / (v_BL-1 + v_BL) / 2
-                + (t_BL+1 / 2) / (3 * V_BL + V_BL+1) / 4
-    Remember that t_i is the thickness of the layer between v_i-1 & v_i.
-
-    If H is the identity matrix, then h is this equation solved for the
-    model parameter of interest (i.e. v_0 through v_BL+1, t_BL)
-
-    For the model parameters that only appear once, this is easy!
-    (In the notation below, e.g. 2:BL is inclusive of 2 and BL!)
-        v_0 = (2 * t_1
-              / (tt - 2 * ∑[(n = 2:BL) t_n / (v_n-1 + v_n)]
-                 - 2 * t_BL+1 / (3 * V_BL + V_BL+1))
-              - v_1)
-        v_BL+1 = (2 * t_BL+1
-                 / (tt - 2 * ∑[(n = 1:BL+1) t_n / (v_n-1 + v_n)])
-                 - 3 * v_BL
-        t_BL = (tt - 2 * ∑[(n = 1:BL - 1) t_n / (v_n-1 + v_n)])
-                - 2 * t_BL+1 / (3 * V_BL + V_BL+1))
-                * (v_BL-1 + v_BL)
-
-    For the model paramters that appear multiple times, this is tricker.
-        ((2 * t_i) / (v_i-1 + v_i)  +  (2 * t_i+1) / (v_i + v_i+1)
-            = (tt - 2 * ∑[(n = 1:i-1, i+2:BL) t_n / (v_n-1 + v_n)]
-               - 2 * t_BL+1 / (3 * V_BL + V_BL+1)))
-
-        Let's simplify:
-            a = 2 * t_i
-            b = v_i-1
-            c = 2 * t_i+1
-            d = v_i+1
-            e = (tt - 2 * ∑[(n = 1:i-1, i+2:BL) t_n / (v_n-1 + v_n)]
-                 - 2 * t_BL+1 / (3 * V_BL + V_BL+1)))
-
-            a / (b + x) + c / (d + x) = e
-            a * (d + x) + c * (b + x) = e * (d + x) * (b + x)
-            e * x **2  - (a - be + c - de) * x - da - cv + bde = 0
-
-        Let's simplify again!
-            m * x ** 2 - n * x - p = 0
-
-        Time for the quadratic formula:
-            x = (-(-n) + ((-n) ** 2 - 4 * m * (-p)) ** 0.5) / 2 * m
-            x = (n + ((n ** 2 + 4 * m * p) ** 0.5) / 2 * m
-
-        Go back to a, b, c, d, e
-            x = ((a - be + c - de
-                + ((a - be + c - de)**2 + 4 * e * (da + cv - bde)) ** 0.5)
-                / 2 * e)
-        And I'm not going to write that out in terms of tt, t_i, v_i here!
+    In H * m = h, we want to end up with
+            exp(t_i - setup_model.boundary_depth_uncertainty[i]) = 1
+            exp(setup_model.boundary_depth_uncertainty[i] - t_i) = 1
 
     """
-
-    i = model.boundary_inds[boundary_ind]
-    n_depth_layers = model.vsv.shape[0] - 1
-    n_boundary_layers = len(model.boundary_inds)
-    n_relevent_params = (i + 2) + (boundary_ind + 1)
-
-    H = np.identity(n_depth_layers + n_boundary_layers)
-    t = model.thickness
-    if type == 'Ps':
-        v = model.vsv
-    elif type == 'Sp':
-        v = model.vsv * setup_model.vpv_vsv_ratio
-
-    # First, deal with the easy variables - v_0, v_BL+1, t_BL
-    v_0 = (2 * t[1]
-          / (
-                travel_time
-                - _sum_RF_travel_times(range(2, i + 1), t, v)
-                - 2 * t[i + 1] / (3 * v[i] + v[i + 1])
-            )
-          - v[1])
-    v_BLp1 = (2 * t[1]
-             / (
-                travel_time
-                - _sum_RF_travel_times(range(2, i + 1), t, v)
-                - 2 * t[i + 1] / (3 * v[i] + v[i + 1])
-              )
-              - v[1])
-
-
-
-    return h
-
-def _sum_RF_travel_times(inds, t, v):
-    total = 0
-    for i in inds:
-        total += 2 * t[i] / (v[i-1] + v[i])
-    return total

@@ -134,53 +134,105 @@ def run_test_G():
 
 
 def test_damping(n_iter):
-    setup_model = define_models.SetupModel(
-        'testcase', np.array([35., 100.]), np.array([5, 20]),
-        np.array([10, 30]), np.array([3.6, 4.0, 4.4, 4.3]),
-        np.array([0, 300])
-    )
-    data = constraints.extract_observations(35, -112)
-    # To speed things up, remove some data
-    data = data._replace(surface_waves =
-        data.surface_waves.iloc[[3, 7, 9, 11, 12, 13], :].reset_index()
-    )
-    #setup_model = setup_model._replace(boundary_names = [])
-    periods = data.surface_waves.period.values
-    save_name = 'output/{0}/{0}.q'.format(setup_model.id)
 
-    f = plt.figure()
-    f.set_size_inches((15,7))
-    ax_m = f.add_axes([0.35, 0.1, 0.2, 0.8])
-    ax_c = f.add_axes([0.6, 0.2, 0.35, 0.5])
-    line, = ax_c.plot(periods, data.surface_waves.ph_vel.values,
-                      'k-', linewidth=3)
-    line.set_label('data')
+    vs_SL14 = pd.read_csv('/media/sf_VM_Shared/CP_SL14.csv',
+                          header=None).values
+    cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
 
-    m = define_models.setup_starting_model(setup_model)
-    # m = m._replace(boundary_inds =  np.array([]))
-    # m = m._replace(thickness=np.array([0.] + [6.] * (len(m.vsv) - 1))[:, np.newaxis])
-    plots.plot_model(m, 'm0', ax_m)
-    for n in range(n_iter):
-        print('****** ITERATION ' +  str(n) + ' ******')
-        m = inversion._inversion_iteration(setup_model, m, data)
-        c = mineos._read_qfile(save_name, periods)
-        plots.plot_model(m, 'm' + str(n + 1), ax_m)
-        plots.plot_ph_vel(periods, c, 'm' + str(n), ax_c)
-    # Run MINEOS on final model
-    params = mineos.RunParameters(freq_max = 1000 / min(periods) + 1)
-    _ = define_models.convert_inversion_model_to_mineos_model(m, setup_model)
-    c, _ = mineos.run_mineos(params, periods, setup_model.id)
-    plots.plot_ph_vel(periods, c, 'm' + str(n + 1), ax_c)
+    for t_LAB in [5., 10., 15., 20., 25., 30.]:
+        for lat in range(34, 41):
+            for lon in range(-115, -105):
+                location = (lat, lon)
+                print('*********************** {}N, {}W, {}km LAB'.format(
+                    lat, -lon, t_LAB
+                ))
 
-    save_name = 'output/{0}/{0}'.format(setup_model.id)
-    damp_s = pd.read_csv(save_name + 'damp_s.csv')
-    damp_t = pd.read_csv(save_name + 'damp_t.csv')
-    n = 0
-    for label in ['roughness', 'to_m0', 'to_m0_grad']:
-        ax_d = f.add_axes([0.05 + 0.1 * n, 0.1, 0.05, 0.8])
-        ax_d.plot(damp_s[label], damp_s.Depth, 'ko-', markersize=3)
-        ax_d.plot(damp_t[label], damp_t.Depth, 'ro', markersize=2)
-        ax_d.set(title=label)
-        ax_d.set_ylim([np.cumsum(m.thickness)[-1], 0])
-        ax_d.xaxis.tick_top()
-        n += 1
+                setup_model = define_models.SetupModel(
+                    'test', np.array([35., 80.]), np.array([5, 10]),
+                    np.array([2, 20]), np.array([3.6, 4.0, 4.4, 4.3]),
+                    np.array([0, 300])
+                )
+                #location = (35, -112)
+                obs, std_obs, periods = constraints.extract_observations(
+                    location, setup_model
+                )
+                moho_z_ish = np.round(obs[-4] * 3.5)
+                lab_z_ish = np.round(obs[-3] * 4.2)
+                setup_model = setup_model._replace(
+                    boundary_depths = np.concatenate((moho_z_ish, lab_z_ish))
+                )
+
+
+                # To speed things up, remove some data
+                # i_p = list(range(3, 10, 2)) + list(range(10, 14))
+                # i_rf = list(range(14, 18))
+                # periods = periods[i_p]
+                # obs = obs[i_p + i_rf]
+                # std_obs = std_obs[i_p + i_rf]
+
+                i_c = list(range(len(obs) - 2 * len(setup_model.boundary_names)))
+                i_rf = list(range(i_c[-1] + 1, len(obs)))
+
+                #setup_model = setup_model._replace(boundary_names = [])
+                save_name = 'output/{0}/{0}.q'.format(setup_model.id)
+                lat, lon = location
+
+                f = plt.figure()
+                f.set_size_inches((15,7))
+                ax_m = f.add_axes([0.35, 0.1, 0.2, 0.8])
+                ax_c = f.add_axes([0.6, 0.4, 0.35, 0.5])
+                ax_map = f.add_axes([0.84, 0.44, 0.1, 0.2])
+                im = ax_map.contourf(np.arange(-119, -100.9, 0.2),
+                    np.arange(30, 45.1, 0.2), vs_SL14, levels=20,
+                    cmap=plt.cm.RdBu, vmin=4, vmax=4.7)
+                ax_map.plot(lon, lat, 'k*')
+                ax_map.plot(cp_outline[:, 1], cp_outline[:, 0], 'k:')
+                ax_c.set_title(
+                    '{:.1f}N, {:.1f}W:  {:.0f} km LAB'.format(lat, -lon, t_LAB)
+                )
+                ax_rf = f.add_axes([0.6, 0.1, 0.35, 0.2])
+                line, = ax_c.plot(periods, obs[i_c],
+                                  'k-', linewidth=3, label='data')
+                plots.plot_rf_data_std(obs[i_rf], std_obs[i_rf], 'data', ax_rf)
+
+                m = define_models.setup_starting_model(setup_model)
+                # m = m._replace(boundary_inds =  np.array([]))
+                # m = m._replace(thickness=np.array([0.] + [6.] * (len(m.vsv) - 1))[:, np.newaxis])
+                plots.plot_model(m, 'm0', ax_m)
+                p_rf = inversion._predict_RF_vals(m)
+                plots.plot_rf_data(p_rf, 'm0', ax_rf)
+                for n in range(n_iter):
+                    print('****** ITERATION ' +  str(n) + ' ******')
+                    m = inversion._inversion_iteration(setup_model, m, location)
+                    p_rf = inversion._predict_RF_vals(m)
+                    c = mineos._read_qfile(save_name, periods)
+                    plots.plot_model(m, 'm' + str(n + 1), ax_m)
+                    plots.plot_rf_data(p_rf, 'm' + str(n + 1), ax_rf)
+                    plots.plot_ph_vel(periods, c, 'm' + str(n), ax_c)
+
+                # Run MINEOS on final model
+                params = mineos.RunParameters(freq_max = 1000 / min(periods) + 1)
+                _ = define_models.convert_inversion_model_to_mineos_model(m, setup_model)
+                c, _ = mineos.run_mineos(params, periods, setup_model.id)
+                plots.plot_ph_vel(periods, c, 'm' + str(n + 1), ax_c)
+                plots.make_plot_symmetric_in_y_around_zero(ax_rf)
+
+                save_name = 'output/{0}/{0}'.format(setup_model.id)
+                damp_s = pd.read_csv(save_name + 'damp_s.csv')
+                damp_t = pd.read_csv(save_name + 'damp_t.csv')
+                n = 0
+                for label in ['roughness', 'to_m0', 'to_m0_grad']:
+                    ax_d = f.add_axes([0.05 + 0.1 * n, 0.1, 0.05, 0.8])
+                    ax_d.plot(damp_s[label], damp_s.Depth, 'ko-', markersize=3)
+                    ax_d.plot(damp_t[label], damp_t.Depth, 'ro', markersize=2)
+                    ax_d.set(title=label)
+                    ax_d.set_ylim([np.cumsum(m.thickness)[-1], 0])
+                    ax_d.xaxis.tick_top()
+                    n += 1
+
+                f.savefig(
+                    '/media/sf_VM_Shared/rftests/{}N_{}W_{}kmLAB.png'.format(
+                    lat, -lon, round(t_LAB),
+                    )
+                )
+                plt.close(f)

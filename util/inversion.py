@@ -37,13 +37,13 @@ def run_with_no_inputs():
         boundary_depths=np.array([35., 90]),
         id='test')
 
-    data = constraints.extract_observations(35, -104)
+    location = (35, -104)
 
-    return run_inversion(setup_model, data)
+    return run_inversion(setup_model, loc)
 
 
 def run_inversion(setup_model:define_models.SetupModel,
-                  data:constraints.Observations,
+                  location:tuple,
                   n_iterations:int=5) -> (define_models.InversionModel):
     """ Set the inversion running over some number of iterations.
 
@@ -54,16 +54,18 @@ def run_inversion(setup_model:define_models.SetupModel,
     for i in range(n_iterations):
         # Still need to pass setup_model as it has info on e.g. vp/vs ratio
         # needed to convert from InversionModel to MINEOS card
-        model = _inversion_iteration(setup_model, model, data)
+        model = _inversion_iteration(setup_model, model, location)
 
     return model
 
 def _inversion_iteration(setup_model:define_models.SetupModel,
                          model:define_models.InversionModel,
-                         data:constraints.Observations
+                         location:tuple
                          ) -> define_models.InversionModel:
     """ Run a single iteration of the least squares
     """
+
+    obs, std_obs, periods = constraints.extract_observations(location, setup_model)
 
     # Build all of the inputs to the damped least squares
     # Run MINEOS to get phase velocities and kernels
@@ -72,31 +74,51 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     )
     # Can vary other parameters in MINEOS by putting them as inputs to this call
     # e.g. defaults include l_min, l_max; qmod_path; phase_or_group_velocity
-    periods = data.surface_waves.period.values
     params = mineos.RunParameters(freq_max = 1000 / min(periods) + 1)
     ph_vel_pred, kernels = mineos.run_mineos_and_kernels(
         params, periods, setup_model.id
     )
     kernels = kernels[kernels['z'] <= setup_model.depth_limits[1]]
 
+    # Assemble G, p, and d
     G = partial_derivatives._build_partial_derivatives_matrix(
-        kernels, model, setup_model, data
+        kernels, model, setup_model
     )
+
     p = _build_model_vector(model)
-    data_vector = surface_waves.phase_vel.values
-    d = _build_data_misfit_vector(
-        data_vector, ph_vel_pred, p, G
-    )
+    predictions = np.concatenate((ph_vel_pred, _predict_RF_vals(model)))
+    d = _build_data_misfit_vector(obs, predictions, p, G)
 
     # Build all of the weighting functions for damped least squares
     W, H_mat, h_vec = (
-        weights.build_weighting_damping(data, p, model, setup_model)
+        weights.build_weighting_damping(std_obs, p, model, setup_model)
     )
 
     # Perform inversion
     p_new = _damped_least_squares(p, G, d, W, H_mat, h_vec)
 
-    return _build_inversion_model_from_model_vector(p_new, model)
+    return _build_inversion_model_from_model_vector(p_new, model, setup_model)
+
+def _predict_RF_vals(model:define_models.InversionModel):
+    """
+    """
+    travel_time = np.zeros_like(model.boundary_inds).astype(float)
+    dV = np.zeros_like(model.boundary_inds).astype(float)
+
+    n = 0
+    for ib in model.boundary_inds:
+        dV[n] = model.vsv[ib + 1] / model.vsv[ib] - 1
+        for i in range(ib):
+            travel_time[n] += model.thickness[i + 1] / np.mean(model.vsv[i:i+2])
+        travel_time[n] += (
+            0.5 * model.thickness[ib + 1]
+            / ((3 * model.vsv[ib] + model.vsv[ib + 1]) / 4)
+        )
+
+        n += 1
+
+    return np.concatenate((travel_time, dV))
+
 
 
 def _build_model_vector(model:define_models.InversionModel,
@@ -128,7 +150,8 @@ def _build_model_vector(model:define_models.InversionModel,
                       model.thickness[list(model.boundary_inds)]))
 
 def _build_inversion_model_from_model_vector(
-        p:np.array, model:define_models.InversionModel):
+        p:np.array, model:define_models.InversionModel,
+        setup_model:define_models.SetupModel):
     """ Make column vector, [s; t] into InversionModel format.
 
     Arguments:
@@ -147,14 +170,19 @@ def _build_inversion_model_from_model_vector(
             - Units:    seismological (km/s, km)
             - Vs model with values updated from p.
     """
+
+    if model.boundary_inds.size == 0:
+        return define_models.InversionModel(
+            vsv = p.copy(),
+            thickness = model.thickness,
+            boundary_inds = model.boundary_inds
+        )
+
     new_thickness = model.thickness.copy()
-    if model.boundary_inds.size > 0:
-        dt = p[-len(model.boundary_inds):] - model.thickness[model.boundary_inds]
-        new_thickness[model.boundary_inds] += dt
-        new_thickness[model.boundary_inds + 2] -= dt
-        new_vsv = p[:-len(model.boundary_inds)].copy()
-    else:
-        new_vsv = p.copy()
+    dt = p[-len(model.boundary_inds):] - model.thickness[model.boundary_inds]
+    new_thickness[model.boundary_inds] += dt
+    new_thickness[model.boundary_inds + 2] -= dt
+    new_vsv = p[:-len(model.boundary_inds)].copy()
 
     return define_models.InversionModel(
                 vsv = np.vstack((new_vsv, model.vsv[-1])),
@@ -190,7 +218,7 @@ def _build_data_misfit_vector(data:np.array, prediction:np.array,
 
     Arguments:
         data:
-            - (n_periods, ) np.array
+            - (n_periods, 1) np.array
             - Units:    data.surface_waves['Phase_vel'] is in km/s
             - Observed phase velocity data
             - Extracted from a constraints.Observations object,
@@ -221,9 +249,9 @@ def _build_data_misfit_vector(data:np.array, prediction:np.array,
     """
 
     Gm0 = np.matmul(G, m0)
-    dc = data - prediction
+    dc = data - prediction[:, np.newaxis]
 
-    data_misfit = Gm0 + dc[:, np.newaxis]
+    data_misfit = Gm0 + dc
 
     return data_misfit
 

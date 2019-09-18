@@ -94,12 +94,11 @@ def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
     """ Make partial derivative matrix, G, for phase velocities and RFs
     """
 
-    G_sw = _build_partial_derivatives_matrix_sw(kernels, model,
-                                                setup_model)
 
-    G_RFs = _build_partial_derivatives_matrix_rf(model, setup_model)
-
-    return np.vstack((G_sw, G_RFs))
+    return np.vstack((
+        _build_partial_derivatives_matrix_sw(kernels, model, setup_model),
+        _build_partial_derivatives_matrix_rf(model, setup_model)
+    ))
 
 
 
@@ -1032,11 +1031,13 @@ def _calculate_dv_rf_partial(model, i_bl, G_rf):
 
     bound_ind = model.boundary_inds[i_bl]
 
-    G_rf[i_bl * 2 + 1, bound_ind] = (
+    G_rf[i_bl + model.boundary_inds.size, bound_ind] = (
         - model.vsv[bound_ind + 1] * model.vsv[bound_ind] ** -2
     )
-    G_rf[i_bl * 2 + 1, bound_ind + 1] = 1 / model.vsv[bound_ind]
-
+    G_rf[i_bl + model.boundary_inds.size, bound_ind + 1] = (
+        1 / model.vsv[bound_ind]
+    )
+    
     return
 
 def _calculate_travel_time_partial(model, i_bl, G_rf):
@@ -1088,22 +1089,22 @@ def _calculate_travel_time_partial(model, i_bl, G_rf):
     ib = model.boundary_inds[i_bl]
     # Calculate partials for central layers
     for i in range(1, ib):
-        G_rf[i_bl * 2, i] = (
+        G_rf[i_bl, i] = (
             -2 * model.thickness[i] * (model.vsv[i - 1] + model.vsv[i]) ** -2
             + (-2 * model.thickness[i + 1]
                * (model.vsv[ib] + model.vsv[i + 1]) ** -2)
         )
 
     # Calculate partials for edge cases of velocity model points
-    G_rf[i_bl * 2, 0] = (
+    G_rf[i_bl, 0] = (
         -2 * model.thickness[1] * (model.vsv[0] + model.vsv[1]) ** -2
     )
-    G_rf[i_bl * 2, ib] = (
+    G_rf[i_bl, ib] = (
         (-2 * model.thickness[ib] * (model.vsv[ib - 1] + model.vsv[ib]) ** -2)
         + (-6 * model.thickness[ib + 1]
            * (3 * model.vsv[ib] + model.vsv[ib + 1]) ** -2)
     )
-    G_rf[i_bl * 2, ib + 1] = (
+    G_rf[i_bl, ib + 1] = (
         -2 * model.thickness[ib + 1]
          * (3 * model.vsv[ib] + model.vsv[ib + 1]) ** -2
     )
@@ -1112,7 +1113,7 @@ def _calculate_travel_time_partial(model, i_bl, G_rf):
     n_depth_points = model.vsv.size - 1
     for i_t in range(i_bl + 1):
         ib = model.boundary_inds[i_t]
-        G_rf[i_bl * 2, n_depth_points + i_t] = (
+        G_rf[i_bl, n_depth_points + i_t] = (
             2 / (model.vsv[ib - 1] + model.vsv[ib])
         )
 
