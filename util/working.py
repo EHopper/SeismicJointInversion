@@ -149,7 +149,7 @@ def test_damping(n_iter):
 
                 setup_model = define_models.SetupModel(
                     'test', np.array([35., 80.]), np.array([5, 10]),
-                    np.array([2, 20]), np.array([3.6, 4.0, 4.4, 4.3]),
+                    np.array([2, t_LAB]), np.array([3.6, 4.0, 4.4, 4.3]),
                     np.array([0, 300])
                 )
                 #location = (35, -112)
