@@ -139,9 +139,10 @@ def test_damping(n_iter):
                           header=None).values
     cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
 
-    for t_LAB in [5., 10., 15., 20., 25., 30.]:
-        for lat in range(34, 41):
-            for lon in range(-115, -105):
+
+    for lat in range(34, 41):
+        for lon in range(-115, -105):
+            for t_LAB in [30., 25., 20., 15., 10.]:
                 location = (lat, lon)
                 print('*********************** {}N, {}W, {}km LAB'.format(
                     lat, -lon, t_LAB
