@@ -97,7 +97,7 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     # Perform inversion
     p_new = _damped_least_squares(p, G, d, W, H_mat, h_vec)
 
-    return _build_inversion_model_from_model_vector(p_new, model, setup_model)
+    return _build_inversion_model_from_model_vector(p_new, model)
 
 def _predict_RF_vals(model:define_models.InversionModel):
     """
@@ -150,8 +150,7 @@ def _build_model_vector(model:define_models.InversionModel,
                       model.thickness[list(model.boundary_inds)]))
 
 def _build_inversion_model_from_model_vector(
-        p:np.array, model:define_models.InversionModel,
-        setup_model:define_models.SetupModel):
+        p:np.array, model:define_models.InversionModel):
     """ Make column vector, [s; t] into InversionModel format.
 
     Arguments:
