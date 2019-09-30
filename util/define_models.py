@@ -40,6 +40,9 @@ class SetupModel(typing.NamedTuple):
         id:
             - str
             - Unique name of model for saving things.
+        location:
+            - tuple
+            -
         boundary_widths:
             - (n_boundary_depths_inverted_for, ) np.array
             - Units:   km
@@ -50,19 +53,11 @@ class SetupModel(typing.NamedTuple):
             - Units:   km
             - Depth to the top of the boundaries of interest from a priori
               constraints (i.e. receiver functions).
-        boundary_depth_uncertainty:
-            - (n_boundary_depths_inverted_for, ) np.array
-            - Units:   km
-            - Uncertainty on the depth of the boundaries of interest from a
-              priori constraints.
-            - Used for setting up model layers and in weighting the constraints
-              in the inversion.
         boundary_vsv:
-            - (n_boundary_depths_inverted_for * 2, ) np.array
+            - (n_boundary_depths_inverted_for, ) np.array
             - Units:    km/s
-            - Shear velocity at the top and bottom of boundaries of interest
-            - Velocities are assumed to be piecewise linear between these
-              points.
+            - Shear velocity at the bottom of boundaries of interest
+            - Velocities are assumed to be constant in each layer, to begin.
         boundary_names:
             - (n_boundary_depths_inverted_for) tuple
             - Units: none
@@ -76,9 +71,9 @@ class SetupModel(typing.NamedTuple):
         min_layer_thickness:
             - float
             - Units:    km
+            - Default value: 6
             - Minimum thickness of the layer, should cover several (three)
               knots in the MINEOS model card.
-            - Default value: 6
         vsv_vsh_ratio:
             - float
             - Units:    dimensionless
@@ -93,18 +88,30 @@ class SetupModel(typing.NamedTuple):
             - Ratio of Vpv to Vph, default value = 1 (i.e. radial isotropy)
         ref_card_csv_name:
             - str
+            - Default value: 'data/earth_model/prem.csv'
             - Path to a .csv file containing the information for the reference
               full MINEOS model card that we'll be altering.
             - This could be some reference Earth model (e.g. PREM), or some
               more specific local model.
-            - Default value: 'data/earth_model/prem.csv'
             - Note that this csv file should be in SI units (m, kg.m^-3, etc)
+        ref_sed_thickness_name:
+            - str
+            - Default value: 'data/earth_model/sedthk_crust1.csv'
+                        (source: https://igppweb.ucsd.edu/~gabi/crust1.html)
+            - Path to a text file containing information for the reference
+              sedimentary thickness model
+            - This could be some reference Earth model (e.g. Crust 1.0), or some
+              more specific local model.
+            - Note that this csv file should be in seismology units (km), with
+              the column names 'lat', 'lon', and 'thickness_km'
+            - A stratified sedimentary velocity model is assumed based on the
+              thickness.
 
     """
 
     id: str
+    location: tuple
     boundary_depths: np.array
-    boundary_depth_uncertainty: np.array
     boundary_widths: np.array
     boundary_vsv: np.array
     depth_limits: np.array
@@ -114,6 +121,7 @@ class SetupModel(typing.NamedTuple):
     vpv_vsv_ratio: float = 1.75
     vpv_vph_ratio: float = 1.
     ref_card_csv_name: str = 'data/earth_models/prem.csv'
+    ref_sed_thickness_name: str = 'data/earth_models/sedthk_crust1.csv'
 
 
 
@@ -162,12 +170,12 @@ class ModelLayerIndices(typing.NamedTuple):
     """ Parameters used for smoothing.
 
     Fields:
-        upper_crust:
+        sediment:
             - (n_depth_points_in_this_layer, ) np.array
-            - Depth indices for upper crust.
-        lower_crust:
+            - Depth indices for sedimentary layer.
+        crust:
             - (n_depth_points_in_this_layer, ) np.array
-            - Depth indices for lower crust.
+            - Depth indices for crust.
         lithospheric_mantle:
             - (n_depth_points_in_this_layer, ) np.array
             - Depth indices for lithospheric mantle.
@@ -191,13 +199,13 @@ class ModelLayerIndices(typing.NamedTuple):
 
     """
 
-    upper_crust: np.array
-    lower_crust: np.array
+    sediment: np.array
+    crust: np.array
     lithospheric_mantle: np.array
     asthenosphere: np.array
     boundary_layers: np.array
     depth: np.array
-    layer_names: list = ['upper_crust', 'lower_crust',
+    layer_names: list = ['sediment', 'crust',
                          'lithospheric_mantle', 'asthenosphere',
                          'boundary_layers']
 
@@ -248,6 +256,9 @@ def setup_starting_model(setup_model):
     ref_depth[np.append(np.diff(ref_depth), 0) == 0] += 0.01
     ref_depth = ref_depth.iloc[::-1].values
     ref_vs = ref_vs.iloc[::-1].values
+
+    # Load in sediment model
+    ref_seds = _load_sediment_layers(setup_model)
 
     thickness = [setup_model.depth_limits[0]] # first point
     vsv = [np.interp(setup_model.depth_limits[0], ref_depth, ref_vs)]
