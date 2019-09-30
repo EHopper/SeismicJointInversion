@@ -42,7 +42,8 @@ class SetupModel(typing.NamedTuple):
             - Unique name of model for saving things.
         location:
             - tuple
-            -
+            - (latitude in degrees N, longitude in degrees E)
+            - Used to pick the starting sediment model
         boundary_widths:
             - (n_boundary_depths_inverted_for, ) np.array
             - Units:   km
@@ -258,15 +259,17 @@ def setup_starting_model(setup_model):
     ref_vs = ref_vs.iloc[::-1].values
 
     # Load in sediment model
-    ref_seds = _load_sediment_layers(setup_model)
+    sed_total = _load_sediment_layers(setup_model)
+    thickness, vsv = _prepend_sediment(setup_model, sed_total)
 
-    thickness = [setup_model.depth_limits[0]] # first point
-    vsv = [np.interp(setup_model.depth_limits[0], ref_depth, ref_vs)]
+    vsv += [np.interp(
+        setup_model.depth_limits[0] + sum(thickness), ref_depth, ref_vs)
+    ]
     boundary_inds = []
     for i_b in range(n_bounds):
         # boundary[i_b] is our boundary of interest
-        vsv_top_layer_i = setup_model.boundary_vsv[i_b * 2]
-        vsv_base_layer_i = setup_model.boundary_vsv[i_b * 2 + 1]
+        vsv_top_layer_i = vsv[-1]
+        vsv_base_layer_i = setup_model.boundary_vsv[i_b]
         depth_top_layer_i = (setup_model.boundary_depths[i_b]
                         - setup_model.boundary_widths[i_b]/2)
         depth_base_layer_i = (depth_top_layer_i
@@ -276,7 +279,8 @@ def setup_starting_model(setup_model):
         # so the thickness of the overlying layer defines the depth to the
         # boundary.  This layer has to be thick enough that the boundary layer
         # can move shallower and still leave a sufficiently thick layer.
-        padding = (setup_model.boundary_depth_uncertainty[i_b]
+        boundary_depth_uncertainty = 10
+        padding = (boundary_depth_uncertainty
                    + setup_model.min_layer_thickness)
         depth_top_layer_i_minus_1 = depth_top_layer_i - padding
         depth_base_layer_i_plus_1 = depth_base_layer_i + padding
@@ -327,9 +331,46 @@ def setup_starting_model(setup_model):
     thickness += [thick_layers_below] * n_layers_below
 
 
+
     return InversionModel(vsv = np.array(vsv)[np.newaxis].T,
                           thickness = np.array(thickness)[np.newaxis].T,
                           boundary_inds = np.array(boundary_inds))
+
+def _prepend_sediment(setup_model, sed_total):
+    """
+    """
+
+    step = setup_model.min_layer_thickness / 3
+    # Make a dictionary with estimated sedimentary Vp (from Crust 1.0)
+    # with the structure (max depth in km for this velocity: Vp in km/s)
+    sed_vp = {2.: 2.5, 7.:4.1, 15.: 5.2}
+    thick_sed = [0]
+    vsv_sed = []
+    while sum(thick_sed) < sed_total:
+        thick_sed += [2]
+        vsv_sed += [[sed_vp[k] / setup_model.vpv_vsv_ratio
+            for k in sed_vp if sum(thick_sed) <= k][0]]
+
+    return thick_sed, vsv_sed
+
+def _load_sediment_layers(setup_model: SetupModel):
+    """
+    """
+
+
+    lat, lon = setup_model.location
+    ref_sed = pd.read_csv(setup_model.ref_sed_thickness_name)
+    rad = 0.5
+
+    nearby_seds = ref_sed.query(
+        '{} <= lat <= {} and {} <= lon <= {}'.format(
+            lat - rad, lat + rad, lon - rad, lon + rad,
+        )
+    )
+
+    return nearby_seds.thickness_km.median()
+
+
 
 def convert_inversion_model_to_mineos_model(inversion_model, setup_model,
                                             **kwargs):

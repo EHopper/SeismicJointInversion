@@ -135,27 +135,27 @@ def run_test_G():
 
 def test_damping(n_iter):
 
-    vs_SL14 = pd.read_csv('/media/sf_VM_Shared/CP_SL14.csv',
-                          header=None).values
-    cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
+    # vs_SL14 = pd.read_csv('/media/sf_VM_Shared/CP_SL14.csv',
+    #                       header=None).values
+    # cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
 
 
-    for lat in range(34, 41):
-        for lon in range(-115, -105):
-            for t_LAB in [30., 25., 20., 15., 10.]:
+    for lat in [37]:#range(34, 41):
+        for lon in [-112]:#range(-115, -105):
+            for t_LAB in [5.]:#[30., 25., 20., 15., 10.]:
                 location = (lat, lon)
                 print('*********************** {}N, {}W, {}km LAB'.format(
                     lat, -lon, t_LAB
                 ))
 
                 setup_model = define_models.SetupModel(
-                    'test', np.array([35., 80.]), np.array([5, 10]),
-                    np.array([2, t_LAB]), np.array([3.6, 4.0, 4.4, 4.3]),
+                    'test', (lat, lon), np.array([35., 80.]),
+                    np.array([2, t_LAB]), np.array([4.4, 4.2]),
                     np.array([0, 300])
                 )
                 #location = (35, -112)
                 obs, std_obs, periods = constraints.extract_observations(
-                    location, setup_model
+                    setup_model
                 )
                 moho_z_ish = np.round(obs[-4] * 3.5)
                 lab_z_ish = np.round(obs[-3] * 4.2)
@@ -183,11 +183,11 @@ def test_damping(n_iter):
                 ax_m = f.add_axes([0.35, 0.1, 0.2, 0.8])
                 ax_c = f.add_axes([0.6, 0.4, 0.35, 0.5])
                 ax_map = f.add_axes([0.84, 0.44, 0.1, 0.2])
-                im = ax_map.contourf(np.arange(-119, -100.9, 0.2),
-                    np.arange(30, 45.1, 0.2), vs_SL14, levels=20,
-                    cmap=plt.cm.RdBu, vmin=4, vmax=4.7)
+                # im = ax_map.contourf(np.arange(-119, -100.9, 0.2),
+                #     np.arange(30, 45.1, 0.2), vs_SL14, levels=20,
+                #     cmap=plt.cm.RdBu, vmin=4, vmax=4.7)
                 ax_map.plot(lon, lat, 'k*')
-                ax_map.plot(cp_outline[:, 1], cp_outline[:, 0], 'k:')
+                # ax_map.plot(cp_outline[:, 1], cp_outline[:, 0], 'k:')
                 ax_c.set_title(
                     '{:.1f}N, {:.1f}W:  {:.0f} km LAB'.format(lat, -lon, t_LAB)
                 )

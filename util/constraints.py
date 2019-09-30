@@ -22,11 +22,10 @@ from util import define_models
 #       Extract the observations of interest for a given location
 # =============================================================================
 
-def extract_observations(location:tuple,
-                         setup_model:define_models.SetupModel):
+def extract_observations(setup_model:define_models.SetupModel):
     """ Make an Observations object.
     """
-    lat, lon = location
+    lat, lon = setup_model.location
     surface_waves = _extract_phase_vels(lat, lon)
     #surface_waves = surface_waves.iloc[[3, 5, 7, 11, 12, 13], :]
     rfs = _extract_rf_constraints(lat, lon, setup_model)
@@ -61,7 +60,6 @@ def _extract_rf_constraints(lat:float, lon:float,
     all_rfs = pd.read_csv('data/RFconstraints/a_priori_constraints.csv')
     ind = _find_closest_lat_lon(all_rfs.copy(), lat, lon)
     obs = all_rfs.loc[ind]
-    cols = list(obs.index)
 
     rfs = pd.DataFrame(
         columns = ['lat', 'lon', 'tt', 'ttstd', 'dv', 'dvstd']
