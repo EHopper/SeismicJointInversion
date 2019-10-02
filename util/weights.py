@@ -28,9 +28,9 @@ class ModelLayerValues(typing.NamedTuple):
 
 
     Fields:
-        upper_crust:
+        sediment:
             - (n_values_in_layer, ) np.array
-        lower_crust:
+        crust:
             - (n_values_in_layer, ) np.array
         lithospheric_mantle:
             - (n_values_in_layer, ) np.array
@@ -39,8 +39,8 @@ class ModelLayerValues(typing.NamedTuple):
 
     """
 
-    upper_crust: np.array
-    lower_crust: np.array
+    sediment: np.array
+    crust: np.array
     lithospheric_mantle: np.array
     asthenosphere: np.array
 
@@ -68,7 +68,7 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
     # having different values for those two layers messes with things, as does
     # having variable damping within a layer
     # Already built into roughness_mat is that we do not smooth around BLs
-    _set_layer_values((0.5, 0.5, 1, 2, 0), layers, damp_s, damp_t, 'roughness')
+    _set_layer_values((1, 2, 1, 2, 0), layers, damp_s, damp_t, 'roughness')
     roughness_mat, roughness_vec = _damp_constraints(
         _build_smoothing_constraints(model), damp_s, damp_t
     )
@@ -77,8 +77,8 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
     # Damp towards starting model
     _set_layer_values(
         (
-            [0.5] * len(layers.upper_crust),
-            [0.5] * (len(layers.lower_crust) - 1) + [0.5],
+            [0.1] * len(layers.sediment),
+            [0.5] * (len(layers.crust) - 1) + [0.5],
             [0.5] * (len(layers.lithospheric_mantle) - 1) + [0.5],
             [0.5] * len(layers.asthenosphere),
             [0.01, 0.01]

@@ -65,7 +65,7 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     """ Run a single iteration of the least squares
     """
 
-    obs, std_obs, periods = constraints.extract_observations(location, setup_model)
+    obs, std_obs, periods = constraints.extract_observations(setup_model)
 
     # Build all of the inputs to the damped least squares
     # Run MINEOS to get phase velocities and kernels

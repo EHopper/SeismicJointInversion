@@ -135,9 +135,9 @@ def run_test_G():
 
 def test_damping(n_iter):
 
-    # vs_SL14 = pd.read_csv('/media/sf_VM_Shared/CP_SL14.csv',
-    #                       header=None).values
-    # cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
+    vs_SL14 = pd.read_csv('data/earth_models/CP_SL14.csv',
+                           header=None).values
+    cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
 
 
     for lat in [37]:#range(34, 41):
@@ -183,11 +183,11 @@ def test_damping(n_iter):
                 ax_m = f.add_axes([0.35, 0.1, 0.2, 0.8])
                 ax_c = f.add_axes([0.6, 0.4, 0.35, 0.5])
                 ax_map = f.add_axes([0.84, 0.44, 0.1, 0.2])
-                # im = ax_map.contourf(np.arange(-119, -100.9, 0.2),
-                #     np.arange(30, 45.1, 0.2), vs_SL14, levels=20,
-                #     cmap=plt.cm.RdBu, vmin=4, vmax=4.7)
+                im = ax_map.contourf(np.arange(-119, -100.9, 0.2),
+                    np.arange(30, 45.1, 0.2), vs_SL14, levels=20,
+                    cmap=plt.cm.RdBu, vmin=4, vmax=4.7)
                 ax_map.plot(lon, lat, 'k*')
-                # ax_map.plot(cp_outline[:, 1], cp_outline[:, 0], 'k:')
+                ax_map.plot(cp_outline[:, 1], cp_outline[:, 0], 'k:')
                 ax_c.set_title(
                     '{:.1f}N, {:.1f}W:  {:.0f} km LAB'.format(lat, -lon, t_LAB)
                 )

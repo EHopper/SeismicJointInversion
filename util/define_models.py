@@ -593,6 +593,8 @@ def _set_model_indices(setup_model, model, **kwargs):
     # Last model point is not included in the inversion
     depth = np.cumsum(model.thickness[:-1])
 
+    sed_inds = [list(model.vsv).index(v) for v in model.vsv if v <= 3]
+
     if 'Moho' in setup_model.boundary_names:
         moho_ind = model.boundary_inds[setup_model.boundary_names.index('Moho')]
     else:
@@ -613,8 +615,8 @@ def _set_model_indices(setup_model, model, **kwargs):
 
 
     return ModelLayerIndices(
-        upper_crust = np.arange(moho_ind/2),
-        lower_crust = np.arange(round(moho_ind/2), moho_ind + 1),
+        sediment = np.array(sed_inds),
+        crust = np.arange(sed_inds[-1] + 1, moho_ind + 1),
         lithospheric_mantle = np.arange(moho_ind + 1, lab_ind + 1),
         asthenosphere = np.arange(lab_ind + 1, len(depth)),
         boundary_layers = len(depth) + np.arange(len(model.boundary_inds)),
