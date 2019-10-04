@@ -344,14 +344,13 @@ def _factor_in_sediment_layers(setup_model, thickness, vsv):
     vpvs = setup_model.vpv_vsv_ratio
     while sed_total > 0:
         if thickness[i] < sed_total:
-            vsv[i] = sed_total * _average_sed_velocity(sed_total, vpvs)
-            sed_total -= thickness[i]
+            vsv[i] = _average_sed_velocity(sed_total, vpvs)
         else:
             vsv[i] = (
                 sed_total * _average_sed_velocity(sed_total, vpvs)
                 + (thickness[i] - sed_total) * vsv[i]
             ) / thickness[i]
-            sed_total -= thickness[i]
+        sed_total -= thickness[i]
         i += 1
     return vsv
 
