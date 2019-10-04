@@ -258,13 +258,10 @@ def setup_starting_model(setup_model):
     ref_depth = ref_depth.iloc[::-1].values
     ref_vs = ref_vs.iloc[::-1].values
 
-    # Load in sediment model
-    sed_total = _load_sediment_layers(setup_model)
-    thickness, vsv = _prepend_sediment(setup_model, sed_total)
 
-    vsv += [np.interp(
-        setup_model.depth_limits[0] + sum(thickness), ref_depth, ref_vs)
-    ]
+    thickness = [setup_model.depth_limits[0]] # first point
+    vsv = [np.interp(setup_model.depth_limits[0], ref_depth, ref_vs)]
+
     boundary_inds = []
     for i_b in range(n_bounds):
         # boundary[i_b] is our boundary of interest
@@ -330,28 +327,52 @@ def setup_starting_model(setup_model):
         vsv += [vsv[-1] + vsv_grad_below * thick_layers_below]
     thickness += [thick_layers_below] * n_layers_below
 
+    # Load in sediment model
+    vsv = _factor_in_sediment_layers(setup_model, thickness, vsv)
+
 
 
     return InversionModel(vsv = np.array(vsv)[np.newaxis].T,
                           thickness = np.array(thickness)[np.newaxis].T,
                           boundary_inds = np.array(boundary_inds))
 
-def _prepend_sediment(setup_model, sed_total):
+def _factor_in_sediment_layers(setup_model, thickness, vsv):
+    """
+    """
+    sed_total = _load_sediment_layers(setup_model)
+    i = 0
+    vpvs = setup_model.vpv_vsv_ratio
+    while sed_total > 0:
+        if thickness[i] < sed_total:
+            vsv[i] = sed_total * _average_sed_velocity(sed_total, vpvs)
+            sed_total -= thickness[i]
+        else:
+            vsv[i] = (
+                sed_total * _average_sed_velocity(sed_total, vpvs)
+                + (thickness[i] - sed_total) * vsv[i]
+            ) / thickness[i]
+            sed_total -= thickness[i]
+        i += 1
+    return vsv
+
+def _average_sed_velocity(sed_total, vpvs):
     """
     """
 
-    step = setup_model.min_layer_thickness / 3
-    # Make a dictionary with estimated sedimentary Vp (from Crust 1.0)
-    # with the structure (max depth in km for this velocity: Vp in km/s)
-    sed_vp = {2.: 2.5, 7.:4.1, 15.: 5.2}
-    thick_sed = [0]
-    vsv_sed = []
-    while sum(thick_sed) < sed_total:
-        thick_sed += [2]
-        vsv_sed += [[sed_vp[k] / setup_model.vpv_vsv_ratio
-            for k in sed_vp if sum(thick_sed) <= k][0]]
+    sed_ref_thick = [2., 5., 7.] # Values suggested on Crust 1.0 website
+    sed_ref_vs = [vp / vpvs for vp in [2.5, 4.1, 5.2]]
+    sed_ref_vs = [2.5, 2.8, 3.0]
+    sed_vs = 0
+    sed_left = sed_total
+    for i in range(len(sed_ref_vs)):
+        if sed_left <= sed_ref_thick[i]:
+            sed_vs += sed_left * sed_ref_vs[i]
+            break
+        sed_vs += sed_ref_thick[i] * sed_ref_vs[i]
+        sed_left -= sed_ref_thick[i]
 
-    return thick_sed, vsv_sed
+    return sed_vs / sed_total
+
 
 def _load_sediment_layers(setup_model: SetupModel):
     """
