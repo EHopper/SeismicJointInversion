@@ -329,6 +329,7 @@ def setup_starting_model(setup_model):
 
     # Load in sediment model
     vsv = _factor_in_sediment_layers(setup_model, thickness, vsv)
+    #vsv[0] = 2.5
 
 
 
@@ -636,7 +637,7 @@ def _set_model_indices(setup_model, model, **kwargs):
 
     return ModelLayerIndices(
         sediment = np.array(sed_inds),
-        crust = np.arange(sed_inds[-1] + 1, moho_ind + 1),
+        crust = np.arange(len(sed_inds), moho_ind + 1),
         lithospheric_mantle = np.arange(moho_ind + 1, lab_ind + 1),
         asthenosphere = np.arange(lab_ind + 1, len(depth)),
         boundary_layers = len(depth) + np.arange(len(model.boundary_inds)),

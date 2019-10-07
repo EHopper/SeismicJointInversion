@@ -141,7 +141,7 @@ def test_damping(n_iter):
 
 
     for lat in [37]:#range(34, 41):
-        for lon in [-112]:#range(-115, -105):
+        for lon in [-110]:#range(-115, -105):
             for t_LAB in [5.]:#[30., 25., 20., 15., 10.]:
                 location = (lat, lon)
                 print('*********************** {}N, {}W, {}km LAB'.format(
@@ -171,8 +171,8 @@ def test_damping(n_iter):
                 # obs = obs[i_p + i_rf]
                 # std_obs = std_obs[i_p + i_rf]
 
-                i_c = list(range(len(obs) - 2 * len(setup_model.boundary_names)))
-                i_rf = list(range(i_c[-1] + 1, len(obs)))
+                ic = list(range(len(obs) - 2 * len(setup_model.boundary_names)))
+                i_rf = list(range(ic[-1] + 1, len(obs)))
 
                 #setup_model = setup_model._replace(boundary_names = [])
                 save_name = 'output/{0}/{0}.q'.format(setup_model.id)
@@ -181,8 +181,9 @@ def test_damping(n_iter):
                 f = plt.figure()
                 f.set_size_inches((15,7))
                 ax_m = f.add_axes([0.35, 0.1, 0.2, 0.8])
-                ax_c = f.add_axes([0.6, 0.4, 0.35, 0.5])
-                ax_map = f.add_axes([0.84, 0.44, 0.1, 0.2])
+                ax_c = f.add_axes([0.6, 0.6, 0.35, 0.3])
+                ax_map = f.add_axes([0.84, 0.64, 0.1, 0.2])
+                ax_dc = f.add_axes([0.6, 0.375, 0.35, 0.15])
                 im = ax_map.contourf(np.arange(-119, -100.9, 0.2),
                     np.arange(30, 45.1, 0.2), vs_SL14, levels=20,
                     cmap=plt.cm.RdBu, vmin=4, vmax=4.7)
@@ -192,7 +193,7 @@ def test_damping(n_iter):
                     '{:.1f}N, {:.1f}W:  {:.0f} km LAB'.format(lat, -lon, t_LAB)
                 )
                 ax_rf = f.add_axes([0.6, 0.1, 0.35, 0.2])
-                line, = ax_c.plot(periods, obs[i_c],
+                line, = ax_c.plot(periods, obs[ic],
                                   'k-', linewidth=3, label='data')
                 plots.plot_rf_data_std(obs[i_rf], std_obs[i_rf], 'data', ax_rf)
 
@@ -210,12 +211,18 @@ def test_damping(n_iter):
                     plots.plot_model(m, 'm' + str(n + 1), ax_m)
                     plots.plot_rf_data(p_rf, 'm' + str(n + 1), ax_rf)
                     plots.plot_ph_vel(periods, c, 'm' + str(n), ax_c)
+                    dc = [c[i] - obs[ic[i]] for i in range(len(c))]
+                    plots.plot_ph_vel(periods, dc, 'm' + str(n), ax_dc)
 
                 # Run MINEOS on final model
                 params = mineos.RunParameters(freq_max = 1000 / min(periods) + 1)
                 _ = define_models.convert_inversion_model_to_mineos_model(m, setup_model)
                 c, _ = mineos.run_mineos(params, periods, setup_model.id)
                 plots.plot_ph_vel(periods, c, 'm' + str(n + 1), ax_c)
+                dc = [c[i] - obs[ic[i]] for i in range(len(c))]
+                plots.plot_ph_vel(periods, dc, 'm' + str(n + 1), ax_dc)
+                ax_dc.plot(periods, [0] * len(periods), 'k--')
+                ax_dc.set(ylabel="dc (km/s)")
                 plots.make_plot_symmetric_in_y_around_zero(ax_rf)
 
                 save_name = 'output/{0}/{0}'.format(setup_model.id)

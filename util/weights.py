@@ -68,7 +68,7 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
     # having different values for those two layers messes with things, as does
     # having variable damping within a layer
     # Already built into roughness_mat is that we do not smooth around BLs
-    _set_layer_values((1, 2, 1, 2, 0), layers, damp_s, damp_t, 'roughness')
+    _set_layer_values((4, 3, 1, 2, 0), layers, damp_s, damp_t, 'roughness')
     roughness_mat, roughness_vec = _damp_constraints(
         _build_smoothing_constraints(model), damp_s, damp_t
     )
@@ -77,7 +77,7 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
     # Damp towards starting model
     _set_layer_values(
         (
-            [0.1] * len(layers.sediment),
+            [0.5] * (len(layers.sediment) - 1) + [0.5],
             [0.5] * (len(layers.crust) - 1) + [0.5],
             [0.5] * (len(layers.lithospheric_mantle) - 1) + [0.5],
             [0.5] * len(layers.asthenosphere),
@@ -309,12 +309,12 @@ def _build_smoothing_constraints(
     for ib in model.boundary_inds:
         # Smooth layers above and below BL assuming that variable thickness
         # layers won't been perturbed that much
-        banded_matrix[ib - 1, ib - 1:ib + 1] = (
-              [-model.thickness[ib - 1] / model.thickness[ib] - 1,
-              model.thickness[ib - 1] / model.thickness[ib]])
-        banded_matrix[ib + 2, ib + 1:ib + 3] = (
-              [model.thickness[ib + 3] / model.thickness[ib + 2],
-               -model.thickness[ib + 3] / model.thickness[ib + 2] - 1])
+        for i in range(-1, 3):
+            banded_matrix[ib + i, ib + i - 1:ib + i + 2] = ([
+                model.thickness[ib + i],
+                -(model.thickness[ib + i] + model.thickness[ib + i + 1]),
+                model.thickness[ib + i + 1]
+                 ])
 
     # At all discontinuities (and the first and last layers of the model),
     # set the roughness_matrix to zero
