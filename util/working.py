@@ -141,7 +141,7 @@ def test_damping(n_iter):
 
 
     for lat in [37]:#range(34, 41):
-        for lon in [-110]:#range(-115, -105):
+        for lon in range(-115, -105):
             for t_LAB in [5.]:#[30., 25., 20., 15., 10.]:
                 location = (lat, lon)
                 print('*********************** {}N, {}W, {}km LAB'.format(
@@ -223,6 +223,7 @@ def test_damping(n_iter):
                 plots.plot_ph_vel(periods, dc, 'm' + str(n + 1), ax_dc)
                 ax_dc.plot(periods, [0] * len(periods), 'k--')
                 ax_dc.set(ylabel="dc (km/s)")
+                ax_dc.set_ylim(max(abs(np.array(dc))) * 1.1 * np.array([-1, 1]))
                 plots.make_plot_symmetric_in_y_around_zero(ax_rf)
 
                 save_name = 'output/{0}/{0}'.format(setup_model.id)

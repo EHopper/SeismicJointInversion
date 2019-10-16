@@ -68,7 +68,7 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
     # having different values for those two layers messes with things, as does
     # having variable damping within a layer
     # Already built into roughness_mat is that we do not smooth around BLs
-    _set_layer_values((4, 3, 1, 2, 0), layers, damp_s, damp_t, 'roughness')
+    _set_layer_values((2, 3, 3, 2, 0), layers, damp_s, damp_t, 'roughness')
     roughness_mat, roughness_vec = _damp_constraints(
         _build_smoothing_constraints(model), damp_s, damp_t
     )
@@ -77,10 +77,10 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
     # Damp towards starting model
     _set_layer_values(
         (
-            [0.5] * (len(layers.sediment) - 1) + [0.5],
-            [0.5] * (len(layers.crust) - 1) + [0.5],
-            [0.5] * (len(layers.lithospheric_mantle) - 1) + [0.5],
-            [0.5] * len(layers.asthenosphere),
+            [5] * (len(layers.sediment) - 1) + [5],
+            [4] * (len(layers.crust) - 1) + [4],
+            [3] * (len(layers.lithospheric_mantle) - 1) + [3],
+            [2] * len(layers.asthenosphere),
             [0.01, 0.01]
         ),
         layers, damp_s, damp_t, 'to_m0'
@@ -303,24 +303,24 @@ def _build_smoothing_constraints(
     n_depth_points = model.vsv.size - 1
 
     # Make and edit the banded matrix (roughness equations)
-    banded_matrix = _make_banded_matrix(n_depth_points, (1, -2, 1))
+    banded_matrix = np.zeros((n_depth_points, n_depth_points)) #_make_banded_matrix(n_depth_points, (1, -2, 1))
     t = model.thickness
     # NOTE: around the boundary layers, layer thickness isn't equal
-    for ib in model.boundary_inds:
+    for ib in range(2, len(t) - 4):
         # Smooth layers above and below BL assuming that variable thickness
         # layers won't been perturbed that much
         for i in range(-1, 3):
             banded_matrix[ib + i, ib + i - 1:ib + i + 2] = ([
-                model.thickness[ib + i],
-                -(model.thickness[ib + i] + model.thickness[ib + i + 1]),
-                model.thickness[ib + i + 1]
-                 ])
+                t[ib + i], -(t[ib + i] + t[ib + i + 1]), t[ib + i + 1]
+            ])
 
     # At all discontinuities (and the first and last layers of the model),
     # set the roughness_matrix to zero
-    do_not_smooth = ([0, -1]
-                    + list(model.boundary_inds) + list(model.boundary_inds + 1))
+    do_not_smooth = ([0, -1])
+                    #+ list(model.boundary_inds) + list(model.boundary_inds + 1))
     banded_matrix[do_not_smooth, :] = 0
+    smooth_less = list(model.boundary_inds) + list(model.boundary_inds + 1)
+    banded_matrix[smooth_less, :] *= 0.5
     # Add columns to roughness_matrix to get it into the right shape
     # These columns can be filled with zeros as they will be mutlipliers
     # for the parameters controlling layer size
