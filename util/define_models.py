@@ -113,6 +113,7 @@ class SetupModel(typing.NamedTuple):
     id: str
     location: tuple
     boundary_depths: np.array
+    boundary_depth_uncertainty: np.array
     boundary_widths: np.array
     boundary_vsv: np.array
     depth_limits: np.array
@@ -265,8 +266,8 @@ def setup_starting_model(setup_model):
     boundary_inds = []
     for i_b in range(n_bounds):
         # boundary[i_b] is our boundary of interest
-        vsv_top_layer_i = vsv[-1]
-        vsv_base_layer_i = setup_model.boundary_vsv[i_b]
+        vsv_top_layer_i = setup_model.boundary_vsv[i_b * 2] #vsv[-1]
+        vsv_base_layer_i = setup_model.boundary_vsv[i_b * 2 + 1]
         depth_top_layer_i = (setup_model.boundary_depths[i_b]
                         - setup_model.boundary_widths[i_b]/2)
         depth_base_layer_i = (depth_top_layer_i
@@ -276,7 +277,7 @@ def setup_starting_model(setup_model):
         # so the thickness of the overlying layer defines the depth to the
         # boundary.  This layer has to be thick enough that the boundary layer
         # can move shallower and still leave a sufficiently thick layer.
-        boundary_depth_uncertainty = 10
+        boundary_depth_uncertainty = setup_model.boundary_depth_uncertainty[i_b]
         padding = (boundary_depth_uncertainty
                    + setup_model.min_layer_thickness)
         depth_top_layer_i_minus_1 = depth_top_layer_i - padding
@@ -328,7 +329,7 @@ def setup_starting_model(setup_model):
     thickness += [thick_layers_below] * n_layers_below
 
     # Load in sediment model
-    vsv = _factor_in_sediment_layers(setup_model, thickness, vsv)
+    #vsv = _factor_in_sediment_layers(setup_model, thickness, vsv)
     #vsv[0] = 2.5
 
 

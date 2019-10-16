@@ -9,6 +9,10 @@ from util import partial_derivatives
 from util import weights
 from util import constraints
 
+def make_fig():
+    plt.figure(figsize=(10,8))
+    return plt.subplot(1, 1, 1)
+
 def plot_model(model, label, ax):
     depth = np.cumsum(model.thickness)
     for ib in model.boundary_inds:

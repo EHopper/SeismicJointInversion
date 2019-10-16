@@ -141,7 +141,7 @@ def test_damping(n_iter):
 
 
     for lat in [37]:#range(34, 41):
-        for lon in range(-115, -105):
+        for lon in [-115]: #range(-115, -105):
             for t_LAB in [5.]:#[30., 25., 20., 15., 10.]:
                 location = (lat, lon)
                 print('*********************** {}N, {}W, {}km LAB'.format(
@@ -149,7 +149,7 @@ def test_damping(n_iter):
                 ))
 
                 setup_model = define_models.SetupModel(
-                    'test', (lat, lon), np.array([35., 80.]),
+                    'test2', (lat, lon), np.array([35., 80.]),
                     np.array([2, t_LAB]), np.array([4.4, 4.2]),
                     np.array([0, 300])
                 )

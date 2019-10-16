@@ -68,7 +68,7 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
     # having different values for those two layers messes with things, as does
     # having variable damping within a layer
     # Already built into roughness_mat is that we do not smooth around BLs
-    _set_layer_values((2, 3, 3, 2, 0), layers, damp_s, damp_t, 'roughness')
+    _set_layer_values((0, 0, 0, 0, 0), layers, damp_s, damp_t, 'roughness')
     roughness_mat, roughness_vec = _damp_constraints(
         _build_smoothing_constraints(model), damp_s, damp_t
     )
@@ -77,10 +77,10 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
     # Damp towards starting model
     _set_layer_values(
         (
-            [5] * (len(layers.sediment) - 1) + [5],
-            [4] * (len(layers.crust) - 1) + [4],
-            [3] * (len(layers.lithospheric_mantle) - 1) + [3],
-            [2] * len(layers.asthenosphere),
+            [0] * (len(layers.sediment) - 1) + [0],
+            [0] * (len(layers.crust) - 1) + [0],
+            [0] * (len(layers.lithospheric_mantle) - 1) + [0],
+            [0] * len(layers.asthenosphere),
             [0.01, 0.01]
         ),
         layers, damp_s, damp_t, 'to_m0'
@@ -89,7 +89,7 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
         _build_constraint_damp_to_m0(p), damp_s, damp_t
     )
     # Damp towards starting model gradients in Vs
-    _set_layer_values((1, 1, 1, 1, 0), layers, damp_s, damp_t, 'to_m0_grad')
+    _set_layer_values((0, 0, 0, 0, 0), layers, damp_s, damp_t, 'to_m0_grad')
     damp_to_m0_grad_mat, damp_to_m0_grad_vec = _damp_constraints(
         _build_constraint_damp_original_gradient(model), damp_s, damp_t
     )

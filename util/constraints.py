@@ -29,7 +29,10 @@ def extract_observations(setup_model:define_models.SetupModel):
     surface_waves = _extract_phase_vels(lat, lon)
     #surface_waves = surface_waves.iloc[[3, 5, 7, 11, 12, 13], :]
     rfs = _extract_rf_constraints(lat, lon, setup_model)
+
     # Write to file
+    if not os.path.exists('output/' + setup_model.id):
+        os.mkdir('output/' + setup_model.id)
     surface_waves.to_csv(
         'output/{0}/{0}_surface_wave_constraints.csv'.format(setup_model.id)
     )
