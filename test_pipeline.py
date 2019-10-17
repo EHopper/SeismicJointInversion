@@ -16,7 +16,7 @@ from util import partial_derivatives
 from util import weights
 from util import constraints
 
-skipMINEOS = False
+skipMINEOS = True
 skip_influx = True
 
 class PipelineTest(unittest.TestCase):
@@ -886,22 +886,22 @@ class PipelineTest(unittest.TestCase):
             ),
             np.array([
                 [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
-                [1, -2,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
-                [0,  1, -2,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
-                [0,  0,  1, -13/7,  6/7,  0,  0,  0,  0,  0,  0,  0,  0,  0],
-                [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
-                [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
-                [0,  0,  0,  0,  0,  6/4, -10/4,  1,  0,  0,  0,  0,  0,  0],
-                [0,  0,  0,  0,  0,  0,  1, -16/10,  6/10,  0,  0,  0,  0,  0],
-                [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
-                [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
-                [0,  0,  0,  0,  0,  0,  0,  0,  0,  6/12, -18/12,  1,  0,  0],
+                [6, -12,  6,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
+                [0,  6, -12,  6,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
+                [0,  0,  7, -13,  6,  0,  0,  0,  0,  0,  0,  0,  0,  0],
+                [0,  0,  0,  5./2,  -12./2,  7./2,  0,  0,  0,  0,  0,  0,  0,  0],
+                [0,  0,  0,  0,  4./2,  -9./2,  5./2,  0,  0,  0,  0,  0,  0,  0],
+                [0,  0,  0,  0,  0,  6, -10,  4,  0,  0,  0,  0,  0,  0],
+                [0,  0,  0,  0,  0,  0,  10,  -16,  6,  0,  0,  0,  0,  0],
+                [0,  0,  0,  0,  0,  0,  0,  15./2,  -25./2,  10./2,  0,  0,  0,  0],
+                [0,  0,  0,  0,  0,  0,  0,  0,  12./2, -27./2,  15./2,  0,  0,  0],
+                [0,  0,  0,  0,  0,  0,  0,  0,  0,  6,  -18,  12,  0,  0],
                 [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
             ]),
             np.array([0] * 12)[:, np.newaxis],
         ),
     ])
-    @unittest.skipIf(skip_influx, "Changed this bit but not the test yet")
+    #@unittest.skipIf(skip_influx, "Changed this bit but not the test yet")
     def test_build_smoothing_constraints(self, name, model,
                                          expected_H, expected_h):
 

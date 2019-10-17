@@ -306,13 +306,12 @@ def _build_smoothing_constraints(
     banded_matrix = np.zeros((n_depth_points, n_depth_points)) #_make_banded_matrix(n_depth_points, (1, -2, 1))
     t = model.thickness
     # NOTE: around the boundary layers, layer thickness isn't equal
-    for ib in range(2, len(t) - 4):
+    for ir in range(1, len(t) - 1):
         # Smooth layers above and below BL assuming that variable thickness
         # layers won't been perturbed that much
-        for i in range(-1, 3):
-            banded_matrix[ib + i, ib + i - 1:ib + i + 2] = ([
-                t[ib + i], -(t[ib + i] + t[ib + i + 1]), t[ib + i + 1]
-            ])
+        banded_matrix[ir, ir - 1:ir + 2] = ([
+            t[ir + 1], -np.sum(t[ir:ir + 2]), t[ir]
+        ])
 
     # At all discontinuities (and the first and last layers of the model),
     # set the roughness_matrix to zero
