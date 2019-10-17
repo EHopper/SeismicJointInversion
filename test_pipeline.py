@@ -16,8 +16,8 @@ from util import partial_derivatives
 from util import weights
 from util import constraints
 
-skipMINEOS = True
-skip_influx = True
+skipMINEOS = False
+skip_influx = False
 
 class PipelineTest(unittest.TestCase):
 

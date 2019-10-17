@@ -527,10 +527,10 @@ def _write_mineos_card(mineos_card_model:pd.DataFrame, name:str):
             n_inner_core_layers, n_core_layers));
     # Now print the model
     for index, row in mineos_card_model.iterrows():
-        fid.write('{0:7.0f}.{1:9.2f}{2:9.2f}{3:9.2f}'.format(
+        fid.write('{0:6.0f}. {1:8.2f} {2:8.2f} {3:8.2f} '.format(
             row['radius'], row['rho'], row['vpv'], row['vsv']
         ))
-        fid.write('{0:9.1f}{1:9.1f}{2:9.2f}{3:9.2f}{4:9.5f}\n'.format(
+        fid.write('{0:8.1f} {1:8.1f} {2:8.2f} {3:8.2f} {4:8.5f}\n'.format(
             row['q_kappa'], row['q_mu'], row['vph'], row['vsh'], row['eta']
         ))
 

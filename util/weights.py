@@ -77,10 +77,10 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
     # Damp towards starting model
     _set_layer_values(
         (
-            [0] * (len(layers.sediment) - 1) + [0],
-            [0] * (len(layers.crust) - 1) + [0],
-            [0] * (len(layers.lithospheric_mantle) - 1) + [0],
-            [0] * len(layers.asthenosphere),
+            [1] * (len(layers.sediment) - 1) + [1],
+            [1] * (len(layers.crust) - 1) + [1],
+            [1] * (len(layers.lithospheric_mantle) - 1) + [1],
+            [1] * len(layers.asthenosphere),
             [0.01, 0.01]
         ),
         layers, damp_s, damp_t, 'to_m0'
@@ -306,18 +306,14 @@ def _build_smoothing_constraints(
     banded_matrix = np.zeros((n_depth_points, n_depth_points)) #_make_banded_matrix(n_depth_points, (1, -2, 1))
     t = model.thickness
     # NOTE: around the boundary layers, layer thickness isn't equal
-    for ir in range(1, len(t) - 1):
+    for ir in range(1, n_depth_points - 1):
         # Smooth layers above and below BL assuming that variable thickness
         # layers won't been perturbed that much
         banded_matrix[ir, ir - 1:ir + 2] = ([
             t[ir + 1], -np.sum(t[ir:ir + 2]), t[ir]
         ])
 
-    # At all discontinuities (and the first and last layers of the model),
-    # set the roughness_matrix to zero
-    do_not_smooth = ([0, -1])
-                    #+ list(model.boundary_inds) + list(model.boundary_inds + 1))
-    banded_matrix[do_not_smooth, :] = 0
+    # At all discontinuities, reduce the smoothing constraints
     smooth_less = list(model.boundary_inds) + list(model.boundary_inds + 1)
     banded_matrix[smooth_less, :] *= 0.5
     # Add columns to roughness_matrix to get it into the right shape
