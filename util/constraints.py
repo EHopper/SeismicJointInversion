@@ -302,3 +302,13 @@ def get_vels_Crust1(lat, lon):
         ).values.flatten()
     rho = pd.read_csv(nm + 'rho', skiprows=i, nrows=1, header=None, sep='\s+'
         ).values.flatten()
+
+    thickness = -np.diff(cb)
+    ib = 0
+    m_t = [0]
+    m_vs = []
+    for t in thickness:
+        if t > 0:
+            m_vs += [vs[ib]]
+            m_t += [t]
+        ib += 1
