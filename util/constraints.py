@@ -259,3 +259,46 @@ def _find_closest_lat_lon(df:pd.DataFrame, lat:float, lon:float):
             df.loc[min_ind, 'lat'], df.loc[min_ind, 'lon']))
 
     return min_ind
+
+def get_vels_Crust1(lat, lon):
+    """
+    Crust 1.0 is given in a 1 degree x 1 degree grid (i.e. 360 lon points, 180
+    lat points).  The downloads are structured as
+        crust1.bnds  (360 * 180) x 9 depths to top of each layer
+                             0. water (i.e. topography)
+                             1. ice (i.e. bathymetry)
+                             2. upper sediments (i.e. depth to rock)
+                             3. middle sediments
+                             4. lower sediments
+                             5. upper crust (i.e. depth to bedrock)
+                             6. middle crust
+                             7. lower crust
+                             8. mantle (i.e. Moho depth)
+    Note that for places where a layer doesn't exist, the difference between
+    bnds[i, n] and bnds[i, n+1] = 0; i.e. for continents, the top of the ice is
+    the same as the top of the water; where there are no glaciers, the top of
+    sediments is the same as the top of the ice, etc.
+
+        crust1.[rho|vp|vs]  (360 * 180) x 9 values of density, Vp, Vs for each
+                            of the layers specified in bnds
+
+    Each row in these datasets steps first in longitude (from -179.5 to +179.5)
+    then in latitude (from 89.5 to -89.5).
+        i.e. index of (lat, lon) will be at (lon + 179.5) + (89.5 - lat) * 360
+
+
+    """
+
+    lons = np.arange(-179.5,180,1)
+    lats = np.arange(89.5,-90,-1)
+    i = int((lon - lons[0]) + ((lats[0] - lat) // 1) * len(lons))
+
+    nm = 'data/earth_models/crust1/crust1.'
+    cb = pd.read_csv(nm + 'bnds', skiprows=i, nrows=1, header=None, sep='\s+'
+        ).values.flatten()
+    vs = pd.read_csv(nm + 'vs', skiprows=i, nrows=1, header=None, sep='\s+'
+        ).values.flatten()
+    vp = pd.read_csv(nm + 'vp', skiprows=i, nrows=1, header=None, sep='\s+'
+        ).values.flatten()
+    rho = pd.read_csv(nm + 'rho', skiprows=i, nrows=1, header=None, sep='\s+'
+        ).values.flatten()
