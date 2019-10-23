@@ -22,13 +22,13 @@ from util import define_models
 #       Extract the observations of interest for a given location
 # =============================================================================
 
-def extract_observations(setup_model:define_models.SetupModel):
+def extract_observations(setup_model:define_models.SetupModel, location:tuple):
     """ Make an Observations object.
     """
-    lat, lon = setup_model.location
-    surface_waves = _extract_phase_vels(lat, lon)
+
+    surface_waves = _extract_phase_vels(location)
     #surface_waves = surface_waves.iloc[[3, 5, 7, 11, 12, 13], :]
-    rfs = _extract_rf_constraints(lat, lon, setup_model)
+    rfs = _extract_rf_constraints(location, setup_model)
 
     # Write to file
     if not os.path.exists('output/' + setup_model.id):
@@ -50,7 +50,7 @@ def extract_observations(setup_model:define_models.SetupModel):
 
     return d, std, periods
 
-def _extract_rf_constraints(lat:float, lon:float,
+def _extract_rf_constraints(location: tuple,
                             setup_model:define_models.SetupModel):
     """
 
@@ -61,7 +61,7 @@ def _extract_rf_constraints(lat:float, lon:float,
 
     # Load in receiver function constraints
     all_rfs = pd.read_csv('data/RFconstraints/a_priori_constraints.csv')
-    ind = _find_closest_lat_lon(all_rfs.copy(), lat, lon)
+    ind = _find_closest_lat_lon(all_rfs.copy(), location)
     obs = all_rfs.loc[ind]
 
     rfs = pd.DataFrame(
@@ -106,14 +106,14 @@ def _extract_rf_constraints(lat:float, lon:float,
                 min_allowed_amstd = all_rfs['amp' + bound + 'std'].quantile(0.1)
                 ampstd = max((ampstd, min_allowed_amstd))
 
-                type = obs['type' + bound]
                 dv, dvstd = _convert_amplitude_to_dv(
-                    amp, ampstd, type, setup_model.boundary_widths[ib]
+                    amp, ampstd, rftype, setup_model.boundary_widths[ib]
                 )
             except:
                 print('No RF constraints on dV for ' + bound)
                 return
 
+        lat, lon = location
         rfs = rfs.append(
             pd.Series([lat, lon, tt, ttstd, dv, dvstd], index=rfs.columns),
             ignore_index=True,
@@ -156,14 +156,14 @@ def _convert_amplitude_to_dv(amp, ampstd, rftype, boundary_width):
 
     return dv, dvstd
 
-def _extract_phase_vels(lat:float, lon:float):
+def _extract_phase_vels(location: tuple):
 
     phv = _load_observed_sw_constraints()
 
     surface_waves = pd.DataFrame()
     for period in phv['period'].unique():
         ind = _find_closest_lat_lon(
-            phv[phv['period'] == period].copy(), lat, lon
+            phv[phv['period'] == period].copy(), location
         )
         surface_waves = surface_waves.append(phv.loc[ind])
     surface_waves = (surface_waves.sort_values(by=['period'], ascending=True)
@@ -239,13 +239,14 @@ def _load_earthquake_sw(data_dir:str, file:str):
 
     return surface_waves[['period', 'lat', 'lon', 'ph_vel']]
 
-def _find_closest_lat_lon(df:pd.DataFrame, lat:float, lon:float):
+def _find_closest_lat_lon(df:pd.DataFrame, location: tuple):
     """ Find index in dataframe of closest point to lat, lon.
 
     Assumes that the dataframe has (at least) two columns, Lat and Lon, which
     are in °N and °E respectively.
 
     """
+    lat, lon = location
     # Make sure all longitudes are in range -180 to 180
     if lon > 180:
         lon -= 360
@@ -260,7 +261,7 @@ def _find_closest_lat_lon(df:pd.DataFrame, lat:float, lon:float):
 
     return min_ind
 
-def get_vels_Crust1(lat, lon):
+def get_vels_Crust1(location):
     """
     Crust 1.0 is given in a 1 degree x 1 degree grid (i.e. 360 lon points, 180
     lat points).  The downloads are structured as
@@ -288,20 +289,21 @@ def get_vels_Crust1(lat, lon):
 
 
     """
+    lat, lon = location
 
-    lons = np.arange(-179.5,180,1)
-    lats = np.arange(89.5,-90,-1)
-    i = int((lon - lons[0]) + ((lats[0] - lat) // 1) * len(lons))
+    all_lons = np.arange(-179.5,180,1)
+    all_lats = np.arange(89.5,-90,-1)
+    i = int((lon - all_lons[0]) + ((all_lats[0] - lat) // 1) * len(all_lons))
 
     nm = 'data/earth_models/crust1/crust1.'
     cb = pd.read_csv(nm + 'bnds', skiprows=i, nrows=1, header=None, sep='\s+'
         ).values.flatten()
     vs = pd.read_csv(nm + 'vs', skiprows=i, nrows=1, header=None, sep='\s+'
         ).values.flatten()
-    vp = pd.read_csv(nm + 'vp', skiprows=i, nrows=1, header=None, sep='\s+'
-        ).values.flatten()
-    rho = pd.read_csv(nm + 'rho', skiprows=i, nrows=1, header=None, sep='\s+'
-        ).values.flatten()
+    # vp = pd.read_csv(nm + 'vp', skiprows=i, nrows=1, header=None, sep='\s+'
+    #     ).values.flatten()
+    # rho = pd.read_csv(nm + 'rho', skiprows=i, nrows=1, header=None, sep='\s+'
+    #     ).values.flatten()
 
     thickness = -np.diff(cb)
     ib = 0
@@ -312,3 +314,5 @@ def get_vels_Crust1(lat, lon):
             m_vs += [vs[ib]]
             m_t += [t]
         ib += 1
+
+    return m_t, m_vs

@@ -40,35 +40,28 @@ class SetupModel(typing.NamedTuple):
         id:
             - str
             - Unique name of model for saving things.
-        location:
-            - tuple
-            - (latitude in degrees N, longitude in degrees E)
-            - Used to pick the starting sediment model
-        boundary_widths:
-            - (n_boundary_depths_inverted_for, ) np.array
-            - Units:   km
-            - Width of the layer the boundaries of interest (i.e. Moho, LAB)
-              in the model, fixed for a given inversion.
-        boundary_depths:
-            - (n_boundary_depths_inverted_for, ) np.array
-            - Units:   km
-            - Depth to the top of the boundaries of interest from a priori
-              constraints (i.e. receiver functions).
-        boundary_vsv:
-            - (n_boundary_depths_inverted_for, ) np.array
-            - Units:    km/s
-            - Shear velocity at the bottom of boundaries of interest
-            - Velocities are assumed to be constant in each layer, to begin.
         boundary_names:
             - (n_boundary_depths_inverted_for) tuple
             - Units: none
-            - Labels for each of the boundaries, e.g. Moho, LAB
-        depth_limits:
-            - (2, ) np.array
+            - Labels for each of the boundaries, default = ('Moho', 'LAB')
+        boundary_widths:
+            - (n_boundary_depths_inverted_for) tuple
+            - Units: kilometres
+            - (Fixed) width of the boundary layer.  This is fixed for a given
+              inversion (though we will allow the depth of the boundary layer
+              as a whole to change).
+        depth_boundary_dvs:
+            - (n_boundary_depths_inverted_for) tuple
+            - Units: dimensionless
+            - Fractional change in Vs at each of the boundaries,
+              default = (0.05, -0.02)
+        limits:
+            - (length 2) tuple
             - Units:    km
             - Top and base of the model that we are inverting for.
             - Outside of this range, the model is fixed to our starting MINEOS
               model card (which extends throughout the whole Earth).
+            - Default value = (0, 300)
         min_layer_thickness:
             - float
             - Units:    km
@@ -95,35 +88,19 @@ class SetupModel(typing.NamedTuple):
             - This could be some reference Earth model (e.g. PREM), or some
               more specific local model.
             - Note that this csv file should be in SI units (m, kg.m^-3, etc)
-        ref_sed_thickness_name:
-            - str
-            - Default value: 'data/earth_model/sedthk_crust1.csv'
-                        (source: https://igppweb.ucsd.edu/~gabi/crust1.html)
-            - Path to a text file containing information for the reference
-              sedimentary thickness model
-            - This could be some reference Earth model (e.g. Crust 1.0), or some
-              more specific local model.
-            - Note that this csv file should be in seismology units (km), with
-              the column names 'lat', 'lon', and 'thickness_km'
-            - A stratified sedimentary velocity model is assumed based on the
-              thickness.
 
     """
 
     id: str
-    location: tuple
-    boundary_depths: np.array
-    boundary_depth_uncertainty: np.array
-    boundary_widths: np.array
-    boundary_vsv: np.array
-    depth_limits: np.array
     boundary_names: tuple = ('Moho', 'LAB')
+    boundary_widths: tuple = (3., 10.)
+    boundary_dvs: tuple = (0.05, -0.02)
+    depth_limits: tuple = (0, 300)
     min_layer_thickness: float = 6.
     vsv_vsh_ratio: float = 1.
     vpv_vsv_ratio: float = 1.75
     vpv_vph_ratio: float = 1.
     ref_card_csv_name: str = 'data/earth_models/prem.csv'
-    ref_sed_thickness_name: str = 'data/earth_models/sedthk_crust1.csv'
 
 
 
@@ -217,7 +194,7 @@ class ModelLayerIndices(typing.NamedTuple):
 # =============================================================================
 
 
-def setup_starting_model(setup_model):
+def setup_starting_model(setup_model, location):
     """ Convert from SetupModel to InversionModel.
 
     SetupModel is the bare bones of what we want to constrain for the starting
@@ -237,6 +214,11 @@ def setup_starting_model(setup_model):
             - SetupModel
             - Units:    seismological, i.e. km, km/s
             - Starting model, defined elsewhere
+        location:
+            - tuple
+            - Units:    degrees latitude (N), degrees longitude (E)
+            - Location for constraints - used here to put in appropriate
+              crustal structure, Moho, and LAB
 
     Returns:
         inversion_model:
@@ -250,7 +232,41 @@ def setup_starting_model(setup_model):
     else:
         print('This model ID has already been used!')
 
-    n_bounds = setup_model.boundary_depths.size
+    n_bounds = setup_model.boundary_names.size
+    boundary_inds = [0] * n_bounds
+
+    # Load in Crust 1.0 crustal structure, defined globally (but coarsely)
+    t, vs = constraints.get_vels_Crust1(location)
+
+    # Load in observed constraints
+    rfs = constraints._extract_rf_constraints(location, setup_model)
+
+    # Check if we are inverting for the Moho & correct Crust 1 accordingly
+    if 'Moho' in setup_model.boundary_names:
+        Moho_ind = setup_model.boundary_names.index('Moho')
+        Moho_depth_ish = np.round(rfs.loc[Moho_ind, 'tt'] * 3.5)
+        if Moho_depth_ish > sum(t[:-1]):
+            t[-1] = Moho_depth_ish - sum(t[:-1])
+
+    # FOR NOW, assuming that Moho_ind = 0, i.e. no BLs within the crust!
+    boundary_inds[Moho_ind] = len(t) - 1
+    t += [setup_model.boundary_widths[Moho_ind]]
+    vs += [vs[-1] * (1 + setup_model.boundary_dvs[Moho_ind])]
+
+    # Add in all BLs beneath the Moho (i.e. LAB)
+    for i_b in range(n_bounds):
+        # boundary[i_b] is our boundary of interest
+        bound_depth_ish = np.round(rfs.loc[i_b, 'tt'] * 4.2)
+
+        boundary_inds[i_b] = len(t)
+        # Top of the boundary layer
+        t += [bound_depth_ish - sum(t)]
+        vs += [vs[-1]]
+        # Bottom of the boundary layer
+        t += [setup_model.boundary_widths[i_b]]
+        vs += [vs[-1] * (1 + setup_model.boundary_dvs[Moho_ind])]
+
+    # And fill in to the base of the model
     ref_model =  pd.read_csv(setup_model.ref_card_csv_name)
     ref_depth = (ref_model['radius'].iloc[-1] - ref_model['radius']) * 1e-3
     ref_vs = ref_model['vsv'] * 1e-3
@@ -259,139 +275,17 @@ def setup_starting_model(setup_model):
     ref_depth = ref_depth.iloc[::-1].values
     ref_vs = ref_vs.iloc[::-1].values
 
+    t += [setup_model.depth_limits[1] - sum(t)]
+    vs += [np.interp(setup_model.depth_limits[1], ref_depth, ref_vs)]
 
-    thickness = [setup_model.depth_limits[0]] # first point
-    vsv = [np.interp(setup_model.depth_limits[0], ref_depth, ref_vs)]
-
-    boundary_inds = []
-    for i_b in range(n_bounds):
-        # boundary[i_b] is our boundary of interest
-        vsv_top_layer_i = setup_model.boundary_vsv[i_b * 2] #vsv[-1]
-        vsv_base_layer_i = setup_model.boundary_vsv[i_b * 2 + 1]
-        depth_top_layer_i = (setup_model.boundary_depths[i_b]
-                        - setup_model.boundary_widths[i_b]/2)
-        depth_base_layer_i = (depth_top_layer_i
-                              + setup_model.boundary_widths[i_b])
-
-        # Overlying layer is pinned in depth at the top but not the bottom,
-        # so the thickness of the overlying layer defines the depth to the
-        # boundary.  This layer has to be thick enough that the boundary layer
-        # can move shallower and still leave a sufficiently thick layer.
-        boundary_depth_uncertainty = setup_model.boundary_depth_uncertainty[i_b]
-        padding = (boundary_depth_uncertainty
-                   + setup_model.min_layer_thickness)
-        depth_top_layer_i_minus_1 = depth_top_layer_i - padding
-        depth_base_layer_i_plus_1 = depth_base_layer_i + padding
-
-        depth_boundary_above = sum(thickness)
-        depth_between_boundaries = depth_top_layer_i - depth_boundary_above
-        n_layers_above = max(
-            (1,
-            int((depth_top_layer_i_minus_1 - depth_boundary_above)
-                 // setup_model.min_layer_thickness)
-            )
-        )
-        thickness_layers_above = (
-            (depth_top_layer_i_minus_1 - depth_boundary_above) / n_layers_above
-        )
-        vsv_grad_above = (vsv_top_layer_i - vsv[-1]) / depth_between_boundaries
-
-        for n in range(n_layers_above):
-            vsv += [vsv[-1] + vsv_grad_above * thickness_layers_above]
-        vsv += [vsv_top_layer_i, vsv_base_layer_i,
-            vsv_base_layer_i + vsv_grad_above * thickness_layers_above]
-
-        thickness += (
-            [thickness_layers_above] * n_layers_above
-            + [depth_top_layer_i - depth_top_layer_i_minus_1]
-            + [setup_model.boundary_widths[i_b]]
-            + [depth_base_layer_i_plus_1 - depth_base_layer_i]
-        )
-
-        # Retrieve boundary index,
-        # i.e. thickness index for [top_of_layer - top_of_layer_above] layer
-        boundary_inds += [len(thickness) - 3]
-
-    # And add on everything to the base of the model
-    depth_to_bottom = setup_model.depth_limits[1] - sum(thickness)
-    n_layers_below = max(
-        (1,
-        int(depth_to_bottom // setup_model.min_layer_thickness)
-        )
-    )
-    thick_layers_below = depth_to_bottom / n_layers_below
-    vsv_grad_below = (
-        (np.interp(setup_model.depth_limits[1], ref_depth, ref_vs) - vsv[-1])
-        / depth_to_bottom
-    )
-    for n in range(n_layers_below):
-        vsv += [vsv[-1] + vsv_grad_below * thick_layers_below]
-    thickness += [thick_layers_below] * n_layers_below
-
-    # Load in sediment model
-    #vsv = _factor_in_sediment_layers(setup_model, thickness, vsv)
-    #vsv[0] = 2.5
-
-
+    t, vs = _return_evenly_spaced_model(t, vs, boundary_inds)
 
     return InversionModel(vsv = np.array(vsv)[np.newaxis].T,
                           thickness = np.array(thickness)[np.newaxis].T,
                           boundary_inds = np.array(boundary_inds))
 
-def _factor_in_sediment_layers(setup_model, thickness, vsv):
-    """
-    """
-    sed_total = _load_sediment_layers(setup_model)
-    i = 0
-    vpvs = setup_model.vpv_vsv_ratio
-    while sed_total > 0:
-        if thickness[i] < sed_total:
-            vsv[i] = _average_sed_velocity(sed_total, vpvs)
-        else:
-            vsv[i] = (
-                sed_total * _average_sed_velocity(sed_total, vpvs)
-                + (thickness[i] - sed_total) * vsv[i]
-            ) / thickness[i]
-        sed_total -= thickness[i]
-        i += 1
-    return vsv
-
-def _average_sed_velocity(sed_total, vpvs):
-    """
-    """
-
-    sed_ref_thick = [2., 5., 7.] # Values suggested on Crust 1.0 website
-    sed_ref_vs = [vp / vpvs for vp in [2.5, 4.1, 5.2]]
-    sed_ref_vs = [2.5, 2.8, 3.0]
-    sed_vs = 0
-    sed_left = sed_total
-    for i in range(len(sed_ref_vs)):
-        if sed_left <= sed_ref_thick[i]:
-            sed_vs += sed_left * sed_ref_vs[i]
-            break
-        sed_vs += sed_ref_thick[i] * sed_ref_vs[i]
-        sed_left -= sed_ref_thick[i]
-
-    return sed_vs / sed_total
-
-
-def _load_sediment_layers(setup_model: SetupModel):
-    """
-    """
-
-
-    lat, lon = setup_model.location
-    ref_sed = pd.read_csv(setup_model.ref_sed_thickness_name)
-    rad = 0.5
-
-    nearby_seds = ref_sed.query(
-        '{} <= lat <= {} and {} <= lon <= {}'.format(
-            lat - rad, lat + rad, lon - rad, lon + rad,
-        )
-    )
-
-    return nearby_seds.thickness_km.median()
-
+def _return_evenly_spaced_model(t, vs, boundary_inds):
+    pass
 
 
 def convert_inversion_model_to_mineos_model(inversion_model, setup_model,
