@@ -1001,7 +1001,8 @@ def _build_partial_derivatives_matrix_rf(model:define_models.InversionModel,
                      model.vsv.size - 1 + n_boundary_layers))
 
     i_bl = 0
-    for bl in setup_model.boundary_names:
+    bnames, _, _ = setup_model.boundaries
+    for bl in bnames:
         # Calculate partials for travel time constraint
         _calculate_travel_time_partial(model, i_bl, G_rf)
         # Calculate partials for velocity contrast constraint
@@ -1037,7 +1038,7 @@ def _calculate_dv_rf_partial(model, i_bl, G_rf):
     G_rf[i_bl + model.boundary_inds.size, bound_ind + 1] = (
         1 / model.vsv[bound_ind]
     )
-    
+
     return
 
 def _calculate_travel_time_partial(model, i_bl, G_rf):

@@ -286,9 +286,10 @@ def setup_starting_model(setup_model, location):
 
     t += [setup_model.depth_limits[1] - sum(t)]
     vs += [np.interp(setup_model.depth_limits[1], ref_depth, ref_vs)]
-    return t, vs, boundary_inds
 
-    t, vs, boundary_inds = _return_evenly_spaced_model(t, vs, boundary_inds)
+    thickness, vsv, boundary_inds = _return_evenly_spaced_model(
+        t, vs, boundary_inds, setup_model.min_layer_thickness,
+    )
 
     return InversionModel(vsv = np.array(vsv)[np.newaxis].T,
                           thickness = np.array(thickness)[np.newaxis].T,
@@ -298,37 +299,54 @@ def _return_evenly_spaced_model(t, vs, boundary_inds, min_layer_thickness):
     """
     Important to keep the boundary layer thicknesses the same.
     """
+    print('T, Vsv, Boundary Inds')
+    print(t, vs, boundary_inds)
+    if type(t) == np.ndarray:
+        t = t.flatten().tolist()
+    if type(vs) == np.ndarray:
+        vs = vs.flatten().tolist()
 
-    previous_boundary_depth = 0
-    new_t = [0]
-    new_vs = []
-    new_bi = []
-    for ib in boundary_inds:
-        boundary_depth = sum(t[:ib + 1])
-        inter_boundary_depth = boundary_depth - previous_boundary_depth
-        n_layers = inter_boundary_depth // min_layer_thickness
+    # Set uppermost value of t
+    nt = [t[0]]
+    bi = [-1] + boundary_inds
+    nbi = []
+
+    # Loop through all BLs to get velocities above and within them
+    for ib in range(len(bi[:-1])):
+        inter_boundary_depth = (sum(t[:bi[ib + 1] + 1])
+                                - sum(t[:bi[ib] + 2]))
+        n_layers = int(inter_boundary_depth // min_layer_thickness)
         layer_t = inter_boundary_depth / n_layers
-        ts = [layer_t] * int(n_layers)
 
-        for il in range(len(ts) - 1):
-            if il == 0:
-                new_vs += [_mean_val_in_interval(vs, t, sum(new_t),
-                                                 sum(new_t) + layer_t / 2)]
-                new_t += ts
-            else:
-                d = np.cumsum(ts[:il + 1]) + previous_boundary_depth
-                new_vs += [_mean_val_in_interval(vs, t, d[il] - layer_t / 2,
-                                                 d[il] + layer_t / 2)]
+        # set uppermost value of Vs
+        if ib == 0:
+            nv = [_mean_val_in_interval(vs, t, sum(nt), sum(nt) + layer_t / 2)]
 
-        new_bi += [len(new_t) - 1]
-        new_t += [t[ib + 1]]
-        new_vs += [vs[ib:ib + 2]]
-        previous_boundary_depth = sum(new_t)
+        for il in range(n_layers - 1):
+            nt += [layer_t]
+            nv += [_mean_val_in_interval(vs, t, sum(nt) - layer_t / 2,
+                                         sum(nt) + layer_t / 2)]
+        nbi += [len(nt)]
+        nt += [layer_t, t[bi[ib + 1] + 1]]
+        nv += vs[bi[ib + 1]:bi[ib + 1] + 2]
 
-    return new_t, new_vs, new_bi
+
+    # For the deepest BL to the base of the model
+    inter_boundary_depth = sum(t) - sum(t[:boundary_inds[-1] + 2])
+    n_layers = int(inter_boundary_depth // min_layer_thickness)
+    layer_t = inter_boundary_depth / n_layers
+    for il in range(n_layers - 1):
+        nt += [layer_t]
+        nv += [_mean_val_in_interval(vs, t, sum(nt) - layer_t / 2,
+                                     sum(nt) + layer_t / 2)]
+    nt += [layer_t]
+    nv += [vs[-1]]
+    return nt, nv, nbi
+
 
 def _mean_val_in_interval(v, t, d1, d2):
     """
+    All assumed to be lists or floats!!
     """
     interp_d = np.arange(t[0], sum(t), 0.1)
     interp_vs = np.interp(interp_d, np.cumsum(t), v)
@@ -388,9 +406,10 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model,
     q_mu = np.interp(radius, ref_model['radius'], ref_model['q_mu'])
     q_kappa = np.interp(radius, ref_model['radius'], ref_model['q_kappa'])
     rho = np.interp(radius, ref_model['radius'], ref_model['rho'])
-    if 'Moho' in setup_model.boundary_names:
-        Moho_ind = (inversion_model.boundary_inds[
-                        setup_model.boundary_names.index('Moho')])
+
+    bnames, _, _ = setup_model.boundaries
+    if 'Moho' in bnames:
+        Moho_ind = (inversion_model.boundary_inds[bnames.index('Moho')])
         Moho_depth = np.sum(inversion_model.thickness[:Moho_ind + 1])
     else:
         try:
@@ -560,8 +579,9 @@ def _set_model_indices(setup_model, model, **kwargs):
 
     sed_inds = [list(model.vsv).index(v) for v in model.vsv if v <= 3]
 
-    if 'Moho' in setup_model.boundary_names:
-        moho_ind = model.boundary_inds[setup_model.boundary_names.index('Moho')]
+    bnames, _, _ = setup_model.boundaries
+    if 'Moho' in bnames:
+        moho_ind = model.boundary_inds[bnames.index('Moho')]
     else:
         try:
             moho_ind = np.argmin(np.abs(depth - kwargs['Moho']))
@@ -569,8 +589,8 @@ def _set_model_indices(setup_model, model, **kwargs):
             print('Moho depth never specified! Guessing 35 km.')
             moho_ind = np.argmin(np.abs(depth - 35))
 
-    if 'LAB' in setup_model.boundary_names:
-        lab_ind = model.boundary_inds[setup_model.boundary_names.index('LAB')]
+    if 'LAB' in bnames:
+        lab_ind = model.boundary_inds[bnames.index('LAB')]
     else:
         try:
             lab_ind = np.argmin(np.abs(depth - kwargs['LAB']))

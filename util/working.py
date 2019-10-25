@@ -148,31 +148,17 @@ def test_damping(n_iter):
                     lat, -lon, t_LAB
                 ))
 
-                setup_model = define_models.SetupModel(
-                    'test2', (lat, lon), np.array([35., 80.]),
-                    np.array([5, 10.]),
-                    np.array([2, t_LAB]), np.array([3.5, 4.4,  4.4, 4.2]),
-                    np.array([0, 300])
+                setup_model = define_models.SetupModel('test2',
+                    boundaries=(('Moho', 'LAB'), [3., t_LAB], [0.1, -0.05])
                 )
                 #location = (35, -112)
                 obs, std_obs, periods = constraints.extract_observations(
-                    setup_model
-                )
-                moho_z_ish = np.round(obs[-4] * 3.5)
-                lab_z_ish = np.round(obs[-3] * 4.2)
-                setup_model = setup_model._replace(
-                    boundary_depths = np.concatenate((moho_z_ish, lab_z_ish))
+                    location, setup_model.id, setup_model.boundaries,
+                    setup_model.vpv_vsv_ratio,
                 )
 
 
-                # To speed things up, remove some data
-                # i_p = list(range(3, 10, 2)) + list(range(10, 14))
-                # i_rf = list(range(14, 18))
-                # periods = periods[i_p]
-                # obs = obs[i_p + i_rf]
-                # std_obs = std_obs[i_p + i_rf]
-
-                ic = list(range(len(obs) - 2 * len(setup_model.boundary_names)))
+                ic = list(range(len(obs) - 2 * len(setup_model.boundaries[0])))
                 i_rf = list(range(ic[-1] + 1, len(obs)))
 
                 #setup_model = setup_model._replace(boundary_names = [])
@@ -198,7 +184,7 @@ def test_damping(n_iter):
                                   'k-', linewidth=3, label='data')
                 plots.plot_rf_data_std(obs[i_rf], std_obs[i_rf], 'data', ax_rf)
 
-                m = define_models.setup_starting_model(setup_model)
+                m = define_models.setup_starting_model(setup_model, location)
                 # m = m._replace(boundary_inds =  np.array([]))
                 # m = m._replace(thickness=np.array([0.] + [6.] * (len(m.vsv) - 1))[:, np.newaxis])
                 plots.plot_model(m, 'm0', ax_m)
@@ -246,3 +232,5 @@ def test_damping(n_iter):
                     )
                 )
                 plt.close(f)
+
+                return m

@@ -65,7 +65,9 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     """ Run a single iteration of the least squares
     """
 
-    obs, std_obs, periods = constraints.extract_observations(setup_model)
+    obs, std_obs, periods = constraints.extract_observations(
+        location, setup_model.id, setup_model.boundaries, setup_model.vpv_vsv_ratio
+    )
 
     # Build all of the inputs to the damped least squares
     # Run MINEOS to get phase velocities and kernels
@@ -97,7 +99,9 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     # Perform inversion
     p_new = _damped_least_squares(p, G, d, W, H_mat, h_vec)
 
-    return _build_inversion_model_from_model_vector(p_new, model)
+    return _build_inversion_model_from_model_vector(
+        p_new, model, setup_model.min_layer_thickness
+    )
 
 def _predict_RF_vals(model:define_models.InversionModel):
     """
@@ -149,8 +153,8 @@ def _build_model_vector(model:define_models.InversionModel,
     return np.vstack((model.vsv[:-1],
                       model.thickness[list(model.boundary_inds)]))
 
-def _build_inversion_model_from_model_vector(
-        p:np.array, model:define_models.InversionModel):
+def _build_inversion_model_from_model_vector(p:np.array,
+        model:define_models.InversionModel, min_layer_thickness:float):
     """ Make column vector, [s; t] into InversionModel format.
 
     Arguments:
@@ -181,12 +185,17 @@ def _build_inversion_model_from_model_vector(
     dt = p[-len(model.boundary_inds):] - model.thickness[model.boundary_inds]
     new_thickness[model.boundary_inds] += dt
     new_thickness[model.boundary_inds + 2] -= dt
-    new_vsv = p[:-len(model.boundary_inds)].copy()
+    new_vsv = np.vstack((p[:-len(model.boundary_inds)].copy(), model.vsv[-1]))
+    print(new_thickness, new_vsv, model.boundary_inds)
+
+    thickness, vsv, bi = define_models._return_evenly_spaced_model(
+        new_thickness, new_vsv, model.boundary_inds, min_layer_thickness
+    )
 
     return define_models.InversionModel(
-                vsv = np.vstack((new_vsv, model.vsv[-1])),
-                thickness = new_thickness,
-                boundary_inds = model.boundary_inds,
+                vsv = np.array(vsv)[np.newaxis].T,
+                thickness = np.array(thickness)[np.newaxis].T,
+                boundary_inds = np.array(bi),
     )
 
 
