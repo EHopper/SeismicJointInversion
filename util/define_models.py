@@ -18,6 +18,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import os
 
+from util import constraints
+
 # =============================================================================
 # Set up classes for commonly used variables
 # =============================================================================
@@ -40,22 +42,25 @@ class SetupModel(typing.NamedTuple):
         id:
             - str
             - Unique name of model for saving things.
-        boundary_names:
-            - (n_boundary_depths_inverted_for) tuple
-            - Units: none
-            - Labels for each of the boundaries, default = ('Moho', 'LAB')
-        boundary_widths:
-            - (n_boundary_depths_inverted_for) tuple
-            - Units: kilometres
-            - (Fixed) width of the boundary layer.  This is fixed for a given
-              inversion (though we will allow the depth of the boundary layer
-              as a whole to change).
-        depth_boundary_dvs:
-            - (n_boundary_depths_inverted_for) tuple
-            - Units: dimensionless
-            - Fractional change in Vs at each of the boundaries,
-              default = (0.05, -0.02)
-        limits:
+        boundaries:
+            - tuple of length 3, where each item in the tuple is a tuple or list
+              with (n_boundary_depths_inverted_for) items in it
+            - Items in tuple:
+                boundary names:
+                    - Units: none
+                    - Labels for each of the boundaries
+                    - Default = ('Moho', 'LAB')
+                boundary widths:
+                    - Units: kilometres
+                    - (Fixed) width of the boundary layer.  This is fixed for a given
+                      inversion (though we will allow the depth of the boundary layer
+                      as a whole to change).
+                    - Default = [3., 10.]
+                boundary dVs:
+                    - Units: dimensionless
+                    - Fractional change in Vs at each of the boundaries,
+                    - Default = [0.05, -0.02]
+        depth_limits:
             - (length 2) tuple
             - Units:    km
             - Top and base of the model that we are inverting for.
@@ -92,9 +97,7 @@ class SetupModel(typing.NamedTuple):
     """
 
     id: str
-    boundary_names: tuple = ('Moho', 'LAB')
-    boundary_widths: tuple = (3., 10.)
-    boundary_dvs: tuple = (0.05, -0.02)
+    boundaries: tuple = (('Moho', 'LAB'), [3., 10.], [0.05, -0.02])
     depth_limits: tuple = (0, 300)
     min_layer_thickness: float = 6.
     vsv_vsh_ratio: float = 1.
@@ -232,39 +235,45 @@ def setup_starting_model(setup_model, location):
     else:
         print('This model ID has already been used!')
 
-    n_bounds = setup_model.boundary_names.size
-    boundary_inds = [0] * n_bounds
+    bnames, bwidths, bdvs = setup_model.boundaries
+    n_bounds = len(bnames)
+    boundary_inds = []
 
     # Load in Crust 1.0 crustal structure, defined globally (but coarsely)
     t, vs = constraints.get_vels_Crust1(location)
 
     # Load in observed constraints
-    rfs = constraints._extract_rf_constraints(location, setup_model)
+    rfs = constraints._extract_rf_constraints(
+        location, setup_model.id, setup_model.boundaries,
+        setup_model.vpv_vsv_ratio
+    )
 
     # Check if we are inverting for the Moho & correct Crust 1 accordingly
-    if 'Moho' in setup_model.boundary_names:
-        Moho_ind = setup_model.boundary_names.index('Moho')
-        Moho_depth_ish = np.round(rfs.loc[Moho_ind, 'tt'] * 3.5)
+    if 'Moho' in bnames:
+        Moho_ind = bnames.index('Moho')
+        Moho_depth_ish = int(rfs.loc[Moho_ind, 'tt'] * 3.5)
         if Moho_depth_ish > sum(t[:-1]):
             t[-1] = Moho_depth_ish - sum(t[:-1])
 
-    # FOR NOW, assuming that Moho_ind = 0, i.e. no BLs within the crust!
-    boundary_inds[Moho_ind] = len(t) - 1
-    t += [setup_model.boundary_widths[Moho_ind]]
-    vs += [vs[-1] * (1 + setup_model.boundary_dvs[Moho_ind])]
+        # FOR NOW, assuming that Moho_ind = 0, i.e. no BLs within the crust!
+        boundary_inds += [len(t) - 1]
+        t += [bwidths[Moho_ind]]
+        vs += [vs[-1] * (1 + bdvs[Moho_ind])]
+    else:
+        Moho_ind = -1
 
     # Add in all BLs beneath the Moho (i.e. LAB)
-    for i_b in range(n_bounds):
+    for i_b in range(Moho_ind + 1, n_bounds):
         # boundary[i_b] is our boundary of interest
         bound_depth_ish = np.round(rfs.loc[i_b, 'tt'] * 4.2)
 
-        boundary_inds[i_b] = len(t)
+        boundary_inds += [len(t)]
         # Top of the boundary layer
         t += [bound_depth_ish - sum(t)]
         vs += [vs[-1]]
         # Bottom of the boundary layer
-        t += [setup_model.boundary_widths[i_b]]
-        vs += [vs[-1] * (1 + setup_model.boundary_dvs[Moho_ind])]
+        t += [bwidths[i_b]]
+        vs += [vs[-1] * (1 + bdvs[i_b])]
 
     # And fill in to the base of the model
     ref_model =  pd.read_csv(setup_model.ref_card_csv_name)
@@ -277,16 +286,56 @@ def setup_starting_model(setup_model, location):
 
     t += [setup_model.depth_limits[1] - sum(t)]
     vs += [np.interp(setup_model.depth_limits[1], ref_depth, ref_vs)]
+    return t, vs, boundary_inds
 
-    t, vs = _return_evenly_spaced_model(t, vs, boundary_inds)
+    t, vs, boundary_inds = _return_evenly_spaced_model(t, vs, boundary_inds)
 
     return InversionModel(vsv = np.array(vsv)[np.newaxis].T,
                           thickness = np.array(thickness)[np.newaxis].T,
                           boundary_inds = np.array(boundary_inds))
 
-def _return_evenly_spaced_model(t, vs, boundary_inds):
-    pass
+def _return_evenly_spaced_model(t, vs, boundary_inds, min_layer_thickness):
+    """
+    Important to keep the boundary layer thicknesses the same.
+    """
 
+    previous_boundary_depth = 0
+    new_t = [0]
+    new_vs = []
+    new_bi = []
+    for ib in boundary_inds:
+        boundary_depth = sum(t[:ib + 1])
+        inter_boundary_depth = boundary_depth - previous_boundary_depth
+        n_layers = inter_boundary_depth // min_layer_thickness
+        layer_t = inter_boundary_depth / n_layers
+        ts = [layer_t] * int(n_layers)
+
+        for il in range(len(ts) - 1):
+            if il == 0:
+                new_vs += [_mean_val_in_interval(vs, t, sum(new_t),
+                                                 sum(new_t) + layer_t / 2)]
+                new_t += ts
+            else:
+                d = np.cumsum(ts[:il + 1]) + previous_boundary_depth
+                new_vs += [_mean_val_in_interval(vs, t, d[il] - layer_t / 2,
+                                                 d[il] + layer_t / 2)]
+
+        new_bi += [len(new_t) - 1]
+        new_t += [t[ib + 1]]
+        new_vs += [vs[ib:ib + 2]]
+        previous_boundary_depth = sum(new_t)
+
+    return new_t, new_vs, new_bi
+
+def _mean_val_in_interval(v, t, d1, d2):
+    """
+    """
+    interp_d = np.arange(t[0], sum(t), 0.1)
+    interp_vs = np.interp(interp_d, np.cumsum(t), v)
+
+    return np.mean(interp_vs[np.logical_and(
+                d1 <= interp_d, interp_d < d2
+            )])
 
 def convert_inversion_model_to_mineos_model(inversion_model, setup_model,
                                             **kwargs):

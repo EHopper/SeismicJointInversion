@@ -10,7 +10,6 @@ import pandas as pd
 import re
 import os
 
-from util import define_models
 
 
 # =============================================================================
@@ -22,23 +21,20 @@ from util import define_models
 #       Extract the observations of interest for a given location
 # =============================================================================
 
-def extract_observations(setup_model:define_models.SetupModel, location:tuple):
+def extract_observations(location:tuple, id:str, boundaries:tuple, vpvs:float):
     """ Make an Observations object.
     """
 
     surface_waves = _extract_phase_vels(location)
     #surface_waves = surface_waves.iloc[[3, 5, 7, 11, 12, 13], :]
-    rfs = _extract_rf_constraints(location, setup_model)
+    rfs = _extract_rf_constraints(location, id, boundaries, vpvs)
 
     # Write to file
-    if not os.path.exists('output/' + setup_model.id):
-        os.mkdir('output/' + setup_model.id)
-    surface_waves.to_csv(
-        'output/{0}/{0}_surface_wave_constraints.csv'.format(setup_model.id)
-    )
-    rfs.to_csv(
-        'output/{0}/{0}_RF_constraints.csv'.format(setup_model.id)
-    )
+    if not os.path.exists('output/' + id):
+        os.mkdir('output/' + id)
+    savedir = 'output/{0}/{0}_'.format(id)
+    surface_waves.to_csv('{}_surface_wave_constraints.csv'.format(savedir, id))
+    rfs.to_csv('{}_RF_constraints.csv'.format(savedir, id))
 
     d = np.vstack((surface_waves['ph_vel'][:, np.newaxis],
                    rfs['tt'][:, np.newaxis],
@@ -50,14 +46,15 @@ def extract_observations(setup_model:define_models.SetupModel, location:tuple):
 
     return d, std, periods
 
-def _extract_rf_constraints(location: tuple,
-                            setup_model:define_models.SetupModel):
+def _extract_rf_constraints(location:tuple, id:str, boundaries:pd.DataFrame,
+                            vpvs:float):
     """
 
     Note that some of the reported standard deviation on values are
     unrealistically low (i.e. zero), so we will assume the minimum standard
     deviation on a value is the 10% quantile of the total data set.
     """
+    bnames, bwidths, bdvs = boundaries
 
     # Load in receiver function constraints
     all_rfs = pd.read_csv('data/RFconstraints/a_priori_constraints.csv')
@@ -68,7 +65,7 @@ def _extract_rf_constraints(location: tuple,
         columns = ['lat', 'lon', 'tt', 'ttstd', 'dv', 'dvstd']
     )
     ib = 0
-    for bound in setup_model.boundary_names:
+    for bound in bnames:
         # Extract travel time information
         try:
             tt = obs['tt' + bound]
@@ -87,9 +84,9 @@ def _extract_rf_constraints(location: tuple,
             rftype = 'Ps'
             print('RF type unspecified for ' + bound + ' - assuming Ps')
         if rftype == 'Sp': # Scale travel time from travelling at Vp to at Vs
-            tt *= setup_model.vpv_vsv_ratio
+            tt *= vpvs
             # for constant a, variable A: sigma_aA = |a| * sigma_A
-            ttstd *= setup_model.vpv_vsv_ratio
+            ttstd *= vpvs
 
         # Extract velocity contrast information
         try:
@@ -107,7 +104,7 @@ def _extract_rf_constraints(location: tuple,
                 ampstd = max((ampstd, min_allowed_amstd))
 
                 dv, dvstd = _convert_amplitude_to_dv(
-                    amp, ampstd, rftype, setup_model.boundary_widths[ib]
+                    amp, ampstd, rftype, bwidths[ib]
                 )
             except:
                 print('No RF constraints on dV for ' + bound)
@@ -296,10 +293,18 @@ def get_vels_Crust1(location):
     i = int((lon - all_lons[0]) + ((all_lats[0] - lat) // 1) * len(all_lons))
 
     nm = 'data/earth_models/crust1/crust1.'
-    cb = pd.read_csv(nm + 'bnds', skiprows=i, nrows=1, header=None, sep='\s+'
-        ).values.flatten()
-    vs = pd.read_csv(nm + 'vs', skiprows=i, nrows=1, header=None, sep='\s+'
-        ).values.flatten()
+    try:
+        cb = pd.read_csv(nm + 'bnds', skiprows=i, nrows=1, header=None, sep='\s+'
+            ).values.flatten()
+        vs = pd.read_csv(nm + 'vs', skiprows=i, nrows=1, header=None, sep='\s+'
+            ).values.flatten()
+    except:
+        crust1url = 'http://igppweb.ucsd.edu/~gabi/crust1/crust1.0.tar.gz'
+        print(
+            'You need to download (and extract) the Crust1.0 model'
+            + ' from \n\t{} \nand save to \n\t{}'.format(crust1url, nm[:-7])
+        )
+        return
     # vp = pd.read_csv(nm + 'vp', skiprows=i, nrows=1, header=None, sep='\s+'
     #     ).values.flatten()
     # rho = pd.read_csv(nm + 'rho', skiprows=i, nrows=1, header=None, sep='\s+'
@@ -314,5 +319,6 @@ def get_vels_Crust1(location):
             m_vs += [vs[ib]]
             m_t += [t]
         ib += 1
+    m_vs += [m_vs[-1]]
 
     return m_t, m_vs
