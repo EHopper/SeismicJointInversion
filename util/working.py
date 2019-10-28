@@ -169,7 +169,7 @@ def test_damping(n_iter):
                 f.set_size_inches((15,7))
                 ax_m = f.add_axes([0.35, 0.1, 0.2, 0.8])
                 ax_c = f.add_axes([0.6, 0.6, 0.35, 0.3])
-                ax_map = f.add_axes([0.84, 0.64, 0.1, 0.2])
+                ax_map = f.add_axes([0.84, 0.1, 0.1, 0.2])
                 ax_dc = f.add_axes([0.6, 0.375, 0.35, 0.15])
                 im = ax_map.contourf(np.arange(-119, -100.9, 0.2),
                     np.arange(30, 45.1, 0.2), vs_SL14, levels=20,
@@ -179,7 +179,7 @@ def test_damping(n_iter):
                 ax_c.set_title(
                     '{:.1f}N, {:.1f}W:  {:.0f} km LAB'.format(lat, -lon, t_LAB)
                 )
-                ax_rf = f.add_axes([0.6, 0.1, 0.35, 0.2])
+                ax_rf = f.add_axes([0.6, 0.1, 0.2, 0.2])
                 line, = ax_c.plot(periods, obs[ic],
                                   'k-', linewidth=3, label='data')
                 plots.plot_rf_data_std(obs[i_rf], std_obs[i_rf], 'data', ax_rf)
@@ -210,7 +210,7 @@ def test_damping(n_iter):
                 plots.plot_ph_vel(periods, dc, 'm' + str(n + 1), ax_dc)
                 ax_dc.plot(periods, [0] * len(periods), 'k--')
                 ax_dc.set(ylabel="dc (km/s)")
-                ax_dc.set_ylim(max(abs(np.array(dc))) * 1.1 * np.array([-1, 1]))
+                ax_dc.set_ylim(max(abs(np.array(dc))) * 1.25 * np.array([-1, 1]))
                 plots.make_plot_symmetric_in_y_around_zero(ax_rf)
 
                 save_name = 'output/{0}/{0}'.format(setup_model.id)

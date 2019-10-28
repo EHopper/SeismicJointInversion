@@ -299,12 +299,12 @@ def _return_evenly_spaced_model(t, vs, boundary_inds, min_layer_thickness):
     """
     Important to keep the boundary layer thicknesses the same.
     """
-    print('T, Vsv, Boundary Inds')
-    print(t, vs, boundary_inds)
     if type(t) == np.ndarray:
         t = t.flatten().tolist()
     if type(vs) == np.ndarray:
         vs = vs.flatten().tolist()
+    if type(boundary_inds) == np.ndarray:
+        boundary_inds = boundary_inds.flatten().tolist()
 
     # Set uppermost value of t
     nt = [t[0]]

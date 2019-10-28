@@ -186,7 +186,6 @@ def _build_inversion_model_from_model_vector(p:np.array,
     new_thickness[model.boundary_inds] += dt
     new_thickness[model.boundary_inds + 2] -= dt
     new_vsv = np.vstack((p[:-len(model.boundary_inds)].copy(), model.vsv[-1]))
-    print(new_thickness, new_vsv, model.boundary_inds)
 
     thickness, vsv, bi = define_models._return_evenly_spaced_model(
         new_thickness, new_vsv, model.boundary_inds, min_layer_thickness
