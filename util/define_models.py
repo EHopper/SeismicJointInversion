@@ -295,6 +295,18 @@ def setup_starting_model(setup_model, location):
                           thickness = np.array(thickness)[np.newaxis].T,
                           boundary_inds = np.array(boundary_inds))
 
+def _add_random_noise(a:np.array, sc:float, pdf='normal'):
+    """ Add random noise to an array of mean 0, scaled by sc.
+
+    Arguments:
+        a:
+            -
+    """
+    pass
+
+
+
+
 def _return_evenly_spaced_model(t, vs, boundary_inds, min_layer_thickness):
     """
     Important to keep the boundary layer thicknesses the same.
