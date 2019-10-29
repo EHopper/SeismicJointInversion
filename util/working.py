@@ -139,9 +139,21 @@ def test_damping(n_iter):
                            header=None).values
     cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
 
+    vs_SLall = pd.read_csv('data/earth_models/SchmandtLinVs_only.csv',
+                            header=None).values.flatten()
+    # To save spave, have saved the lat, lon, depth ranges of the Schmandt & Lin
+    # model just as three lines in a csv
+    vs_lats = pd.read_csv('data/earth_models/SL_coords.csv', skiprows=0,
+                          nrows=1, header=None).values.flatten()
+    vs_lons = pd.read_csv('data/earth_models/SL_coords.csv', skiprows=1,
+                          nrows=1, header=None).values.flatten()
+    vs_deps = pd.read_csv('data/earth_models/SL_coords.csv', skiprows=2,
+                          nrows=1, header=None).values.flatten()
+    vs_SLall = vs_SLall.reshape((vs_lats.size, vs_lons.size, vs_deps.size))
 
-    for lat in [37]:#range(34, 41):
-        for lon in [-115]: #range(-115, -105):
+
+    for lat in [41, 39, 35, 33]:#range(34, 41):
+        for lon in range(-115, -105):
             for t_LAB in [5.]:#[30., 25., 20., 15., 10.]:
                 location = (lat, lon)
                 print('*********************** {}N, {}W, {}km LAB'.format(
@@ -149,7 +161,8 @@ def test_damping(n_iter):
                 ))
 
                 setup_model = define_models.SetupModel('test2',
-                    boundaries=(('Moho', 'LAB'), [3., t_LAB], [0.1, -0.05])
+                    boundaries=(('Moho', 'LAB'), [3., t_LAB], [0.1, -0.05]),
+                    depth_limits=(0, 420),
                 )
                 #location = (35, -112)
                 obs, std_obs, periods = constraints.extract_observations(
@@ -167,7 +180,8 @@ def test_damping(n_iter):
 
                 f = plt.figure()
                 f.set_size_inches((15,7))
-                ax_m = f.add_axes([0.35, 0.1, 0.2, 0.8])
+                ax_m150 = f.add_axes([0.35, 0.3, 0.2, 0.6])
+                ax_mDeep = f.add_axes([0.35, 0.1, 0.2, 0.12])
                 ax_c = f.add_axes([0.6, 0.6, 0.35, 0.3])
                 ax_map = f.add_axes([0.84, 0.1, 0.1, 0.2])
                 ax_dc = f.add_axes([0.6, 0.375, 0.35, 0.15])
@@ -180,14 +194,25 @@ def test_damping(n_iter):
                     '{:.1f}N, {:.1f}W:  {:.0f} km LAB'.format(lat, -lon, t_LAB)
                 )
                 ax_rf = f.add_axes([0.6, 0.1, 0.2, 0.2])
+
+                # Plot on data and Schmandt & Lin Vs model
                 line, = ax_c.plot(periods, obs[ic],
                                   'k-', linewidth=3, label='data')
                 plots.plot_rf_data_std(obs[i_rf], std_obs[i_rf], 'data', ax_rf)
+                vs_ilon = np.argmin(abs(vs_lons - lon))
+                vs_ilat = np.argmin(abs(vs_lats - lat))
+                print()
+                ax_m150.plot(vs_SLall[vs_ilat, vs_ilon, :], vs_deps,
+                             'k-', linewidth=3, label='SL14')
+                ax_mDeep.plot(vs_SLall[vs_ilat, vs_ilon, :], vs_deps,
+                              'k-', linewidth=3, label='SL14')
+
 
                 m = define_models.setup_starting_model(setup_model, location)
                 # m = m._replace(boundary_inds =  np.array([]))
                 # m = m._replace(thickness=np.array([0.] + [6.] * (len(m.vsv) - 1))[:, np.newaxis])
-                plots.plot_model(m, 'm0', ax_m)
+                plots.plot_model(m, 'm0', ax_m150, (0, 150))
+                plots.plot_model(m, 'm0', ax_mDeep, (150, setup_model.depth_limits[1]), False)
                 p_rf = inversion._predict_RF_vals(m)
                 plots.plot_rf_data(p_rf, 'm0', ax_rf)
                 for n in range(n_iter):
@@ -195,11 +220,13 @@ def test_damping(n_iter):
                     m = inversion._inversion_iteration(setup_model, m, location)
                     p_rf = inversion._predict_RF_vals(m)
                     c = mineos._read_qfile(save_name, periods)
-                    plots.plot_model(m, 'm' + str(n + 1), ax_m)
+                    plots.plot_model(m, 'm' + str(n + 1), ax_m150, (0, 150))
+                    plots.plot_model(m, 'm' + str(n + 1), ax_mDeep,
+                                     (150, setup_model.depth_limits[1]), False)
                     plots.plot_rf_data(p_rf, 'm' + str(n + 1), ax_rf)
                     plots.plot_ph_vel(periods, c, 'm' + str(n), ax_c)
                     dc = [c[i] - obs[ic[i]] for i in range(len(c))]
-                    plots.plot_ph_vel(periods, dc, 'm' + str(n), ax_dc)
+                    plots.plot_dc(periods, dc, ax_dc)
 
                 # Run MINEOS on final model
                 params = mineos.RunParameters(freq_max = 1000 / min(periods) + 1)
@@ -207,9 +234,8 @@ def test_damping(n_iter):
                 c, _ = mineos.run_mineos(params, periods, setup_model.id)
                 plots.plot_ph_vel(periods, c, 'm' + str(n + 1), ax_c)
                 dc = [c[i] - obs[ic[i]] for i in range(len(c))]
-                plots.plot_ph_vel(periods, dc, 'm' + str(n + 1), ax_dc)
+                plots.plot_dc(periods, dc, ax_dc)
                 ax_dc.plot(periods, [0] * len(periods), 'k--')
-                ax_dc.set(ylabel="dc (km/s)")
                 ax_dc.set_ylim(max(abs(np.array(dc))) * 1.25 * np.array([-1, 1]))
                 plots.make_plot_symmetric_in_y_around_zero(ax_rf)
 
@@ -232,5 +258,3 @@ def test_damping(n_iter):
                     )
                 )
                 plt.close(f)
-
-                return m

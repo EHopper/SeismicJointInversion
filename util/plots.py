@@ -13,21 +13,29 @@ def make_fig():
     plt.figure(figsize=(10,8))
     return plt.subplot(1, 1, 1)
 
-def plot_model(model, label, ax):
+def plot_model(model, label, ax, depth_range=(), iflegend=True):
     depth = np.cumsum(model.thickness)
     for ib in model.boundary_inds:
         ax.axhline(depth[ib], linestyle=':', color='#e0e0e0')
     line, = ax.plot(model.vsv, depth, '-o', markersize=2, label=label)
-    ax.set_ylim([depth[-1], 0])
+    if depth_range:
+        ax.set_ylim([depth_range[1], depth_range[0]])
+    else:
+        ax.set_ylim([depth[-1], 0])
     ax.xaxis.set_label_position('top')
     ax.xaxis.tick_top()
     ax.set(xlabel='Vsv (km/s)', ylabel='Depth (km)')
-    ax.legend()
+    if iflegend:
+        ax.legend()
 
 def plot_ph_vel(periods, c, label, ax):
     line = ax.plot(periods, c, '-o', markersize=3, label=label)
     ax.set(xlabel='Period (s)', ylabel='Phase Velocity (km/s)')
     ax.legend()
+
+def plot_dc(periods, dc, ax):
+    line = ax.plot(periods, dc, '-o', markersize=3)
+    ax.set(xlabel='Period (s)', ylabel='c misfit (km/s)')
 
 def plot_rf_data_std(rf_data, std_rf_data, label, ax):
     tt = rf_data[:len(rf_data) // 2].flatten()
