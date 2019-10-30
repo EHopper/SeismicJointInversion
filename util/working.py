@@ -133,7 +133,7 @@ def run_test_G():
     print(dc_mineos, dc_Gdm)
 
 
-def test_damping(n_iter):
+def test_damping(): #n_iter
 
     vs_SL14 = pd.read_csv('data/earth_models/CP_SL14.csv',
                            header=None).values
@@ -152,8 +152,8 @@ def test_damping(n_iter):
     vs_SLall = vs_SLall.reshape((vs_lats.size, vs_lons.size, vs_deps.size))
 
 
-    for lat in [41, 39, 35, 33]:#range(34, 41):
-        for lon in range(-115, -105):
+    for lat in range(33, 41, 2):#range(34, 41):
+        for lon in range(-115, -105, 2):
             for t_LAB in [5.]:#[30., 25., 20., 15., 10.]:
                 location = (lat, lon)
                 print('*********************** {}N, {}W, {}km LAB'.format(
@@ -215,7 +215,15 @@ def test_damping(n_iter):
                 plots.plot_model(m, 'm0', ax_mDeep, (150, setup_model.depth_limits[1]), False)
                 p_rf = inversion._predict_RF_vals(m)
                 plots.plot_rf_data(p_rf, 'm0', ax_rf)
-                for n in range(n_iter):
+
+                dc = np.ones_like(periods)
+                old_dc = np.zeros_like(periods)
+                n = -1
+                while np.sum(abs(dc - old_dc)) > 0.005 * periods.size and n < 10:
+                #for n in range(n_iter):
+                    n += 1
+                    old_dc = dc.copy()
+
                     print('****** ITERATION ' +  str(n) + ' ******')
                     m = inversion._inversion_iteration(setup_model, m, location)
                     p_rf = inversion._predict_RF_vals(m)
@@ -225,8 +233,12 @@ def test_damping(n_iter):
                                      (150, setup_model.depth_limits[1]), False)
                     plots.plot_rf_data(p_rf, 'm' + str(n + 1), ax_rf)
                     plots.plot_ph_vel(periods, c, 'm' + str(n), ax_c)
-                    dc = [c[i] - obs[ic[i]] for i in range(len(c))]
+                    dc = np.array([c[i] - obs[ic[i]] for i in range(len(c))])
                     plots.plot_dc(periods, dc, ax_dc)
+
+
+
+
 
                 # Run MINEOS on final model
                 params = mineos.RunParameters(freq_max = 1000 / min(periods) + 1)
@@ -238,6 +250,9 @@ def test_damping(n_iter):
                 ax_dc.plot(periods, [0] * len(periods), 'k--')
                 ax_dc.set_ylim(max(abs(np.array(dc))) * 1.25 * np.array([-1, 1]))
                 plots.make_plot_symmetric_in_y_around_zero(ax_rf)
+                ax_m150.set_xlim([2, 5.5])
+                ax_mDeep.set_xlim([2, 5.5])
+                ax_c.set_ylim([2, 4.5])
 
                 save_name = 'output/{0}/{0}'.format(setup_model.id)
                 damp_s = pd.read_csv(save_name + 'damp_s.csv')
@@ -258,3 +273,124 @@ def test_damping(n_iter):
                     )
                 )
                 plt.close(f)
+
+
+def test_MonteCarlo(n_MonteCarlo): #n_iter
+
+    vs_SL14 = pd.read_csv('data/earth_models/CP_SL14.csv',
+                           header=None).values
+    cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
+
+    vs_SLall = pd.read_csv('data/earth_models/SchmandtLinVs_only.csv',
+                            header=None).values.flatten()
+    # To save space, have saved the lat, lon, depth ranges of the Schmandt & Lin
+    # model just as three lines in a csv
+    vs_lats = pd.read_csv('data/earth_models/SL_coords.csv', skiprows=0,
+                          nrows=1, header=None).values.flatten()
+    vs_lons = pd.read_csv('data/earth_models/SL_coords.csv', skiprows=1,
+                          nrows=1, header=None).values.flatten()
+    vs_deps = pd.read_csv('data/earth_models/SL_coords.csv', skiprows=2,
+                          nrows=1, header=None).values.flatten()
+    vs_SLall = vs_SLall.reshape((vs_lats.size, vs_lons.size, vs_deps.size))
+
+    lat = 35.
+    lon = -111.
+    t_LAB = 5.
+    location = (lat, lon)
+    print('*********************** {}N, {}W, {}km LAB'.format(
+        lat, -lon, t_LAB
+    ))
+
+    setup_model = define_models.SetupModel('test2',
+        boundaries=(('Moho', 'LAB'), [3., t_LAB], [0.1, -0.05]),
+        depth_limits=(0, 420),
+    )
+    obs, std_obs, periods = constraints.extract_observations(
+        location, setup_model.id, setup_model.boundaries,
+        setup_model.vpv_vsv_ratio,
+    )
+
+
+    ic = list(range(len(obs) - 2 * len(setup_model.boundaries[0])))
+    i_rf = list(range(ic[-1] + 1, len(obs)))
+
+    #setup_model = setup_model._replace(boundary_names = [])
+    save_name = 'output/{0}/{0}.q'.format(setup_model.id)
+    lat, lon = location
+
+    f = plt.figure()
+    f.set_size_inches((15,7))
+    ax_m150 = f.add_axes([0.35, 0.3, 0.2, 0.6])
+    ax_mDeep = f.add_axes([0.35, 0.1, 0.2, 0.12])
+    ax_c = f.add_axes([0.6, 0.6, 0.35, 0.3])
+    ax_map = f.add_axes([0.84, 0.1, 0.1, 0.2])
+    ax_dc = f.add_axes([0.6, 0.375, 0.35, 0.15])
+    im = ax_map.contourf(np.arange(-119, -100.9, 0.2),
+        np.arange(30, 45.1, 0.2), vs_SL14, levels=20,
+        cmap=plt.cm.RdBu, vmin=4, vmax=4.7)
+    ax_map.plot(lon, lat, 'k*')
+    ax_map.plot(cp_outline[:, 1], cp_outline[:, 0], 'k:')
+    ax_c.set_title(
+        '{:.1f}N, {:.1f}W:  {:.0f} km LAB'.format(lat, -lon, t_LAB)
+    )
+    ax_rf = f.add_axes([0.6, 0.1, 0.2, 0.2])
+
+    # Plot on data and Schmandt & Lin Vs model
+    line, = ax_c.plot(periods, obs[ic],
+                      'k-', linewidth=3, label='data')
+    plots.plot_rf_data_std(obs[i_rf], std_obs[i_rf], 'data', ax_rf)
+    vs_ilon = np.argmin(abs(vs_lons - lon))
+    vs_ilat = np.argmin(abs(vs_lats - lat))
+    ax_m150.plot(vs_SLall[vs_ilat, vs_ilon, :], vs_deps,
+                 'k-', linewidth=3, label='SL14')
+    ax_mDeep.plot(vs_SLall[vs_ilat, vs_ilon, :], vs_deps,
+                  'k-', linewidth=3, label='SL14')
+
+    for trial in range(n_MonteCarlo):
+        m = define_models.setup_starting_model(setup_model, location)
+
+        dc = np.ones_like(periods)
+        old_dc = np.zeros_like(periods)
+        n = -1
+        while np.sum(abs(dc - old_dc)) > 0.005 * periods.size and n < 10:
+            n += 1
+            old_dc = dc.copy()
+
+            print('****** ITERATION ' +  str(n) + ' ******')
+            m = inversion._inversion_iteration(setup_model, m, location)
+
+        # Plot up the model that reached convergence
+        plots.plot_model_simple(m, 'm' + str(n + 1), ax_m150, (0, 150))
+        plots.plot_model_simple(m, 'm' + str(n + 1), ax_mDeep,
+                                (150, setup_model.depth_limits[1]), False)
+        # Run MINEOS on final model
+        params = mineos.RunParameters(freq_max = 1000 / min(periods) + 1)
+        _ = define_models.convert_inversion_model_to_mineos_model(m, setup_model)
+        c, _ = mineos.run_mineos(params, periods, setup_model.id)
+        plots.plot_ph_vel_simple(periods, c, ax_c)
+        dc = [c[i] - obs[ic[i]] for i in range(len(c))]
+        plots.plot_ph_vel_simple(periods, dc, ax_dc)
+        ax_dc.plot(periods, [0] * len(periods), 'k--')
+        plots.make_plot_symmetric_in_y_around_zero(ax_dc)
+        plots.make_plot_symmetric_in_y_around_zero(ax_rf)
+
+
+    save_name = 'output/{0}/{0}'.format(setup_model.id)
+    damp_s = pd.read_csv(save_name + 'damp_s.csv')
+    damp_t = pd.read_csv(save_name + 'damp_t.csv')
+    n = 0
+    for label in ['roughness', 'to_m0', 'to_m0_grad']:
+        ax_d = f.add_axes([0.05 + 0.1 * n, 0.1, 0.05, 0.8])
+        ax_d.plot(damp_s[label], damp_s.Depth, 'ko-', markersize=3)
+        ax_d.plot(damp_t[label], damp_t.Depth, 'ro', markersize=2)
+        ax_d.set(title=label)
+        ax_d.set_ylim([np.cumsum(m.thickness)[-1], 0])
+        ax_d.xaxis.tick_top()
+        n += 1
+
+    f.savefig(
+        '/media/sf_VM_Shared/rftests/MC_{}N_{}W_{}kmLAB.png'.format(
+        lat, -lon, round(t_LAB),
+        )
+    )
+    plt.close(f)

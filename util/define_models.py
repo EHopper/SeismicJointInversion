@@ -290,9 +290,11 @@ def setup_starting_model(setup_model, location):
     thickness, vsv, boundary_inds = _return_evenly_spaced_model(
         t, vs, boundary_inds, setup_model.min_layer_thickness,
     )
+    vsv = _add_random_noise(np.array(vsv), 0.1)
+    thickness = _add_random_noise(np.array(thickness), 2)
 
-    return InversionModel(vsv = np.array(vsv)[np.newaxis].T,
-                          thickness = np.array(thickness)[np.newaxis].T,
+    return InversionModel(vsv = vsv[np.newaxis].T,
+                          thickness = thickness[np.newaxis].T,
                           boundary_inds = np.array(boundary_inds))
 
 def _add_random_noise(a:np.array, sc:float, pdf='normal'):
@@ -300,9 +302,18 @@ def _add_random_noise(a:np.array, sc:float, pdf='normal'):
 
     Arguments:
         a:
-            -
+            - np.array
+        sc:
+            - float
+            - Size of noise to use
+                e.g. standard deviation of normal distribution
+                e.g. maximum value for a uniform distribution
     """
-    pass
+    if pdf == 'normal':
+        return a + np.random.normal(loc=0, scale=sc, size=a.shape)
+    if pdf == 'uniform':
+        return a + np.random.uniform(low=-sc, high=sc, size=a.shape)
+
 
 
 

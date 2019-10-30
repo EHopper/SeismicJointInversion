@@ -82,7 +82,7 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
             [sc] * (len(layers.sediment) - 1) + [sc],
             [sc] * (len(layers.crust) - 1) + [sc],
             [sc] * (len(layers.lithospheric_mantle) - 1) + [sc],
-            [0.5] * len(layers.asthenosphere),
+            [0.05] * len(layers.asthenosphere),
             [sc, sc]
         ),
         layers, damp_s, damp_t, 'to_m0'
