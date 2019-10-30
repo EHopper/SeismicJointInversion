@@ -358,6 +358,9 @@ def test_MonteCarlo(n_MonteCarlo): #n_iter
 
             print('****** ITERATION ' +  str(n) + ' ******')
             m = inversion._inversion_iteration(setup_model, m, location)
+            c = mineos._read_qfile(save_name, periods)
+            dc = np.array([c[i] - obs[ic[i]] for i in range(len(c))])
+
 
         # Plot up the model that reached convergence
         plots.plot_model_simple(m, 'm' + str(n + 1), ax_m150, (0, 150))
