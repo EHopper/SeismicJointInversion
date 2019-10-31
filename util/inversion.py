@@ -99,9 +99,18 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     # Perform inversion
     p_new = _damped_least_squares(p, G, d, W, H_mat, h_vec)
 
-    return _build_inversion_model_from_model_vector(
-        p_new, model, setup_model.min_layer_thickness
+    model = _build_inversion_model_from_model_vector(p_new, model)
+
+    thickness, vsv, bi = define_models._return_evenly_spaced_model(
+        model.thickness, model.vsv, model.boundary_inds,
+        setup_model.min_layer_thickness
     )
+
+    return define_models.InversionModel(
+        np.array(vsv)[:, np.newaxis], np.array(thickness)[:, np.newaxis],
+        np.array(bi)
+    )
+
 
 def _predict_RF_vals(model:define_models.InversionModel):
     """
@@ -176,7 +185,7 @@ def _build_inversion_model_from_model_vector(p:np.array,
 
     if model.boundary_inds.size == 0:
         return define_models.InversionModel(
-            vsv = p.copy(),
+            vsv = np.vstack((p.copy(), model.vsv[-1])),
             thickness = model.thickness,
             boundary_inds = model.boundary_inds
         )
@@ -187,14 +196,10 @@ def _build_inversion_model_from_model_vector(p:np.array,
     new_thickness[model.boundary_inds + 2] -= dt
     new_vsv = np.vstack((p[:-len(model.boundary_inds)].copy(), model.vsv[-1]))
 
-    thickness, vsv, bi = define_models._return_evenly_spaced_model(
-        new_thickness, new_vsv, model.boundary_inds, min_layer_thickness
-    )
-
     return define_models.InversionModel(
-                vsv = np.array(vsv)[np.newaxis].T,
-                thickness = np.array(thickness)[np.newaxis].T,
-                boundary_inds = np.array(bi),
+        vsv = new_vsv,
+        thickness = new_thickness,
+        boundary_inds = model.boundary_inds,
     )
 
 

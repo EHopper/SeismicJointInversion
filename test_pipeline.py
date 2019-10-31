@@ -216,8 +216,8 @@ class PipelineTest(unittest.TestCase):
              (
                 [0., 6., 6., 6., 6., 6., 3., 6., 6., 6., 6., 10.,
                  6., 6., 6., 6., 6.], # expected t
-                [3.0, 3.1, 3.2, 3.3, 3.4, 3.5, 4.0, 4.1, 4.2, 4.3,
-                 4.4, 4.5, 4.6, 4.4, 4.45, 4.5, 4.55, 4.6, 4.65], # expected vs
+                [3.0, 3.1, 3.2, 3.3, 3.4, 3.5, 4.0, 4.15, 4.3,
+                 4.45, 4.6, 4.4, 4.45, 4.5, 4.55, 4.6, 4.65], # expected vs
                 [5, 10] # expected bi
              ),
 
@@ -233,335 +233,220 @@ class PipelineTest(unittest.TestCase):
 
         exp_t, exp_vs, exp_bi = expected
         np.testing.assert_array_equal(thickness, np.array(exp_t))
-        np.testing.assert_array_equal(vsv, np.array(exp_vs))
+        np.testing.assert_allclose(vsv, np.array(exp_vs), rtol=0.01, atol=0.05)
         np.testing.assert_array_equal(bound_inds, np.array(exp_bi))
 
 
 
-    # # test_setup_starting_model
-    # @parameterized.expand([
-    #     (
-    #         'basic model',
-    #         define_models.SetupModel('testcase'),
-    #         define_models.InversionModel(
-    #             vsv = np.array([[
-    #                 3.2       , 3.27230769, 3.34461538, 3.41692308, 3.5       ,
-    #                 4.        , 4.07230769, 4.10566016, 4.13901263, 4.2       ,
-    #                 4.1       , 4.13335247, 4.15500413, 4.17665579, 4.19830745,
-    #                 4.21995911, 4.24161077, 4.26326243, 4.28491409, 4.30656575,
-    #                 4.32821741, 4.34986907, 4.37152073, 4.39317239, 4.41482405,
-    #                 4.43647571]]).T,
-    #             thickness = np.array([[
-    #                 0.        ,  7.83333333,  7.83333333,  7.83333333,  9.,
-    #                 5.        ,  9.        ,  8.75      ,  8.75      , 16.,
-    #                 20.        , 16.        ,  6.        ,  6.        ,  6.,
-    #                 6.        ,  6.        ,  6.        ,  6.        ,  6.,
-    #                 6.        ,  6.        ,  6.        ,  6.        ,  6.,
-    #                 6.        ]]).T,
-    #             boundary_inds = np.array([4, 9])
-    #         )
-    #     ),
-    #     ( # the code doesn't work well for overlapping BLs, or for a shallow
-    #       # velocity constraint that is slower than the PREM surface Vs
-    #       # e.g. see strong negative gradient at top of the output here
-    #       # This may be something to revisit if we were interested in doing
-    #       # crustal structure.
-    #       # If just using Moho and LAB, still need to be careful that the
-    #       # lower bound of the Moho and the upper bound of the LAB don't overlap
-    #       # - code doesn't break if they do, but the model makes no sense
-    #       # Something that should be fixed!
-    #         'complicated model',
-    #         define_models.SetupModel(
-    #             'testcase', (35., -100.), np.array([10, 35., 90., 170]),
-    #             np.array([1, 1, 10, 20]),
-    #             np.array([1, 5, 20, 40]),
-    #             np.array([3.0, 3.2, 3.5, 4.0, 4.2, 4.1, 4.5, 4.6]),
-    #             np.array([0, 400])
-    #         ),
-    #         define_models.InversionModel(
-    #             vsv = np.array([[
-    #                 3.2       , 3.14736842, 3.        , 3.2       , 3.14736842,
-    #                 3.3354386 , 3.5       , 4.        , 4.18807018, 4.19025451,
-    #                 4.19243884, 4.19462318, 4.2       , 4.1       , 4.10218433,
-    #                 4.19578802, 4.5       , 4.6       , 4.69360369, 4.6961469 ,
-    #                 4.69869011, 4.70123332, 4.70377653, 4.70631974, 4.70886295,
-    #                 4.71140616, 4.71394937, 4.71649258, 4.71903579, 4.721579  ,
-    #                 4.72412221, 4.72666542, 4.72920863, 4.73175184, 4.73429505,
-    #                 4.73683826, 4.73938147, 4.74192468, 4.7444679 , 4.74701111,
-    #                 4.74955432, 4.75209753, 4.75464074, 4.75718395, 4.75972716,
-    #                 4.76227037, 4.76481358, 4.76735679, 4.7699]]).T,
-    #             thickness = np.array([[
-    #                 0.  ,  2.5       ,  7.        ,  1.        ,  7.,
-    #                 8.  ,  7.        ,  5.        ,  7.        ,  6.5,
-    #                 6.5 ,  6.5       , 16.        , 20.        , 16.,
-    #                 8.  , 26.        , 40.        , 26.        ,  6.13333333,
-    #                 6.13333333, 6.13333333, 6.13333333, 6.13333333, 6.13333333,
-    #                 6.13333333, 6.13333333, 6.13333333, 6.13333333, 6.13333333,
-    #                 6.13333333, 6.13333333, 6.13333333, 6.13333333, 6.13333333,
-    #                 6.13333333, 6.13333333, 6.13333333, 6.13333333, 6.13333333,
-    #                 6.13333333, 6.13333333, 6.13333333, 6.13333333, 6.13333333,
-    #                 6.13333333, 6.13333333, 6.13333333, 6.13333333]]).T,
-    #             boundary_inds = np.array([2, 6, 12, 16])
-    #         )
-    #     )
-    #
-    # ])
-    # @unittest.skipIf(skip_influx, "Changed this bit but not the test yet")
-    # def test_setup_starting_model(self, name, setup_model, expected):
-    #     """ Test conversion from SetupModel to InversionModel
-    #
-    #     This works as it is told to, but is hampered by...
-    #     1) Can't deal with overlapping boundaries
-    #     2) It is pinned at the surface and at depth to PREM (or whatever other
-    #        ERM it is pointed to in SetupModel)
-    #
-    #     To plot up the models and compare them:
-    #
-    #     plt.plot(model.vsv, np.cumsum(model.thickness), 'b-')
-    #     plt.plot(model.vsv, np.cumsum(model.thickness), 'b.')
-    #     plt.gca().set_ylim(setup_model.depth_limits[[1, 0]])
-    #     top = setup_model.boundary_depths - setup_model.boundary_widths/2
-    #     bot = setup_model.boundary_depths + setup_model.boundary_widths/2
-    #     plt.plot(
-    #         np.hstack((setup_model.boundary_vsv[::2],
-    #                    setup_model.boundary_vsv[1::2])),
-    #         np.hstack((top, bot)), 'r*'
-    #     )
-    #     vslims = np.hstack((min(model.vsv), max(model.vsv)))
-    #     tt = top - setup_model.boundary_depth_uncertainty
-    #     bb = bot + setup_model.boundary_depth_uncertainty
-    #     mlt = setup_model.min_layer_thickness
-    #     for ib in range(len(setup_model.boundary_depths)):
-    #         plt.plot(vslims, tt[[ib, ib]], 'k:')
-    #         plt.plot(vslims, bb[[ib, ib]], 'k:')
-    #         plt.plot(vslims, tt[[ib, ib]] - mlt, ':', color='0.5')
-    #         plt.plot(vslims, bb[[ib, ib]] + mlt, ':', color='0.5')
-    #
-    #     """
-    #     model = define_models.setup_starting_model(setup_model)
-    #     self.assertInversionModelEqual(model, expected)
+    # ************************* #
+    #         mineos.py         #
+    # ************************* #
+
+    # test_mineos
+    @parameterized.expand([
+        (
+            'NoMelt models and results, courtesy Josh Russell, 2019',
+            'NoMeltRayleigh',
+            [15.5556, 16.4706, 20, 25, 32, 40, 50, 60, 80, 100, 120, 140, 150],
+        )
+    ])
+    @unittest.skipIf(skipMINEOS, "MINEOS runs too slow to test every time")
+    def test_mineos(self, name, model_id, periods):
+        """
+
+        card = pd.read_csv('files_for_testing/mineos/' + model_id + '.card',
+                           skiprows=3, header=None, sep='\s+')
+        card.columns = ['r','rho', 'vpv', 'vsv', 'q_kappa', 'q_mu',
+                        'vph', 'vsh', 'eta']
+
+        n = 0
+        p = periods[n]
+        ke = kernels_calc[kernels_calc.period == p]
+        kj = kernels_expected[kernels_expected.period == p]
+        plt.plot(ke.vsv, ke.z)
+        plt.plot(kj.vsv * card.vsv.values[::-1] / phv_calc[n], kj.z, '--')
+        plt.gca().set_ylim([400, 0])
+        maxk = 1.1 * max((kj.loc[kj.z < 400, 'vsv'].max(),
+                    ke.loc[ke.z < 400, 'vsv'].max()))
+        mink = min((kj.loc[kj.z < 400, 'vsv'].min(),
+                    ke.loc[ke.z < 400, 'vsv'].min()))
+        if mink < 0: mink *= 1.1;
+        else: mink *= 0.9
+        plt.gca().set_xlim([mink, maxk])
+        n += 1
+
+        p = periods[n]
+        ke = kernels_calc[kernels_calc.period == p]
+        plt.plot(ke.vsv, ke.z)
+        plt.gca().set_ylim([400, 0])
+        n += 1
+        """
+
+        # All previously calculated test outputs should be saved in
+        expected_output_dir = './files_for_testing/mineos/'
+        # And newly calculated test outputs should be saved in
+        actual_output_dir = 'output/testcase/'
+
+        # Copy the test card into the right directory for the workflow
+        if os.path.exists(actual_output_dir):
+            shutil.rmtree(actual_output_dir)
+
+        os.mkdir(actual_output_dir)
+        shutil.copyfile(expected_output_dir + model_id + '.card',
+                        actual_output_dir + 'testcase.card')
+
+        # Run MINEOS
+        params = mineos.RunParameters(
+            freq_max = 1000 / min(periods) + 1,
+            qmod_path = expected_output_dir + model_id + '.qmod',
+        )
+        phv_calc, kernels_calc = mineos.run_mineos_and_kernels(
+            params, periods, 'testcase'
+        )
+
+        # Load previously calculated test outputs
+        phv_expected = mineos._read_qfile(
+            expected_output_dir + model_id + '.q', periods
+        )
+        # Something super weird with the kernels that Josh sent me
+        kernels_expected = mineos._read_kernels(
+            expected_output_dir + model_id, periods
+        )
+        kernels_expected['type'] = params.Rayleigh_or_Love
+
+        np.testing.assert_allclose(phv_calc, phv_expected, rtol=1e-7)
+
+        kernels_expected.drop(columns=['eta', 'rho'], inplace=True)
+        kernels_calc.drop(columns=['eta', 'rho'], inplace=True)
+        # Make Josh's kernels into m/s units (from 1e-3 m/s)
+        kernels_expected.loc[:, ['vsv', 'vpv', 'vsh', 'vph']] *= 1e3
+        # Make calculated kernels into m/s units (from km/s)
+        kernels_calc.loc[:, ['vsv', 'vpv', 'vsh', 'vph']] *= 1e-3
+        # check_less_precise is the number of sig figs that must match
+        pd.testing.assert_frame_equal(kernels_calc, kernels_expected,
+            check_exact=False, check_less_precise=1,
+        )
 
 
-    #
-    # # ************************* #
-    # #         mineos.py         #
-    # # ************************* #
-    #
-    # # test_mineos
-    # @parameterized.expand([
-    #     (
-    #         'NoMelt models and results, courtesy Josh Russell, 2019',
-    #         'NoMeltRayleigh',
-    #         [15.5556, 16.4706, 20, 25, 32, 40, 50, 60, 80, 100, 120, 140, 150],
-    #     )
-    # ])
-    # @unittest.skipIf(skipMINEOS, "MINEOS runs too slow to test every time")
-    # def test_mineos(self, name, model_id, periods):
-    #     """
-    #
-    #     card = pd.read_csv('files_for_testing/mineos/' + model_id + '.card',
-    #                        skiprows=3, header=None, sep='\s+')
-    #     card.columns = ['r','rho', 'vpv', 'vsv', 'q_kappa', 'q_mu',
-    #                     'vph', 'vsh', 'eta']
-    #
-    #     n = 0
-    #     p = periods[n]
-    #     ke = kernels_calc[kernels_calc.period == p]
-    #     kj = kernels_expected[kernels_expected.period == p]
-    #     plt.plot(ke.vsv, ke.z)
-    #     plt.plot(kj.vsv * card.vsv.values[::-1] / phv_calc[n], kj.z, '--')
-    #     plt.gca().set_ylim([400, 0])
-    #     maxk = 1.1 * max((kj.loc[kj.z < 400, 'vsv'].max(),
-    #                 ke.loc[ke.z < 400, 'vsv'].max()))
-    #     mink = min((kj.loc[kj.z < 400, 'vsv'].min(),
-    #                 ke.loc[ke.z < 400, 'vsv'].min()))
-    #     if mink < 0: mink *= 1.1;
-    #     else: mink *= 0.9
-    #     plt.gca().set_xlim([mink, maxk])
-    #     n += 1
-    #
-    #     p = periods[n]
-    #     ke = kernels_calc[kernels_calc.period == p]
-    #     plt.plot(ke.vsv, ke.z)
-    #     plt.gca().set_ylim([400, 0])
-    #     n += 1
-    #     """
-    #
-    #     # All previously calculated test outputs should be saved in
-    #     expected_output_dir = './files_for_testing/mineos/'
-    #     # And newly calculated test outputs should be saved in
-    #     actual_output_dir = 'output/testcase/'
-    #
-    #     # Copy the test card into the right directory for the workflow
-    #     if os.path.exists(actual_output_dir):
-    #         shutil.rmtree(actual_output_dir)
-    #
-    #     os.mkdir(actual_output_dir)
-    #     shutil.copyfile(expected_output_dir + model_id + '.card',
-    #                     actual_output_dir + 'testcase.card')
-    #
-    #     # Run MINEOS
-    #     params = mineos.RunParameters(
-    #         freq_max = 1000 / min(periods) + 1,
-    #         qmod_path = expected_output_dir + model_id + '.qmod',
-    #     )
-    #     phv_calc, kernels_calc = mineos.run_mineos_and_kernels(
-    #         params, periods, 'testcase'
-    #     )
-    #
-    #     # Load previously calculated test outputs
-    #     phv_expected = mineos._read_qfile(
-    #         expected_output_dir + model_id + '.q', periods
-    #     )
-    #     # Something super weird with the kernels that Josh sent me
-    #     kernels_expected = mineos._read_kernels(
-    #         expected_output_dir + model_id, periods
-    #     )
-    #     kernels_expected['type'] = params.Rayleigh_or_Love
-    #
-    #     np.testing.assert_allclose(phv_calc, phv_expected, rtol=1e-7)
-    #
-    #     kernels_expected.drop(columns=['eta', 'rho'], inplace=True)
-    #     kernels_calc.drop(columns=['eta', 'rho'], inplace=True)
-    #     # Make Josh's kernels into m/s units (from 1e-3 m/s)
-    #     kernels_expected.loc[:, ['vsv', 'vpv', 'vsh', 'vph']] *= 1e3
-    #     # Make calculated kernels into m/s units (from km/s)
-    #     kernels_calc.loc[:, ['vsv', 'vpv', 'vsh', 'vph']] *= 1e-3
-    #     # check_less_precise is the number of sig figs that must match
-    #     pd.testing.assert_frame_equal(kernels_calc, kernels_expected,
-    #         check_exact=False, check_less_precise=1,
-    #     )
-    #
-    #
-    #
-    #
-    # # ************************* #
-    # #       inversion.py        #
-    # # ************************* #
-    #
-    # # test_G
-    # @parameterized.expand([
-    #     (
-    #         'basic model',
-    #         define_models.SetupModel(
-    #             'testcase', (35., -110), np.array([35., 90.]), np.array([3, 10]),
-    #             np.array([5, 20]), np.array([3.5, 4.0, 4.2, 4.1]),
-    #             np.array([0, 200])
-    #         ),
-    #         [10, 20, 30, 40, 60, 80, 100],
-    #         [1.05] + [1] * 26,
-    #     ),
-    #     (
-    #         'more perturbed',
-    #         define_models.SetupModel(
-    #             'testcase', (35., -110), np.array([25., 120.]), np.array([5, 20]),
-    #             np.array([10, 30]), np.array([3.6, 4.0, 4.4, 4.3]),
-    #             np.array([0, 300])
-    #         ),
-    #         [5, 8, 10, 15, 20, 30, 40, 60, 80, 100, 120],
-    #         ([1.05] * 5 + [0.95] * 5 + [1.02] * 5 + [0.99] * 5
-    #         + [1.06] * 5 + [0.97] * 5 + [1.01] * 5 + [1]
-    #         + [1.1] * 2),
-    #     ),
-    #     (
-    #         'small perturbations',
-    #         define_models.SetupModel(
-    #             'testcase', (35., -110), np.array([35., 90.]), np.array([3, 10]),
-    #             np.array([5, 20]), np.array([3.5, 4.0, 4.2, 4.1]),
-    #             np.array([0, 200])
-    #         ),
-    #         [10, 20, 30, 40, 60, 80, 100],
-    #         ([1.005] * 5 + [0.995] * 5 + [1.01] * 5 + [0.997] * 5
-    #         + [1.01] * 4 + [1]
-    #         + [1.05] * 2),
-    #     ),
-    #     (
-    #         'sharp LAB',
-    #         define_models.SetupModel(
-    #             'testcase', (35., -110), np.array([35., 90.]), np.array([3, 10]),
-    #             np.array([5, 10]), np.array([3.5, 4.0, 4.2, 4.1]),
-    #             np.array([0, 200])
-    #         ),
-    #         [10, 20, 30, 40, 60, 80, 100],
-    #         ([1.005] * 5 + [0.995] * 5 + [1.01] * 5 + [0.997] * 5
-    #         + [1.01] * 5 + [1]
-    #         + [1.05] * 2),
-    #     ),
-    #
-    # ])
-    # @unittest.skipIf(skipMINEOS, "MINEOS runs too slow to test every time")
-    # def test_G_sw(self, name, setup_model, periods, model_perturbation):
-    #     """ Test G by comparing the dV from G * dm to the dV output from MINEOS.
-    #
-    #     From a given starting model, calculate phase velocities and kernels
-    #     in MINEOS, and convert to the inversion G.
-    #
-    #     Convert the starting model to the column vector.  Perturb the column
-    #     vector in some way, and then convert it back to a MINEOS card.  Rerun
-    #     MINEOS to get phase velocities.
-    #
-    #     As G is dV/dm, then G * dm == mineos(m_perturbed) - mineos(m0).
-    #
-    #     Plot this comparison:
-    #     plt.figure(figsize=(10,8))
-    #     a1 = plt.subplot(1, 3, 1)
-    #     plt.plot(model.vsv, np.cumsum(model.thickness), 'b-o')
-    #     plt.plot(model_perturbed.vsv, np.cumsum(model_perturbed.thickness), 'r-o')
-    #     plt.title('Vsv Models\nblue: original; red: perturbed')
-    #     plt.gca().set_ylim([200, 0])
-    #     plt.xlabel('Vsv (km/s)')
-    #     plt.ylabel('Depth (km)')
-    #     a2 = plt.subplot(2, 2, 2)
-    #     im = plt.scatter(dc_mineos, dc_from_Gdm, 10, periods)
-    #     plt.xlabel('dc from MINEOS')
-    #     plt.ylabel('dc from G calculation')
-    #     cbar = plt.gcf().colorbar(im)
-    #     cbar.set_label('Periods (s)', rotation=90)
-    #     a3 = plt.subplot(2, 2, 4)
-    #     im = plt.scatter(periods,
-    #                      (dc_from_Gdm - dc_mineos) / dc_mineos, 10, dc_mineos)
-    #     plt.xlabel('Period (s)')
-    #     plt.ylabel('(Gdm - dc) / dc')
-    #     cbar2 = plt.gcf().colorbar(im)
-    #     cbar2.set_label('dc from MINEOS (km/s)', rotation=90)
-    #     """
-    #     # Calculate the G matrix from a starting model
-    #     model = define_models.setup_starting_model(setup_model)
-    #     # No need for output on MINEOS model as saved to .card file
-    #     _ = define_models.convert_inversion_model_to_mineos_model(
-    #         model, setup_model
-    #     )
-    #     params = mineos.RunParameters(
-    #         freq_max = 1000 / min(periods) + 1, max_run_N = 5,
-    #     )
-    #     ph_vel_pred, kernels = mineos.run_mineos_and_kernels(
-    #         params, periods, setup_model.id
-    #     )
-    #     G = partial_derivatives._build_partial_derivatives_matrix_sw(
-    #         kernels, model, setup_model,
-    #     )
-    #
-    #     # Apply the perturbation
-    #     p = inversion._build_model_vector(model)
-    #     p_perturbed = p.copy() * np.array(model_perturbation)[:, np.newaxis]
-    #     perturbation = p_perturbed - p
-    #     model_perturbed = inversion._build_inversion_model_from_model_vector(
-    #         p_perturbed, model
-    #     )
-    #     _ = define_models.convert_inversion_model_to_mineos_model(
-    #         model_perturbed, setup_model._replace(id='testcase_perturbed')
-    #     )
-    #     ph_vel_perturbed, _ = mineos.run_mineos(
-    #         params, periods, 'testcase_perturbed'
-    #     )
-    #
-    #     # calculate dv
-    #     dv_mineos = ph_vel_perturbed - ph_vel_pred
-    #     dv_from_Gdm = np.matmul(G, perturbation).flatten()
-    #
-    #     np.testing.assert_allclose(
-    #         dv_mineos, dv_from_Gdm, atol=0.01, rtol=0.05,
-    #     )
+
+
+    # ************************* #
+    #       inversion.py        #
+    # ************************* #
+
+    # test_G
+    @parameterized.expand([
+        (
+            'basic model',
+            define_models.SetupModel('testcase', depth_limits=(0, 200)),
+            (35, -110),
+            [10, 20, 30, 40, 60, 80, 100],
+            [1.05] + [1] * 33,
+        ),
+        (
+            'more perturbed',
+            define_models.SetupModel('testcase', depth_limits=(0, 150)),
+            (35, -120),
+            [5, 8, 10, 15, 20, 30, 40, 60, 80, 100, 120],
+            ([1.05] * 5 + [0.95] * 5 + [1.02] * 5 + [0.99] * 5 + [1.06] * 2 + [1]
+            + [1.1] * 2),
+        ),
+        (
+            'small perturbations',
+            define_models.SetupModel('testcase', depth_limits=(0, 175)),
+            (35, -100),
+            [10, 20, 30, 40, 60, 80, 100],
+            ([1.005] * 5 + [0.995] * 5 + [1.01] * 5 + [0.997] * 5
+            + [1.001] * 4 + [0.999] * 2 + [1]
+            + [1.05] * 2),
+        ),
+        (
+            'sharp LAB',
+            define_models.SetupModel(
+                'testcase', boundaries=(('Moho', 'LAB'), [3., 3.]),
+                depth_limits=(0, 150)
+            ),
+            (35, -110),
+            [10, 20, 30, 40, 60, 80, 100],
+            ([1.005] * 5 + [0.995] * 5 + [1.01] * 5 + [0.997] * 5 + [1.0001] * 4 + [1]
+            + [1.05] * 2),
+        ),
+    ])
+    @unittest.skipIf(skipMINEOS, "MINEOS runs too slow to test every time")
+    def test_G_sw(self, name, setup_model, location, periods, model_perturbation):
+        """ Test G by comparing the dV from G * dm to the dV output from MINEOS.
+
+        From a given starting model, calculate phase velocities and kernels
+        in MINEOS, and convert to the inversion G.
+
+        Convert the starting model to the column vector.  Perturb the column
+        vector in some way, and then convert it back to a MINEOS card.  Rerun
+        MINEOS to get phase velocities.
+
+        As G is dV/dm, then G * dm == mineos(m_perturbed) - mineos(m0).
+
+        Plot this comparison:
+        plt.figure(figsize=(10,8))
+        a1 = plt.subplot(1, 3, 1)
+        plt.plot(model.vsv, np.cumsum(model.thickness), 'b-o')
+        plt.plot(model_perturbed.vsv, np.cumsum(model_perturbed.thickness), 'r-o')
+        plt.title('Vsv Models\nblue: original; red: perturbed')
+        plt.gca().set_ylim([200, 0])
+        plt.xlabel('Vsv (km/s)')
+        plt.ylabel('Depth (km)')
+        a2 = plt.subplot(2, 2, 2)
+        im = plt.scatter(dc_mineos, dc_from_Gdm, 10, periods)
+        plt.xlabel('dc from MINEOS')
+        plt.ylabel('dc from G calculation')
+        cbar = plt.gcf().colorbar(im)
+        cbar.set_label('Periods (s)', rotation=90)
+        a3 = plt.subplot(2, 2, 4)
+        im = plt.scatter(periods,
+                         (dc_from_Gdm - dc_mineos) / dc_mineos, 10, dc_mineos)
+        plt.xlabel('Period (s)')
+        plt.ylabel('(Gdm - dc) / dc')
+        cbar2 = plt.gcf().colorbar(im)
+        cbar2.set_label('dc from MINEOS (km/s)', rotation=90)
+        """
+        # Calculate the G matrix from a starting model
+        np.random.seed(42) # need to set the seed because model length can be
+                           # different depending on the random variation
+        model = define_models.setup_starting_model(setup_model, location)
+        # No need for output on MINEOS model as saved to .card file
+        _ = define_models.convert_inversion_model_to_mineos_model(
+            model, setup_model
+        )
+        params = mineos.RunParameters(
+            freq_max = 1000 / min(periods) + 1, max_run_N = 5,
+        )
+        ph_vel_pred, kernels = mineos.run_mineos_and_kernels(
+            params, periods, setup_model.id
+        )
+        G = partial_derivatives._build_partial_derivatives_matrix_sw(
+            kernels, model, setup_model,
+        )
+
+        # Apply the perturbation
+        p = inversion._build_model_vector(model)
+        p_perturbed = p.copy() * np.array(model_perturbation)[:, np.newaxis]
+        perturbation = p_perturbed - p
+        model_perturbed = inversion._build_inversion_model_from_model_vector(
+            p_perturbed, model, setup_model.min_layer_thickness
+        )
+        _ = define_models.convert_inversion_model_to_mineos_model(
+            model_perturbed, setup_model._replace(id='testcase_perturbed')
+        )
+        ph_vel_perturbed, _ = mineos.run_mineos(
+            params, periods, 'testcase_perturbed'
+        )
+
+        # calculate dv
+        dc_mineos = ph_vel_perturbed - ph_vel_pred
+        dc_from_Gdm = np.matmul(G, perturbation).flatten()
+
+        np.testing.assert_allclose(
+            dc_mineos, dc_from_Gdm, atol=0.01, rtol=0.05,
+        )
     #
     #
     # # ************************* #
