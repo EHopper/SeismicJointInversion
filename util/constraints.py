@@ -319,6 +319,6 @@ def get_vels_Crust1(location):
             m_vs += [vs[ib]]
             m_t += [t]
         ib += 1
-    m_vs += [m_vs[-1]]
+    m_vs += [vs[ib]]#[m_vs[-1]]
 
     return m_t, m_vs

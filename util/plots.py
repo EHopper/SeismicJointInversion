@@ -30,10 +30,10 @@ def plot_model(model, label, ax, depth_range=(), iflegend=True):
 
 def plot_model_simple(model, label, ax, depth_range=(), iflegend=True):
     depth = np.cumsum(model.thickness)
-    line, = ax.plot(model.vsv, depth, linestyle='-', color='#e0e0e0',
+    line, = ax.plot(model.vsv, depth, linestyle='-',
                     alpha=0.5, label=label)
     ax.plot(model.vsv[model.boundary_inds], depth[model.boundary_inds],
-            'o', markersize=1,  color='#e0e0e0', alpha=0.5)
+            'o', markersize=2,  alpha=0.5, color=line.get_color())
     if depth_range:
         ax.set_ylim([depth_range[1], depth_range[0]])
     else:
@@ -50,7 +50,7 @@ def plot_ph_vel(periods, c, label, ax):
     ax.legend()
 
 def plot_ph_vel_simple(periods, c, ax):
-    ax.plot(periods, c, '-', color='#e0e0e0', alpha=0.5)
+    ax.plot(periods, c, '-', alpha=0.5) #color='#706F6F',
     ax.set(xlabel='Period (s)', ylabel='Phase Velocity (km/s)')
 
 def plot_dc(periods, dc, ax):

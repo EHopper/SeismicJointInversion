@@ -377,7 +377,7 @@ def test_MonteCarlo(n_MonteCarlo): #n_iter
         plots.make_plot_symmetric_in_y_around_zero(ax_dc)
         plots.make_plot_symmetric_in_y_around_zero(ax_rf)
 
-
+    print(trial)
     save_name = 'output/{0}/{0}'.format(setup_model.id)
     damp_s = pd.read_csv(save_name + 'damp_s.csv')
     damp_t = pd.read_csv(save_name + 'damp_t.csv')

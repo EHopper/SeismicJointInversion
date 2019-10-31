@@ -56,10 +56,6 @@ class SetupModel(typing.NamedTuple):
                       inversion (though we will allow the depth of the boundary layer
                       as a whole to change).
                     - Default = [3., 10.]
-                boundary dVs:
-                    - Units: dimensionless
-                    - Fractional change in Vs at each of the boundaries,
-                    - Default = [0.05, -0.02]
         depth_limits:
             - (length 2) tuple
             - Units:    km
@@ -97,8 +93,8 @@ class SetupModel(typing.NamedTuple):
     """
 
     id: str
-    boundaries: tuple = (('Moho', 'LAB'), [3., 10.], [0.05, -0.02])
-    depth_limits: tuple = (0, 300)
+    boundaries: tuple = (('Moho', 'LAB'), [3., 10.])
+    depth_limits: tuple = (0, 400)
     min_layer_thickness: float = 6.
     vsv_vsh_ratio: float = 1.
     vpv_vsv_ratio: float = 1.75
@@ -235,47 +231,48 @@ def setup_starting_model(setup_model, location):
     else:
         print('This model ID has already been used!')
 
-    bnames, bwidths, bdvs = setup_model.boundaries
-    n_bounds = len(bnames)
-    boundary_inds = []
-
     # Load in Crust 1.0 crustal structure, defined globally (but coarsely)
     t, vs = constraints.get_vels_Crust1(location)
 
-    # Load in observed constraints
-    rfs = constraints._extract_rf_constraints(
-        location, setup_model.id, setup_model.boundaries,
-        setup_model.vpv_vsv_ratio
+    # Add on the boundary layers at arbitrary depths (will be fixed by inversion)
+    bi = _append_BLs_to_surface_starting_model(t, vs, setup_model)
+
+    # And fill in to the base of the model
+    _fill_in_base_of_model(t, vs, setup_model)
+
+    # Add random noise
+    _add_noise_to_starting_model(t, vs, bi)
+
+    # Fix the model spacing
+    thickness, vsv, boundary_inds = _return_evenly_spaced_model(
+        np.array(t), np.array(vs), np.array(bi), setup_model.min_layer_thickness,
     )
 
-    # Check if we are inverting for the Moho & correct Crust 1 accordingly
-    if 'Moho' in bnames:
-        Moho_ind = bnames.index('Moho')
-        Moho_depth_ish = int(rfs.loc[Moho_ind, 'tt'] * 3.5)
-        if Moho_depth_ish > sum(t[:-1]):
-            t[-1] = Moho_depth_ish - sum(t[:-1])
+    return InversionModel(vsv = vsv[np.newaxis].T,
+                          thickness = thickness[np.newaxis].T,
+                          boundary_inds = np.array(boundary_inds))
 
-        # FOR NOW, assuming that Moho_ind = 0, i.e. no BLs within the crust!
-        boundary_inds += [len(t) - 1]
-        t += [bwidths[Moho_ind]]
-        vs += [vs[-1] * (1 + bdvs[Moho_ind])]
-    else:
-        Moho_ind = -1
+
+def _append_BLs_to_surface_starting_model(t, vs, setup_model):
+
+    _, bwidths = setup_model.boundaries
+    n_bounds = len(bwidths)
+    boundary_inds = []
 
     # Add in all BLs beneath the Moho (i.e. LAB)
-    for i_b in range(Moho_ind + 1, n_bounds):
-        # boundary[i_b] is our boundary of interest
-        bound_depth_ish = np.round(rfs.loc[i_b, 'tt'] * 4.2)
-
+    for i_b in range(n_bounds):
         boundary_inds += [len(t)]
         # Top of the boundary layer
-        t += [bound_depth_ish - sum(t)]
+        t += [2 * setup_model.min_layer_thickness]
         vs += [vs[-1]]
         # Bottom of the boundary layer
         t += [bwidths[i_b]]
-        vs += [vs[-1] * (1 + bdvs[i_b])]
+        vs += [vs[-1]] # * (1 + bdvs[i_b])]
 
-    # And fill in to the base of the model
+    return boundary_inds
+
+def _fill_in_base_of_model(t, vs, setup_model):
+
     ref_model =  pd.read_csv(setup_model.ref_card_csv_name)
     ref_depth = (ref_model['radius'].iloc[-1] - ref_model['radius']) * 1e-3
     ref_vs = ref_model['vsv'] * 1e-3
@@ -287,47 +284,16 @@ def setup_starting_model(setup_model, location):
     t += [setup_model.depth_limits[1] - sum(t)]
     vs += [np.interp(setup_model.depth_limits[1], ref_depth, ref_vs)]
 
-    thickness, vsv, boundary_inds = _return_evenly_spaced_model(
-        t, vs, boundary_inds, setup_model.min_layer_thickness,
-    )
-    vsv = _add_random_noise(np.array(vsv), 0.1)
-    thickness = _add_random_noise(np.array(thickness), 2)
-
-    return InversionModel(vsv = vsv[np.newaxis].T,
-                          thickness = thickness[np.newaxis].T,
-                          boundary_inds = np.array(boundary_inds))
-
-def _add_random_noise(a:np.array, sc:float, pdf='normal'):
-    """ Add random noise to an array of mean 0, scaled by sc.
-
-    Arguments:
-        a:
-            - np.array
-        sc:
-            - float
-            - Size of noise to use
-                e.g. standard deviation of normal distribution
-                e.g. maximum value for a uniform distribution
-    """
-    if pdf == 'normal':
-        return a + np.random.normal(loc=0, scale=sc, size=a.shape)
-    if pdf == 'uniform':
-        return a + np.random.uniform(low=-sc, high=sc, size=a.shape)
-
-
-
+    return
 
 
 def _return_evenly_spaced_model(t, vs, boundary_inds, min_layer_thickness):
     """
     Important to keep the boundary layer thicknesses the same.
     """
-    if type(t) == np.ndarray:
-        t = t.flatten().tolist()
-    if type(vs) == np.ndarray:
-        vs = vs.flatten().tolist()
-    if type(boundary_inds) == np.ndarray:
-        boundary_inds = boundary_inds.flatten().tolist()
+    t = t.flatten().tolist()
+    vs = vs.flatten().tolist()
+    boundary_inds = boundary_inds.flatten().tolist()
 
     # Set uppermost value of t
     nt = [t[0]]
@@ -356,7 +322,8 @@ def _return_evenly_spaced_model(t, vs, boundary_inds, min_layer_thickness):
 
     # For the deepest BL to the base of the model
     inter_boundary_depth = sum(t) - sum(t[:boundary_inds[-1] + 2])
-    n_layers = int(inter_boundary_depth // min_layer_thickness)
+    # need at least one layer
+    n_layers = max(int(inter_boundary_depth // min_layer_thickness), 1)
     layer_t = inter_boundary_depth / n_layers
     for il in range(n_layers - 1):
         nt += [layer_t]
@@ -364,7 +331,7 @@ def _return_evenly_spaced_model(t, vs, boundary_inds, min_layer_thickness):
                                      sum(nt) + layer_t / 2)]
     nt += [layer_t]
     nv += [vs[-1]]
-    return nt, nv, nbi
+    return np.array(nt), np.array(nv), np.array(nbi)
 
 
 def _mean_val_in_interval(v, t, d1, d2):
@@ -377,6 +344,45 @@ def _mean_val_in_interval(v, t, d1, d2):
     return np.mean(interp_vs[np.logical_and(
                 d1 <= interp_d, interp_d < d2
             )])
+
+def _add_noise_to_starting_model(t, vs, bi):
+    """
+    """
+
+    # Perturb all Vs apart from last value, which is pinned to REM
+    vs[:-1] = _add_random_noise(np.array(vs[:-1]), 0.1)
+
+    # For thickness, as layer thickness can be very different, scale
+    # perturbations by thickness of layer
+    # Note: do not want to change t[0] (depth to top of model, e.g. 0)
+    # or the thicknesses of any of the BLs
+    # and want to maintain total thickness of inversion model
+    #  i.e. sum(t) = sum(t after perturbations)
+    max_depth = sum(t)
+    for i in range(1, len(t) - 1):
+        if i - 1 not in bi:
+            t[i] = _add_random_noise(np.array(t[i]), np.array(t[i]) / 4)
+    t[-1] = max_depth - sum(t[:-1])
+
+    return
+
+def _add_random_noise(a:np.array, sc:float, pdf='normal'):
+    """ Add random noise to an array of mean 0, scaled by sc.
+
+    Arguments:
+        a:
+            - np.array
+        sc:
+            - float
+            - Size of noise to use
+                e.g. standard deviation of normal distribution
+                e.g. maximum value for a uniform distribution
+    """
+    if pdf == 'normal':
+        return a + np.random.normal(loc=0, scale=sc, size=a.shape)
+    if pdf == 'uniform':
+        return a + np.random.uniform(low=-sc, high=sc, size=a.shape)
+
 
 def convert_inversion_model_to_mineos_model(inversion_model, setup_model,
                                             **kwargs):
@@ -430,7 +436,7 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model,
     q_kappa = np.interp(radius, ref_model['radius'], ref_model['q_kappa'])
     rho = np.interp(radius, ref_model['radius'], ref_model['rho'])
 
-    bnames, _, _ = setup_model.boundaries
+    bnames, _ = setup_model.boundaries
     if 'Moho' in bnames:
         Moho_ind = (inversion_model.boundary_inds[bnames.index('Moho')])
         Moho_depth = np.sum(inversion_model.thickness[:Moho_ind + 1])
@@ -602,7 +608,7 @@ def _set_model_indices(setup_model, model, **kwargs):
 
     sed_inds = [list(model.vsv).index(v) for v in model.vsv if v <= 3]
 
-    bnames, _, _ = setup_model.boundaries
+    bnames, _ = setup_model.boundaries
     if 'Moho' in bnames:
         moho_ind = model.boundary_inds[bnames.index('Moho')]
     else:
