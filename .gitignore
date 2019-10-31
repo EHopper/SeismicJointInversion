@@ -3,3 +3,7 @@
 *.pyc
 *.xyz
 *.png
+data/*
+*junk*
+other/*
+output/*
