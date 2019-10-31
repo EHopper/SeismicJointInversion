@@ -418,11 +418,14 @@ def _build_constraint_damp_original_gradient(
     As such, H is set to 1/V_node1 in the node 1 column, and to
     1/V_node2 in the node 2 column; h is zero always.
 
-    This will not work around our boundary layers because the thickness of
-    the layer above, the boundary layer, and the layer below can all change -
-    so the gradient is dependent on more than just the values of velocity!
-    However, we don't want to damp the gradient in our boundary layer that
-    much, and perhaps it is ok to leave out the adjacent layers too?
+    Note that this only considers a single gradient between two adjacent Vs
+    points at a time, so having adjacent layers of different thickness is
+    not an issue - all of this damping is for a single layer thickness.
+
+    However, if layer thickness can change (i.e. the layer above and the layer
+    below our boundary layer, t[model.bi] and t[model.bi + 2]), there is an
+    issue.  We're going to assume that the change in layer thickness is
+    going to be relatively small - perhaps this is ok??
 
     Arguments:
         model:
@@ -437,6 +440,12 @@ def _build_constraint_damp_original_gradient(
               1/V_node2 in the node 2 column.
             - Note that only (n_depth_points - 1) rows in this matrix,
               as every constraint is for two adjacent depth points.
+            - As last velocity point is fixed, to constrain the gradient at the
+              base of the model is just to damp to the last alterable value of
+              vs, i.e. last column for Vs should be
+                    1/V_node_end * V_node_end_new = 1
+                    H[-1, -1] * m[-1] = h[-1]
+                        - note this notation assumes no BLs at the end of m
         h:
             - (n_depth_points - 1, 1) np.array
             - Constraints vector, h, in H * m = h.
@@ -446,9 +455,9 @@ def _build_constraint_damp_original_gradient(
             - Label for this constraint.
     """
 
-    n_depth_points = model.vsv.size - 1
+    n_depth_points = model.vsv.size - 1 # number of Vs nodes inverted for
 
-    H = np.zeros((n_depth_points - 1,
+    H = np.zeros((n_depth_points,
                   n_depth_points + model.boundary_inds.size))
 
     for i_d in range(n_depth_points - 1):
@@ -457,21 +466,11 @@ def _build_constraint_damp_original_gradient(
         H[i_d, [i_d, i_d+1]] = np.hstack((
             1 / model.vsv[i_d], -1 / model.vsv[i_d + 1]
         ))
-    H[-1, -1] = 1 / model.vsv[-2] - 1
 
-    # Remove constraints around discontinuities
-    do_not_damp = list(model.boundary_inds)
-    H[do_not_damp, :] = 0
+    H[n_depth_points - 1, n_depth_points - 1] = 1. / model.vsv[n_depth_points - 1]
 
-    h = np.zeros((n_depth_points - 1, 1))
+    h = np.zeros((n_depth_points, 1))
+    h[-1] = 1  # to apply damping equally, need to weight last inverted Vs
+               # point to m0 rather than m0 grad - deepest Vs is fixed
 
     return H, h, 'to_m0_grad'
-
-def _build_constraint_damp_min_thickness(setup_model, p):
-    """ Damp thickness of variable layers to pre-set minimum.
-
-    In H * m = h, we want to end up with
-            exp(t_i - setup_model.boundary_depth_uncertainty[i]) = 1
-            exp(setup_model.boundary_depth_uncertainty[i] - t_i) = 1
-
-    """
