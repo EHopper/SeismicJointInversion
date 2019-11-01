@@ -821,36 +821,17 @@ class PipelineTest(unittest.TestCase):
             pd.DataFrame({'simple_square': [1] * 2 + [2] + [4, 5, 6, 7]}),
             pd.DataFrame({'simple_square': [1, 2]}),
             np.array([
-                [1, 2, 6, 4, 10, 18, 7, 2, 6],
-                [0, 1, 4, 0, 5, 12, 0, 1, 4],
-                [1, 8, 6, 4, 10, 18, 7, 2, 6],
-                [0, 1, 4, 0, 5, 12, 0, 1, 4],
-                [1, 2, 4, 4, 10, 18, 7, 2, 6],
-                [1, 2, 6, 4, 10, 18, 7, 2, 6],
-                [0, 1, 4, 0, 5, 12, 0, 1, 4],
-                [1, 2, 6, 4, 10, 18, 7, 2, 6],
-                [0, 8, 4, 0, 5, 12, 0, 1, 4]
-            ]),
-            np.array([10, 20, 20, 80, 50, 180, 70, 40, 20])[:, np.newaxis],
-        ),
-        (
-            'fewer_constraints',
-            np.array([
                 [1, 2, 3, 1, 2, 3, 1, 2, 3],
                 [0, 1, 2, 0, 1, 2, 0, 1, 2],
+                [2, 16, 6, 2, 4, 6, 2, 4, 6],
+                [0, 4, 8, 0, 4, 8, 0, 4, 8],
+                [5, 10, 10, 5, 10, 15, 5, 10, 15],
+                [6, 12, 18, 6, 12, 18, 6, 12, 18],
+                [0, 7, 14, 0, 7, 14, 0, 7, 14],
+                [1, 2, 3, 1, 2, 3, 1, 2, 3],
+                [0, 16, 4, 0, 2, 4, 0, 2, 4]
             ]),
-            np.array([10, 20])[:, np.newaxis],
-            pd.DataFrame({'fewer_constraints': [1] * 2 + [2] + [4, 5, 6, 7]}),
-            pd.DataFrame({'fewer_constraints': [1, 2]}),
-            np.array([
-                [1, 2, 6, 4, 10, 18, 7, 2, 6],
-                [0, 1, 4, 0, 5, 12, 0, 1, 4],
-            ]),
-            np.array([10, 20])[:, np.newaxis], # Note that this is the expected
-                                               # behaviour (h unchanged), but
-                                               # it will cause issues unless
-                                               # h == 0 always OR it has
-                                               # already been damped
+            np.array([10, 20, 20, 80, 50, 180, 70, 40, 20])[:, np.newaxis],
         ),
     ])
     # @unittest.skipIf(skip_influx, "Changed this bit but not the test yet")
@@ -886,23 +867,26 @@ class PipelineTest(unittest.TestCase):
                 [0,  0,  0,  0,  0,  0,  0,  15./2,  -25./2,  10./2,  0,  0,  0,  0],
                 [0,  0,  0,  0,  0,  0,  0,  0,  12./2, -27./2,  15./2,  0,  0,  0],
                 [0,  0,  0,  0,  0,  0,  0,  0,  0,  6,  -18,  12,  0,  0],
+                [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  50,  -56,  0,  0],
+                [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
                 [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
             ]),
-            np.array([0] * 12)[:, np.newaxis],
+            np.array([0] * 11 + [-6 * 4.42104] + [0] * 2)[:, np.newaxis],
         ),
     ])
     # @unittest.skipIf(skip_influx, "Changed this bit but not the test yet")
     def test_build_smoothing_constraints(self, name, model,
                                          expected_H, expected_h):
 
-        H, h, label = weights._build_smoothing_constraints(model)
+        sm = define_models.SetupModel('junk') # need PREM path only
+        H, h, label = weights._build_smoothing_constraints(model, sm)
 
         self.assertEqual(label, 'roughness')
         np.testing.assert_array_equal(H, expected_H)
         np.testing.assert_array_equal(h, expected_h)
 
-        n_layers = expected_h.shape[0]
         n_bls = model.boundary_inds.shape[0]
+        n_layers = expected_h.shape[0] - n_bls
         damp_s = pd.DataFrame({'Depth': np.cumsum(model.thickness)})
         damp_t = pd.DataFrame({'Depth': [0] * n_bls})
         layers = define_models.ModelLayerIndices(
@@ -957,8 +941,10 @@ class PipelineTest(unittest.TestCase):
                 [0, 0, 0, 0, 1./5., -1./6., 0, 0, 0],
                 [0, 0, 0, 0, 0, 1./6., -1./7., 0, 0],
                 [0, 0, 0, 0, 0, 0, 1./7., 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0],
             ]),
-            np.array([0, 0, 0, 0, 0, 0, 1])[:, np.newaxis],
+            np.array([0, 0, 0, 0, 0, 0, 1, 0, 0])[:, np.newaxis],
         ),
     ])
     def test_build_constraint_damp_original_gradient(self, name, model,

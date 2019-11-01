@@ -71,12 +71,12 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
     sc = 0.1
     _set_layer_values((sc, sc, sc, sc, sc), layers, damp_s, damp_t, 'roughness')
     roughness_mat, roughness_vec = _damp_constraints(
-        _build_smoothing_constraints(model), damp_s, damp_t
+        _build_smoothing_constraints(model, setup_model), damp_s, damp_t
     )
 
     # Linear constraint equations
     # Damp towards starting model
-    sc = 0
+    sc = 0#5
     _set_layer_values(
         (
             [sc] * (len(layers.sediment) - 1) + [sc],
@@ -90,6 +90,7 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
     damp_to_m0_mat, damp_to_m0_vec = _damp_constraints(
         _build_constraint_damp_to_m0(p), damp_s, damp_t
     )
+    sc = 0.
     # Damp towards starting model gradients in Vs
     _set_layer_values((sc, sc, sc, sc, sc), layers, damp_s, damp_t, 'to_m0_grad')
     damp_to_m0_grad_mat, damp_to_m0_grad_vec = _damp_constraints(
@@ -140,17 +141,20 @@ def _damp_constraints(
     ):
     """ Apply layer specific damping to H and h.
 
-    This is done one model parameter at a time - i.e. assumes that H is only
-    (n_constraints x n_depth_points), NOT n_model_points wide!!
-
-    Damping parameters are set for individual layers.
+    This assumes that in H, every row gives a constraint on the corresponding
+    model point.  That is, if there is no constraint e.g. on gradient in a
+    boundary layer, H is required to have a row of zeros corresponding to that
+    particular model point so that the size is right for this scaling.
 
     Arguments:
         H_h_label:
             - tuple of (H, h, label)
             H:
-                - (n_constraint_equations, n_model_points) np.array
+                - (n_model_points, n_model_points) np.array
                 - Constraints matrix in H * m = h.
+                - MUST be a square matrix for this layer-specific scaling
+                  to work!  Every row corresponds to a constraint on the
+                  corresponding model parameter.
             h:
                 - (n_constraint_equations, 1) np.array
                 - Constraints vector in H * m = h.
@@ -178,52 +182,13 @@ def _damp_constraints(
                 - Damped constraints vector in H * m = h.
     """
 
-    # A note on multiplication in numpy:
-    #   numpy does everything element-wise unless you explicitly tell it not
-    #   to, e.g. by using np.matmul() to do matrix multiplication.
-    #   This means that it will broadcast arrays by repeating rows or columns
-    #   so they are the same shape as the matrix they are being multiplied by.
-    #   This broadcasting is ONLY done for matrices where one of the dimensions
-    #   is equal to 1 (i.e. row (1, n) or column (n, 1) vectors) OR for 1D
-    #   numpy arrays (i.e. (n,) arrays), which are treated as row vectors.
-    #   If the arrays cannot be broadcast to the same shape, the * operator
-    #   will return an error. Note that this element-wise behaviour means all
-    #   numpy * operations are commutative!
-    #   As such, for any c = a * b...
-    #       a.shape | b.shape | c.shape      | Result
-    # ______________|_________|______________|____________________________
-    #       (n,)    | (m,)    | (n==m,)      |  [a_1*b_1, ..., a_n*b_m]
-    #       (1, n)  | (m,)*   | (n==m, 1)    |  [[a_1*b_1, ..., a_n*b_m]]
-    #       (n, 1)  | (m,)*   | (n, m)       |  [[a_1*b_1, ..., a_1*b_m],
-    #               |         |              |   [a_n*b_1, ..., a_n*b_m]]
-    #       (n,)* **| (m, 1)  | (n, m)       |  [[a_1*b_1, ..., a_n*b_1],
-    #               |         |              |   [a_1*b_m, ..., a_n*b_m]]
-    #       (n, m)  | (p,)*   | (n, m==p)    |  [[a_11*b_1, ..., a_1m*b_p],
-    #               |         |              |   [a_n1*b_1, ..., a_nm*b_p]]
-    #       (n, m)  | (p, 1)  | (n==p, m)    |  [[a_11*b_1, ..., a_1m*b_1],
-    #               |         |              |   [a_n1*b_n, ..., a_nm*b_p]]
-    #       (n, m)  | (p, q)  | (n==p, m==q) |  [[a_11*b_11, ..., a_1m*b_1p],
-    #               |         |              |   [a_n1*b_p1, ..., a_nm*b_pq]]
-    #
-    #       * Same result for array.shape = (1, len) as (len,)
-    #               i.e. row vector acts the same as 1D array
-    #       ** This is to show commutative behaviour with example in row above.
-
     H, h, label = H_h_label
 
-    # (n_constraint_equations, n_depth_points_in_layer) H
-    #   * (n_depth_points_in_layer, ) layer_damping
-    # As depth increases by column in H, it will do element-wise
-    # multiplication with layer_damping (which is treated as a row vector)
-    # For h, depth increases by row, so layer_damping is the
-    # wrong orientation - have to add an axis (cannot transpose as
-    # it starts off as 1D)
+    # the values from a pd.DataFrame come out as (n_vals, ) np arrays
     all = np.concatenate((damping_s[label].values, damping_t[label].values))
+    all = all[:, np.newaxis]
     H *= all
-    # h is assumed to either have n_constraints = n_model_params
-    # or to be 0 always
-    if h.shape[0] == H.shape[1]:
-        h *= all[:, np.newaxis]
+    h *= all
 
     return H, h
 
@@ -252,43 +217,50 @@ def _build_error_weighting_matrix(obs_std):
 
     # If standard deviation of data is missing (= 0), fill in with guess
     obs_std = obs_std.flatten().copy()
-    obs_std[obs_std == 0] = 0.15
+    obs_std[obs_std == 0] = 0.05
 
 
     return np.diag(1 / obs_std)
 
 def _build_smoothing_constraints(
-        model:define_models.InversionModel) -> (np.array, np.array):
+        model:define_models.InversionModel,
+        setup_model:define_models.SetupModel) -> (np.array, np.array):
     """ Build the matrices needed to minimise second derivative of the model.
 
     That is, for each layer, we want to minimise the second derivative
-    (i.e. ([layer+1 val] - [layer val]) - ([layer val] - [layer-1 val]) )
+    (i.e. ([layer+1 val] - [layer val])/(layer+1 thickness)
+            - ([layer val] - [layer-1 val])/(layer thickness))
     except for where we expect there to be discontinuties.  At expected
     discontinuities, set the roughness matrix to zero.
+
+    e.g.    (v1 - v0)/t1 - (v2 - v1)/t2 = 0
+            (t2*v1 - t2*v0)/(t1*t2) - (v2*t1 - v1*t1)/(t1*t2) = 0
+            -t2 * v0 + (t1 + t2) * v1 - t1 * v2 = 0
+
+    As such, row i in H should be [..., -t_i+1, t_i + t_i+1, -t_i, ...]
+
 
     Note that Josh says this can be better captured by a linear constraint
     preserving layer gradients (and therefore stopping the model from getting
     any rougher).  So perhaps this can just be removed.
 
-    The smoothing parameters will be different for crust vs. upper mantle etc,
-    and we want to allow larger jumps between layers, so should be zero
-    at the boundaries between layers.
-
     Arguments:
         model:
             - define_models.InversionModel
-            - model.vsv.size = n_depth_points
+            - model.vsv.size = n_depth_points + 1 (deepest Vs is fixed)
             - model.boundary_inds.size = n_boundary_layers
+        setup_model:
+            - define_models.SetupModel
 
     Returns:
         roughness_mat
-            - (n_smoothing_equations, n_model_params) np.array
+            - (n_model_params, n_model_params) np.array
             - Roughness matrix, D, in D * m = d.
             - In Menke (2012)'s notation, this is D and Wm is D^T * D.
             - This is the matrix that we multiply by the model to find the
               roughness of the model (i.e. the second derivative of the model).
         - roughness_vec
-            - (n_smoothing_equations, 1) np.array
+            - (n_model_params, 1) np.array
             - Roughness vector, d, in D * m = d.
             - This is the permitted roughness of the model.
             - Actual roughness is calculated as roughness_matrix * model, and
@@ -302,7 +274,11 @@ def _build_smoothing_constraints(
             - Label for this constraint.
 
     """
+
     n_depth_points = model.vsv.size - 1
+    n_BLs = model.boundary_inds.size
+
+    roughness_vector = np.zeros((n_depth_points + n_BLs, 1))
 
     # Make and edit the banded matrix (roughness equations)
     banded_matrix = np.zeros((n_depth_points, n_depth_points)) #_make_banded_matrix(n_depth_points, (1, -2, 1))
@@ -315,6 +291,15 @@ def _build_smoothing_constraints(
             t[ir + 1], -np.sum(t[ir:ir + 2]), t[ir]
         ])
 
+    # Add smoothing at base of the model
+    base_t = list(sum(t)); base_vs = list(model.vsv[-1])
+    define_models._fill_in_base_of_model(base_t, base_vs, setup_model._replace(
+        depth_limits=(base_t[0], base_t[0] + 50)
+    ))
+    ir += 1
+    banded_matrix[ir, ir - 1: ir + 1] = ([base_t[-1], -t[-1] - base_t[-1]])
+    roughness_vector[ir] = -t[-1] * base_vs[-1]
+
     # At all discontinuities, reduce the smoothing constraints
     smooth_less = list(model.boundary_inds) + list(model.boundary_inds + 1)
     banded_matrix[smooth_less, :] *= 0.5
@@ -322,10 +307,13 @@ def _build_smoothing_constraints(
     # These columns can be filled with zeros as they will be mutlipliers
     # for the parameters controlling layer size
     roughness_matrix = np.hstack(
-        (banded_matrix, np.zeros((n_depth_points, model.boundary_inds.size)))
+        (banded_matrix, np.zeros((n_depth_points, n_BLs)))
     )
 
-    roughness_vector = np.zeros((n_depth_points, 1))
+    # Add rows to the roughness matrix to get it into the right shape
+    roughness_matrix = np.vstack(
+        (roughness_matrix, np.zeros((n_BLs, n_depth_points + n_BLs)))
+    )
 
     return roughness_matrix, roughness_vector, 'roughness'
 
@@ -456,9 +444,8 @@ def _build_constraint_damp_original_gradient(
     """
 
     n_depth_points = model.vsv.size - 1 # number of Vs nodes inverted for
-
-    H = np.zeros((n_depth_points,
-                  n_depth_points + model.boundary_inds.size))
+    n_model_points = n_depth_points + model.boundary_inds.size
+    H = np.zeros((n_model_points, n_model_points))
 
     for i_d in range(n_depth_points - 1):
         # Need to transpose slice of m0 (2, 1) to fit in H (1, 2) gap,
@@ -469,8 +456,40 @@ def _build_constraint_damp_original_gradient(
 
     H[n_depth_points - 1, n_depth_points - 1] = 1. / model.vsv[n_depth_points - 1]
 
-    h = np.zeros((n_depth_points, 1))
-    h[-1] = 1  # to apply damping equally, need to weight last inverted Vs
+    h = np.zeros((n_model_points, 1))
+    i = model.boundary_inds.size + 1
+    h[-i] = 1  # to apply damping equally, need to weight last inverted Vs
                # point to m0 rather than m0 grad - deepest Vs is fixed
 
     return H, h, 'to_m0_grad'
+
+    # A note on multiplication in numpy:
+    #   numpy does everything element-wise unless you explicitly tell it not
+    #   to, e.g. by using np.matmul() to do matrix multiplication.
+    #   This means that it will broadcast arrays by repeating rows or columns
+    #   so they are the same shape as the matrix they are being multiplied by.
+    #   This broadcasting is ONLY done for matrices where one of the dimensions
+    #   is equal to 1 (i.e. row (1, n) or column (n, 1) vectors) OR for 1D
+    #   numpy arrays (i.e. (n,) arrays), which are treated as row vectors.
+    #   If the arrays cannot be broadcast to the same shape, the * operator
+    #   will return an error. Note that this element-wise behaviour means all
+    #   numpy * operations are commutative!
+    #   As such, for any c = a * b...
+    #       a.shape | b.shape | c.shape      | Result
+    # ______________|_________|______________|____________________________
+    #       (n,)    | (m,)    | (n==m,)      |  [a_1*b_1, ..., a_n*b_m]
+    #       (1, n)  | (m,)*   | (n==m, 1)    |  [[a_1*b_1, ..., a_n*b_m]]
+    #       (n, 1)  | (m,)*   | (n, m)       |  [[a_1*b_1, ..., a_1*b_m],
+    #               |         |              |   [a_n*b_1, ..., a_n*b_m]]
+    #       (n,)* **| (m, 1)  | (n, m)       |  [[a_1*b_1, ..., a_n*b_1],
+    #               |         |              |   [a_1*b_m, ..., a_n*b_m]]
+    #       (n, m)  | (p,)*   | (n, m==p)    |  [[a_11*b_1, ..., a_1m*b_p],
+    #               |         |              |   [a_n1*b_1, ..., a_nm*b_p]]
+    #       (n, m)  | (p, 1)  | (n==p, m)    |  [[a_11*b_1, ..., a_1m*b_1],
+    #               |         |              |   [a_n1*b_n, ..., a_nm*b_p]]
+    #       (n, m)  | (p, q)  | (n==p, m==q) |  [[a_11*b_11, ..., a_1m*b_1p],
+    #               |         |              |   [a_n1*b_p1, ..., a_nm*b_pq]]
+    #
+    #       * Same result for array.shape = (1, len) as (len,)
+    #               i.e. row vector acts the same as 1D array
+    #       ** This is to show commutative behaviour with example in row above.
