@@ -134,7 +134,7 @@ def run_test_G():
 
 
 def test_damping(): #n_iter
-    lab = 'smoothing_only'
+    lab = 'roughness_only'
     vs_SL14 = pd.read_csv('data/earth_models/CP_SL14.csv',
                            header=None).values
     cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
@@ -160,7 +160,7 @@ def test_damping(): #n_iter
                     lat, -lon, t_LAB
                 ))
 
-                setup_model = define_models.SetupModel('test2',
+                setup_model = define_models.SetupModel('test_damp' + lab,
                     boundaries=(('Moho', 'LAB'), [3., t_LAB]),
                     depth_limits=(0, 420),
                 )
@@ -219,7 +219,7 @@ def test_damping(): #n_iter
                 dc = np.ones_like(periods)
                 old_dc = np.zeros_like(periods)
                 n = -1
-                while np.sum(abs(dc - old_dc)) > 0.005 * periods.size and n < 10:
+                while  np.sum(abs(dc - old_dc)) > 0.005 * periods.size and n < 10:
                 #for n in range(n_iter):
                     n += 1
                     old_dc = dc.copy()
@@ -259,12 +259,16 @@ def test_damping(): #n_iter
                 damp_t = pd.read_csv(save_name + 'damp_t.csv')
                 n = 0
                 for label in ['roughness', 'to_m0', 'to_m0_grad']:
-                    ax_d = f.add_axes([0.05 + 0.1 * n, 0.1, 0.05, 0.8])
+                    ax_d = f.add_axes([0.05 + 0.1 * n, 0.3, 0.05, 0.6])
                     ax_d.plot(damp_s[label], damp_s.Depth, 'ko-', markersize=3)
                     ax_d.plot(damp_t[label], damp_t.Depth, 'ro', markersize=2)
                     ax_d.set(title=label)
-                    ax_d.set_ylim([np.cumsum(m.thickness)[-1], 0])
+                    ax_d.set_ylim([150, 0])
                     ax_d.xaxis.tick_top()
+                    plt.rcParams.update({'axes.titlesize': 'xx-small',
+                                         'axes.labelsize': 'xx-small',
+                                         'xtick.labelsize': 'xx-small',
+                                         'ytick.labelsize': 'xx-small'})
                     n += 1
 
                 f.savefig(
@@ -301,7 +305,7 @@ def test_MonteCarlo(n_MonteCarlo): #n_iter
         lat, -lon, t_LAB
     ))
 
-    setup_model = define_models.SetupModel('test2',
+    setup_model = define_models.SetupModel('test_MC',
         boundaries=(('Moho', 'LAB'), [3., t_LAB]),
         depth_limits=(0, 420),
     )
@@ -354,14 +358,14 @@ def test_MonteCarlo(n_MonteCarlo): #n_iter
         dc = np.ones_like(periods)
         old_dc = np.zeros_like(periods)
         n = -1
-        # while np.sum(abs(dc - old_dc)) > 0.005 * periods.size and n < 10:
-        #     n += 1
-        #     old_dc = dc.copy()
-        #
-        #     print('****** ITERATION ' +  str(n) + ' ******')
-        #     m = inversion._inversion_iteration(setup_model, m, location)
-        #     c = mineos._read_qfile(save_name, periods)
-        #     dc = np.array([c[i] - obs[ic[i]] for i in range(len(c))])
+        while np.sum(abs(dc - old_dc)) > 0.005 * periods.size and n < 10:
+            n += 1
+            old_dc = dc.copy()
+
+            print('****** ITERATION ' +  str(n) + ' ******')
+            m = inversion._inversion_iteration(setup_model, m, location)
+            c = mineos._read_qfile(save_name, periods)
+            dc = np.array([c[i] - obs[ic[i]] for i in range(len(c))])
 
 
         # Plot up the model that reached convergence
