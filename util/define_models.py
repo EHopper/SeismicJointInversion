@@ -304,7 +304,7 @@ def _return_evenly_spaced_model(t, vs, boundary_inds, min_layer_thickness):
     for ib in range(len(bi[:-1])):
         inter_boundary_depth = (sum(t[:bi[ib + 1] + 1])
                                 - sum(t[:bi[ib] + 2]))
-        n_layers = int(inter_boundary_depth // min_layer_thickness)
+        n_layers = max(int(inter_boundary_depth // min_layer_thickness), 1)
         layer_t = inter_boundary_depth / n_layers
 
         # set uppermost value of Vs

@@ -134,7 +134,7 @@ def run_test_G():
 
 
 def test_damping(): #n_iter
-
+    lab = 'smoothing_only'
     vs_SL14 = pd.read_csv('data/earth_models/CP_SL14.csv',
                            header=None).values
     cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
@@ -152,8 +152,8 @@ def test_damping(): #n_iter
     vs_SLall = vs_SLall.reshape((vs_lats.size, vs_lons.size, vs_deps.size))
 
 
-    for lat in range(33, 41, 2):#range(34, 41):
-        for lon in range(-115, -105, 2):
+    for lat in [33]: #range(33, 41, 2):#range(34, 41):
+        for lon in [-111, -115]: #range(-115, -105, 2):
             for t_LAB in [5.]:#[30., 25., 20., 15., 10.]:
                 location = (lat, lon)
                 print('*********************** {}N, {}W, {}km LAB'.format(
@@ -268,8 +268,8 @@ def test_damping(): #n_iter
                     n += 1
 
                 f.savefig(
-                    '/media/sf_VM_Shared/rftests/{}N_{}W_{}kmLAB.png'.format(
-                    lat, -lon, round(t_LAB),
+                    '/media/sf_VM_Shared/rftests/{}N_{}W_{}kmLAB_{}.png'.format(
+                    lat, -lon, round(t_LAB), lab
                     )
                 )
                 plt.close(f)
@@ -354,20 +354,22 @@ def test_MonteCarlo(n_MonteCarlo): #n_iter
         dc = np.ones_like(periods)
         old_dc = np.zeros_like(periods)
         n = -1
-        while np.sum(abs(dc - old_dc)) > 0.005 * periods.size and n < 10:
-            n += 1
-            old_dc = dc.copy()
-
-            print('****** ITERATION ' +  str(n) + ' ******')
-            m = inversion._inversion_iteration(setup_model, m, location)
-            c = mineos._read_qfile(save_name, periods)
-            dc = np.array([c[i] - obs[ic[i]] for i in range(len(c))])
+        # while np.sum(abs(dc - old_dc)) > 0.005 * periods.size and n < 10:
+        #     n += 1
+        #     old_dc = dc.copy()
+        #
+        #     print('****** ITERATION ' +  str(n) + ' ******')
+        #     m = inversion._inversion_iteration(setup_model, m, location)
+        #     c = mineos._read_qfile(save_name, periods)
+        #     dc = np.array([c[i] - obs[ic[i]] for i in range(len(c))])
 
 
         # Plot up the model that reached convergence
         plots.plot_model_simple(m, 'm' + str(n + 1), ax_m150, (0, 150))
         plots.plot_model_simple(m, 'm' + str(n + 1), ax_mDeep,
                                 (150, setup_model.depth_limits[1]), False)
+        p_rf = inversion._predict_RF_vals(m)
+        plots.plot_rf_data(p_rf, 'm' + str(n + 1), ax_rf)
         # Run MINEOS on final model
         params = mineos.RunParameters(freq_max = 1000 / min(periods) + 1)
         _ = define_models.convert_inversion_model_to_mineos_model(m, setup_model)
@@ -379,18 +381,22 @@ def test_MonteCarlo(n_MonteCarlo): #n_iter
         plots.make_plot_symmetric_in_y_around_zero(ax_dc)
         plots.make_plot_symmetric_in_y_around_zero(ax_rf)
 
-    print(trial)
+    print(trial + 1, ' TRIALS')
     save_name = 'output/{0}/{0}'.format(setup_model.id)
     damp_s = pd.read_csv(save_name + 'damp_s.csv')
     damp_t = pd.read_csv(save_name + 'damp_t.csv')
     n = 0
     for label in ['roughness', 'to_m0', 'to_m0_grad']:
-        ax_d = f.add_axes([0.05 + 0.6 * n, 0.3, 0.02, 0.8])
+        ax_d = f.add_axes([0.025 + 0.0475 * n, 0.3, 0.0275, 0.6])
         ax_d.plot(damp_s[label], damp_s.Depth, 'ko-', markersize=3)
         ax_d.plot(damp_t[label], damp_t.Depth, 'ro', markersize=2)
         ax_d.set(title=label)
         ax_d.set_ylim([150, 0])
         ax_d.xaxis.tick_top()
+        plt.rcParams.update({'axes.titlesize': 'xx-small',
+                             'axes.labelsize': 'xx-small',
+                             'xtick.labelsize': 'xx-small',
+                             'ytick.labelsize': 'xx-small'})
         n += 1
 
     f.savefig(
