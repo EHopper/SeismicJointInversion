@@ -161,7 +161,7 @@ def test_damping(): #n_iter
                 ))
 
                 setup_model = define_models.SetupModel('test2',
-                    boundaries=(('Moho', 'LAB'), [3., t_LAB], [0.1, -0.05]),
+                    boundaries=(('Moho', 'LAB'), [3., t_LAB]),
                     depth_limits=(0, 420),
                 )
                 #location = (35, -112)
@@ -302,7 +302,7 @@ def test_MonteCarlo(n_MonteCarlo): #n_iter
     ))
 
     setup_model = define_models.SetupModel('test2',
-        boundaries=(('Moho', 'LAB'), [3., t_LAB], [0.1, -0.05]),
+        boundaries=(('Moho', 'LAB'), [3., t_LAB]),
         depth_limits=(0, 420),
     )
     obs, std_obs, periods = constraints.extract_observations(
@@ -320,6 +320,7 @@ def test_MonteCarlo(n_MonteCarlo): #n_iter
 
     f = plt.figure()
     f.set_size_inches((15,7))
+    ax_m0 = f.add_axes([0.2, 0.3, 0.1, 0.6])
     ax_m150 = f.add_axes([0.35, 0.3, 0.2, 0.6])
     ax_mDeep = f.add_axes([0.35, 0.1, 0.2, 0.12])
     ax_c = f.add_axes([0.6, 0.6, 0.35, 0.3])
@@ -348,6 +349,7 @@ def test_MonteCarlo(n_MonteCarlo): #n_iter
 
     for trial in range(n_MonteCarlo):
         m = define_models.setup_starting_model(setup_model, location)
+        plots.plot_model_simple(m, 'm0 ' + str(trial), ax_m0, (0, 150))
 
         dc = np.ones_like(periods)
         old_dc = np.zeros_like(periods)
@@ -383,11 +385,11 @@ def test_MonteCarlo(n_MonteCarlo): #n_iter
     damp_t = pd.read_csv(save_name + 'damp_t.csv')
     n = 0
     for label in ['roughness', 'to_m0', 'to_m0_grad']:
-        ax_d = f.add_axes([0.05 + 0.1 * n, 0.1, 0.05, 0.8])
+        ax_d = f.add_axes([0.05 + 0.6 * n, 0.3, 0.02, 0.8])
         ax_d.plot(damp_s[label], damp_s.Depth, 'ko-', markersize=3)
         ax_d.plot(damp_t[label], damp_t.Depth, 'ro', markersize=2)
         ax_d.set(title=label)
-        ax_d.set_ylim([np.cumsum(m.thickness)[-1], 0])
+        ax_d.set_ylim([150, 0])
         ax_d.xaxis.tick_top()
         n += 1
 

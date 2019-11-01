@@ -54,7 +54,7 @@ def _extract_rf_constraints(location:tuple, id:str, boundaries:pd.DataFrame,
     unrealistically low (i.e. zero), so we will assume the minimum standard
     deviation on a value is the 10% quantile of the total data set.
     """
-    bnames, bwidths, bdvs = boundaries
+    bnames, bwidths = boundaries
 
     # Load in receiver function constraints
     all_rfs = pd.read_csv('data/RFconstraints/a_priori_constraints.csv')

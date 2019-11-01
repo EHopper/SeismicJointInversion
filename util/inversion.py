@@ -163,7 +163,7 @@ def _build_model_vector(model:define_models.InversionModel,
                       model.thickness[list(model.boundary_inds)]))
 
 def _build_inversion_model_from_model_vector(p:np.array,
-        model:define_models.InversionModel, min_layer_thickness:float):
+        model:define_models.InversionModel):
     """ Make column vector, [s; t] into InversionModel format.
 
     Arguments:

@@ -431,7 +431,7 @@ class PipelineTest(unittest.TestCase):
         p_perturbed = p.copy() * np.array(model_perturbation)[:, np.newaxis]
         perturbation = p_perturbed - p
         model_perturbed = inversion._build_inversion_model_from_model_vector(
-            p_perturbed, model, setup_model.min_layer_thickness
+            p_perturbed, model
         )
         _ = define_models.convert_inversion_model_to_mineos_model(
             model_perturbed, setup_model._replace(id='testcase_perturbed')
