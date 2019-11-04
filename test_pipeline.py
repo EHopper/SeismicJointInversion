@@ -867,11 +867,11 @@ class PipelineTest(unittest.TestCase):
                 [0,  0,  0,  0,  0,  0,  0,  15./2,  -25./2,  10./2,  0,  0,  0,  0],
                 [0,  0,  0,  0,  0,  0,  0,  0,  12./2, -27./2,  15./2,  0,  0,  0],
                 [0,  0,  0,  0,  0,  0,  0,  0,  0,  6,  -18,  12,  0,  0],
-                [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  50,  -56,  0,  0],
+                [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  10,  -16,  0,  0],
                 [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
                 [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
             ]),
-            np.array([0] * 11 + [-6 * 4.42104] + [0] * 2)[:, np.newaxis],
+            np.array([0] * 11 + [-6 * 4.411829121] + [0] * 2)[:, np.newaxis],
         ),
     ])
     # @unittest.skipIf(skip_influx, "Changed this bit but not the test yet")
@@ -882,8 +882,8 @@ class PipelineTest(unittest.TestCase):
         H, h, label = weights._build_smoothing_constraints(model, sm)
 
         self.assertEqual(label, 'roughness')
-        np.testing.assert_array_equal(H, expected_H)
-        np.testing.assert_array_equal(h, expected_h)
+        np.testing.assert_allclose(H, expected_H)
+        np.testing.assert_allclose(h, expected_h)
 
         n_bls = model.boundary_inds.shape[0]
         n_layers = expected_h.shape[0] - n_bls
@@ -899,8 +899,8 @@ class PipelineTest(unittest.TestCase):
         )
         H_sc, h_sc = weights._damp_constraints((H, h, label), damp_s, damp_t)
         self.assertEqual(label, 'roughness')
-        np.testing.assert_array_equal(H_sc, expected_H)
-        np.testing.assert_array_equal(h_sc, expected_h)
+        np.testing.assert_allclose(H_sc, expected_H)
+        np.testing.assert_allclose(h_sc, expected_h)
 
     # test_build_constraint_damp_to_m0
     @parameterized.expand([
