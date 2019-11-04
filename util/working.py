@@ -134,7 +134,8 @@ def run_test_G():
 
 
 def test_damping(): #n_iter
-    lab = 'roughness_only'
+    lab = 'smootherasth'
+    print(lab)
     vs_SL14 = pd.read_csv('data/earth_models/CP_SL14.csv',
                            header=None).values
     cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
