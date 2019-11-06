@@ -138,7 +138,7 @@ def _build_partial_derivatives_matrix_sw(kernels:pd.DataFrame,
               by MINEOS.
 
     Returns:
-        G_inversion_model:
+        G_inversion_model_sw:
             - (n_periods, n_inversion_model_depths + n_boundary_layers) np.array
             - Units:    assumes velocities in km/s
             - Partial derivatives matrix for use in inversion.

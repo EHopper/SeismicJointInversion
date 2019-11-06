@@ -49,6 +49,12 @@ def plot_ph_vel(periods, c, label, ax):
     ax.set(xlabel='Period (s)', ylabel='Phase Velocity (km/s)')
     ax.legend()
 
+def plot_ph_vel_data_std(periods, obs_c, std_c, label, ax):
+    ax.plot(periods, obs_c, 'k-', linewidth=3, label=label)
+    ax.errorbar(periods, obs_c, yerr=std_c, linestyle='None', ecolor='k')
+    ax.set(xlabel='Period (s)', ylabel='Phase Velocity (km/s)')
+    ax.legend()
+
 def plot_ph_vel_simple(periods, c, ax):
     ax.plot(periods, c, '-', alpha=0.5) #color='#706F6F',
     ax.set(xlabel='Period (s)', ylabel='Phase Velocity (km/s)')

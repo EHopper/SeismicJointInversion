@@ -165,8 +165,11 @@ def _extract_phase_vels(location: tuple):
         surface_waves = surface_waves.append(phv.loc[ind])
     surface_waves = (surface_waves.sort_values(by=['period'], ascending=True)
         .reset_index(drop=True))
-    # Should actually load in some std!!!!  Will be set to 0.15 if  == 0 later
-    surface_waves['std'] = 0.
+    # Should actually load in some std!!!!  Going to do a random estimate
+    for index, row in surface_waves.iterrows():
+        surface_waves.loc[index, 'std'] = (
+            phv[phv.period == row.period].ph_vel.std() / 2
+        )
 
     return surface_waves.reset_index(drop=True)
 

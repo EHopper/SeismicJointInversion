@@ -134,7 +134,7 @@ def run_test_G():
 
 
 def test_damping(): #n_iter
-    lab = 'smootherasth'
+    lab = 'roughness_1'
     print(lab)
     vs_SL14 = pd.read_csv('data/earth_models/CP_SL14.csv',
                            header=None).values
@@ -197,12 +197,13 @@ def test_damping(): #n_iter
                 ax_rf = f.add_axes([0.6, 0.1, 0.2, 0.2])
 
                 # Plot on data and Schmandt & Lin Vs model
-                line, = ax_c.plot(periods, obs[ic],
-                                  'k-', linewidth=3, label='data')
+                plots.plot_ph_vel_data_std(
+                    periods, obs[ic].flatten(), std_obs[ic].flatten(), 'data', ax_c
+                )
+
                 plots.plot_rf_data_std(obs[i_rf], std_obs[i_rf], 'data', ax_rf)
                 vs_ilon = np.argmin(abs(vs_lons - lon))
                 vs_ilat = np.argmin(abs(vs_lats - lat))
-                print()
                 ax_m150.plot(vs_SLall[vs_ilat, vs_ilon, :], vs_deps,
                              'k-', linewidth=3, label='SL14')
                 ax_mDeep.plot(vs_SLall[vs_ilat, vs_ilon, :], vs_deps,
@@ -236,10 +237,6 @@ def test_damping(): #n_iter
                     plots.plot_ph_vel(periods, c, 'm' + str(n), ax_c)
                     dc = np.array([c[i] - obs[ic[i]] for i in range(len(c))])
                     plots.plot_dc(periods, dc, ax_dc)
-
-
-
-
 
                 # Run MINEOS on final model
                 params = mineos.RunParameters(freq_max = 1000 / min(periods) + 1)
@@ -405,8 +402,8 @@ def test_MonteCarlo(n_MonteCarlo): #n_iter
         n += 1
 
     f.savefig(
-        '/media/sf_VM_Shared/rftests/MC_{}N_{}W_{}kmLAB.png'.format(
-        lat, -lon, round(t_LAB),
+        '/media/sf_VM_Shared/rftests/MC_{}N_{}W_{}kmLAB_{}trials.png'.format(
+        lat, -lon, round(t_LAB), trial + 1,
         )
     )
     plt.close(f)

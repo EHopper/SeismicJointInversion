@@ -68,8 +68,8 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
     # having different values for those two layers messes with things, as does
     # having variable damping within a layer
     # Already built into roughness_mat is that we do not smooth around BLs
-    sc = 0.1
-    _set_layer_values((sc, sc, sc, 1, sc), layers, damp_s, damp_t, 'roughness')
+    sc = 1
+    _set_layer_values((sc, sc, sc,sc, sc), layers, damp_s, damp_t, 'roughness')
     roughness_mat, roughness_vec = _damp_constraints(
         _build_smoothing_constraints(model, setup_model), damp_s, damp_t
     )
@@ -83,7 +83,7 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
             [sc] * (len(layers.crust) - 1) + [sc],
             [sc] * (len(layers.lithospheric_mantle) - 1) + [sc],
             [sc] * len(layers.asthenosphere),
-            [sc] * len(model.boundary_inds)
+            [sc * 0.01] * len(model.boundary_inds)
         ),
         layers, damp_s, damp_t, 'to_m0'
     )
