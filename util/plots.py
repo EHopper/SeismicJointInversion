@@ -85,3 +85,13 @@ def plot_rf_data(rf_data, label, ax):
 def make_plot_symmetric_in_y_around_zero(ax):
     yl = max(abs(np.array(ax.get_ylim())))
     ax.set_ylim([-yl, yl])
+
+def plot_kernels(kernels, ax, field='vsv'):
+    periods = kernels.period.unique()
+    for p in periods:
+        k = kernels[kernels.period == p]
+        ax.plot(k[field], k.z, label=str(p) + ' s')
+
+    ax.legend()
+    ax.set_ylim([200, 0])
+    ax.set(xlabel='Kernels for ' + field, ylabel='Depth (km)')
