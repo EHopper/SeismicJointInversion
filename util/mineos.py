@@ -16,6 +16,7 @@ import typing
 import numpy as np
 import subprocess
 import os
+import glob
 import pandas as pd
 
 #import surface_waves
@@ -112,6 +113,18 @@ def run_kernels(parameters:RunParameters, periods:np.array, ph_vel:np.array,
                 card_name:str, n_runs:int):
 
     save_name = 'output/{0}/{0}'.format(card_name)
+
+    # Remove any previously calculated MINEOS kernel files
+    file_list = (glob.glob(save_name + '.strip')
+                + glob.glob(save_name + '.table*')
+                + glob.glob(save_name + '*cv_frechet*')
+                )
+    for file_path in file_list:
+        try:
+            os.remove(file_path)
+        except:
+            pass
+
     execfile = _write_kernel_files(parameters, periods, save_name, n_runs)
     _run_execfile(execfile)
 
@@ -129,6 +142,20 @@ def run_mineos(parameters:RunParameters, periods:np.array,
     """
 
     save_name = 'output/{0}/{0}'.format(card_name)
+
+    # Remove any previously calculated mineos files
+    file_list = (glob.glob(save_name + '*.asc')
+                + glob.glob(save_name + '*.eig*')
+                + glob.glob(save_name + '*run*')
+                + glob.glob(save_name + '*.mode')
+                + glob.glob(save_name + '.q')
+                )
+    for file_path in file_list:
+        try:
+            os.remove(file_path)
+        except:
+            pass
+
 
     # Run MINEOS - and re-run repeatedly if/when it breaks
     min_desired_period = np.min(periods)

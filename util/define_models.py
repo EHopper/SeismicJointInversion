@@ -136,12 +136,20 @@ class InversionModel(typing.NamedTuple):
             - InversionModel.(vsv|thickness)[boundary_inds[i + 1]] is the
               velocity at the bottom of the boundary and the thickness of the
               layer boundary itself, prescribed for an inversion run.
+        d_inds:
+            - (n_velocities_inverted_for, ) np.array of Booleans
+            - Units:    n/a
+            - Indices in .vsv identifying the depths within the depth_limits
+              given by setup_model.  Note that if the upper depth limit is 0,
+              this will be all [True, True, True, ...., True, False] - that is,
+              everything but the last velocity value is inverted for.
 
 
     """
     vsv: np.array
     thickness: np.array
     boundary_inds: np.array
+    invert_d_inds: np.array
 
 
 class ModelLayerIndices(typing.NamedTuple):
@@ -199,7 +207,7 @@ def setup_starting_model(setup_model, location):
     SetupModel is the bare bones of what we want to constrain for the starting
     model, which is in a different format to the model that we actually want
     to invert, m = np.vstack(
-                    (InversionModel.vsv,
+                    (InversionModel.vsv[InversionModel.d_inds],
                      InversionModel.thickness[InversionModel.boundary_inds)
                      )
 
@@ -232,28 +240,38 @@ def setup_starting_model(setup_model, location):
         print('This model ID has already been used!')
 
     # Load in Crust 1.0 crustal structure, defined globally (but coarsely)
-    t, vs = constraints.get_vels_Crust1(location)
+    #t, vs = constraints.get_vels_Crust1(location)
+    t, vs = constraints.get_vels_ShenRitzwoller2016(location)
 
     # Add on the boundary layers at arbitrary depths (will be fixed by inversion)
-    bi = _append_BLs_to_surface_starting_model(t, vs, setup_model)
+    bi = _add_BLs_to_surface_starting_model(t, vs, setup_model)
 
     # And fill in to the base of the model
     _fill_in_base_of_model(t, vs, setup_model)
 
     # Add random noise
-    _add_noise_to_starting_model(t, vs, bi)
+    t = np.array(t)
+    vs = np.array(vs)
+    bi = np.array(bi)
+    _add_noise_to_starting_model(
+        t, vs, bi, _find_depth_indices(t, setup_model.depth_limits)
+    )
 
     # Fix the model spacing
     thickness, vsv, boundary_inds = _return_evenly_spaced_model(
-        np.array(t), np.array(vs), np.array(bi), setup_model.min_layer_thickness,
+        t, vs, bi, setup_model.min_layer_thickness,
     )
+
 
     return InversionModel(vsv = vsv[np.newaxis].T,
                           thickness = thickness[np.newaxis].T,
-                          boundary_inds = np.array(boundary_inds))
+                          boundary_inds = np.array(boundary_inds),
+                          d_inds = _find_depth_indices(thickness,
+                                                       setup_model.depth_limits),
+                          )
 
 
-def _append_BLs_to_surface_starting_model(t, vs, setup_model):
+def _add_BLs_to_surface_starting_model(t, vs, setup_model):
 
     _, bwidths = setup_model.boundaries
     n_bounds = len(bwidths)
@@ -286,6 +304,14 @@ def _fill_in_base_of_model(t, vs, setup_model):
 
     return
 
+def _find_depth_indices(t, depth_limits):
+    """
+    """
+
+    d = np.round(np.cumsum(t), 3) # round to the nearest metre
+    # inds_boolean = np.logical_and(d >= depth_limits[0], d < depth_limits[1])
+    return [i for i in range(len(d))
+            if d[i] >= depth_limits[0] and d[i] < depth_limits[1]]
 
 def _return_evenly_spaced_model(t, vs, boundary_inds, min_layer_thickness):
     """
@@ -345,12 +371,12 @@ def _mean_val_in_interval(v, t, d1, d2):
                 d1 <= interp_d, interp_d < d2
             )])
 
-def _add_noise_to_starting_model(t, vs, bi):
+def _add_noise_to_starting_model(t, vs, bi, d_inds):
     """
     """
 
-    # Perturb all Vs apart from last value, which is pinned to REM
-    vs[:-1] = _add_random_noise(np.array(vs[:-1]), 0.1)
+    # Perturb all Vs that we are inverting for
+    vs[d_inds] = _add_random_noise(np.array(vs[d_inds]), 0.05)
 
     # For thickness, as layer thickness can be very different, scale
     # perturbations by thickness of layer
@@ -359,8 +385,8 @@ def _add_noise_to_starting_model(t, vs, bi):
     # and want to maintain total thickness of inversion model
     #  i.e. sum(t) = sum(t after perturbations)
     max_depth = sum(t)
-    for i in range(1, len(t) - 1):
-        if i - 1 not in bi:
+    for i in range(len(t) - 1):
+        if i - 1 not in bi and i - 1 in d_inds:
             t[i] = _add_random_noise(np.array(t[i]), np.array(t[i]) / 4)
     t[-1] = max_depth - sum(t[:-1])
 

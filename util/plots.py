@@ -90,7 +90,7 @@ def plot_kernels(kernels, ax, field='vsv'):
     periods = kernels.period.unique()
     for p in periods:
         k = kernels[kernels.period == p]
-        ax.plot(k[field], k.z, label=str(p) + ' s')
+        ax.plot(k[field], k.z, '-o', markersize=2, label=str(p) + ' s')
 
     ax.legend()
     ax.set_ylim([200, 0])

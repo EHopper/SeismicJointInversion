@@ -157,6 +157,11 @@ def _build_partial_derivatives_matrix_sw(kernels:pd.DataFrame,
         G_MINEOS, depth, dm_dp_mat
     )
 
+    model_d = np.round(np.cumsum(model.thickness), 3)
+    model_inds = np.logical_and(model_d > setup_model.depth_limits[0],
+                                model_d < setup_model.depth_limits[1])
+    G_inversion_model_sw = G_inversion_model_sw[:, model_inds]
+
 
     return G_inversion_model_sw
 

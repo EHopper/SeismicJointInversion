@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import re
 import os
+import xarray as xr # for loading netcdf
 
 
 
@@ -183,14 +184,19 @@ def _load_observed_sw_constraints():
     # Load in surface waves
     data_dir = 'data/obs_dispersion/'
     phvel = pd.DataFrame()
-    # Have ASWMS data with filenames 'helmholtz_stack_LHZ_[period].xyz'
+    # Have ASWMS data with filenames 'helmholtz_stack_LHZ_[period].xyz',
+    # longer period surface wave data with filenames 'c_[period]s_BD19',
     # and ambient noise data with filenames 'R[period]_USANT15.txt'
-    for file in os.listdir(data_dir):
+    for file in sorted(os.listdir(data_dir), reverse=True, key=str.lower):
         if 'USANT15' in file: # Ambient noise
             phvel = phvel.append(_load_ambient_noise(data_dir, file))
         if 'helmholtz' in file: # ASWMS data
             phvel = phvel.append(_load_earthquake_sw(data_dir, file))
-    phvel.reset_index(drop=True, inplace=True)
+        if 'BD19' in file: # Longer T surface waves: Babikoff & Dalton, 2019
+            c = _load_earthquake_sw_BD19(data_dir, file)
+            if c.period[0] not in phvel.period.unique():
+                phvel = phvel.append(c)
+    phvel = phvel.sort_values(by=['period', 'lat', 'lon']).reset_index(drop=True)
 
     return phvel
 
@@ -236,6 +242,22 @@ def _load_earthquake_sw(data_dir:str, file:str):
     surface_waves = pd.read_csv(data_dir + file, sep='\s+', header=None)
     surface_waves.columns = ['lat', 'lon', 'ph_vel']
     surface_waves['period'] = period
+
+    return surface_waves[['period', 'lat', 'lon', 'ph_vel']]
+
+def _load_earthquake_sw_BD19(data_dir:str, file:str):
+    """
+    """
+    # Find period of observations
+    # Filenames are c_[period]s_BD19, so split on _ and s
+    period = float(re.split('_|s', file)[1])
+
+    surface_waves = pd.read_csv(data_dir + file, sep='\s+', header=None)
+    surface_waves.columns = ['lat', 'lon', 'ph_vel']
+    surface_waves['period'] = period
+
+    # Phase velocities are reported in m/s - convert to km/s
+    surface_waves['ph_vel'] /= 1000
 
     return surface_waves[['period', 'lat', 'lon', 'ph_vel']]
 
@@ -325,3 +347,47 @@ def get_vels_Crust1(location):
     m_vs += [vs[ib]]#[m_vs[-1]]
 
     return m_t, m_vs
+
+
+def get_vels_ShenRitzwoller2016(location):
+    """
+    To get a more accurate starting model for the crust in the US, load in
+    data from Shen & Ritzwoller, 2016.  Note that this is the updated model
+    of Shen et al., 2013 - the model used (at time of writing) for Moho depth
+    and velocity contrast constraints.  (Note we used an older model for that
+    as the download included explicit Moho depth, dVs and error information).
+
+    Download is available from https://doi.org/10.17611/DP/EMCUS2016
+
+    The downloaded file - 'US.2016.nc' - is a NetCDF file with coordinates
+        'depth'         0 - 150 km, spacing 0.5 km
+        'latitude'      20 - 50 °N, spacing 0.25°
+        'longitude'     235 - 295 °E, spacing 0.25°
+    and fields
+        'vsv'           (depth, latitude, longitude)
+        'vp'            (depth, latitude, longitude)
+        'rho'           (depth, latitude, longitude)
+
+    """
+    lat, lon = location
+    if lon < 0: # Convert to °E if in °W
+        lon += 360
+
+    nm = 'data/earth_models/US.2016.nc'
+    try:
+        ds = xr.open_dataset(nm)
+    except:
+        crusturl = 'https://doi.org/10.17611/DP/EMCUS2016'
+        print(
+            'You need to download the Shen & Ritzwoller (2016) model from'
+            + ' IRIS EMC\n\t{} \nand save to \n\t{}'.format(crusturl, nm)
+        )
+        return
+
+    i_lat = np.argmin(np.abs(ds.latitude.values - lat))
+    i_lon = np.argmin(np.abs(ds.latitude.values - lon))
+
+    thickness = np.hstack((np.array([0]), np.diff(ds.depth.values)))
+    vsv = ds.vsv.values[:, i_lat, i_lon]
+
+    return thickness, vsv

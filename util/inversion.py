@@ -87,7 +87,7 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
         kernels, model, setup_model
     )
 
-    p = _build_model_vector(model)
+    p = _build_model_vector(model, setup_model.depth_limits)
     predictions = np.concatenate((ph_vel_pred, _predict_RF_vals(model)))
     d = _build_data_misfit_vector(obs, predictions, p, G)
 
@@ -135,7 +135,7 @@ def _predict_RF_vals(model:define_models.InversionModel):
 
 
 def _build_model_vector(model:define_models.InversionModel,
-                        ) -> (np.array):
+                        depth_limits:tuple) -> (np.array):
     """ Make model into column vector [s; t].
 
     Arguments:
@@ -158,8 +158,9 @@ def _build_model_vector(model:define_models.InversionModel,
             - This model, p, ONLY includes the parameters that we are inverting
               for - it is not a complete description of vs(z)!
     """
-
-    return np.vstack((model.vsv[:-1],
+    d = np.round(np.cumsum(model.thickness), 3)
+    return np.vstack((model.vsv[np.logical_and(d > depth_limits[0],
+                                               d < depth_limits[1])],
                       model.thickness[list(model.boundary_inds)]))
 
 def _build_inversion_model_from_model_vector(p:np.array,
