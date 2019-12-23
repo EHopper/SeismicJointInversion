@@ -149,7 +149,7 @@ class InversionModel(typing.NamedTuple):
     vsv: np.array
     thickness: np.array
     boundary_inds: np.array
-    invert_d_inds: np.array
+    d_inds: np.array
 
 
 class ModelLayerIndices(typing.NamedTuple):
@@ -243,23 +243,22 @@ def setup_starting_model(setup_model, location):
     #t, vs = constraints.get_vels_Crust1(location)
     t, vs = constraints.get_vels_ShenRitzwoller2016(location)
 
+    # Fill in to the base of the model
+    _fill_in_base_of_model(t, vs, setup_model)
+
     # Add on the boundary layers at arbitrary depths (will be fixed by inversion)
     bi = _add_BLs_to_surface_starting_model(t, vs, setup_model)
 
-    # And fill in to the base of the model
-    _fill_in_base_of_model(t, vs, setup_model)
-
-    # Add random noise
-    t = np.array(t)
-    vs = np.array(vs)
-    bi = np.array(bi)
-    _add_noise_to_starting_model(
-        t, vs, bi, _find_depth_indices(t, setup_model.depth_limits)
-    )
-
     # Fix the model spacing
     thickness, vsv, boundary_inds = _return_evenly_spaced_model(
-        t, vs, bi, setup_model.min_layer_thickness,
+        np.array(t), np.array(vs), np.array(bi),
+        setup_model.min_layer_thickness,
+    )
+
+    # Add random noise
+    _add_noise_to_starting_model(
+        thickness, vsv, boundary_inds,
+        _find_depth_indices(thickness, setup_model.depth_limits)
     )
 
 
@@ -277,15 +276,19 @@ def _add_BLs_to_surface_starting_model(t, vs, setup_model):
     n_bounds = len(bwidths)
     boundary_inds = []
 
-    # Add in all BLs beneath the Moho (i.e. LAB)
+    # For now, distribute the boundary layers evenly over the depth range
+    # (and space away from surface and base of model)
+    spacing = np.diff(setup_model.depth_limits) / (n_bounds + 2)
+
+    i = 0
     for i_b in range(n_bounds):
-        boundary_inds += [len(t)]
-        # Top of the boundary layer
-        t += [2 * setup_model.min_layer_thickness]
-        vs += [vs[-1]]
-        # Bottom of the boundary layer
-        t += [bwidths[i_b]]
-        vs += [vs[-1]] # * (1 + bdvs[i_b])]
+        while sum(t[:i + 1]) < spacing * (i_b + 1):
+            i += 1
+        boundary_inds += [i]
+        t[i + 1] = bwidths[i_b]
+
+    t[-1] -= sum(t) - setup_model.depth_limits[1]
+
 
     return boundary_inds
 
@@ -299,8 +302,12 @@ def _fill_in_base_of_model(t, vs, setup_model):
     ref_depth = ref_depth.iloc[::-1].values
     ref_vs = ref_vs.iloc[::-1].values
 
-    t += [setup_model.depth_limits[1] - sum(t)]
-    vs += [np.interp(setup_model.depth_limits[1], ref_depth, ref_vs)]
+    remaining_depth = setup_model.depth_limits[1] - sum(t)
+    n_layers = int(remaining_depth // setup_model.min_layer_thickness)
+    thickness_to_end = [remaining_depth / n_layers] * n_layers
+    vs += list(np.interp(sum(t) + np.cumsum(thickness_to_end), ref_depth, ref_vs))
+    t += thickness_to_end
+
 
     return
 

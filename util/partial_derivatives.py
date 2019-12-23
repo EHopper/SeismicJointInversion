@@ -17,7 +17,7 @@ The Frechet kernels from MINEOS are given at the same depths as those in
 the MINEOS model card, as a function of the model card v(z).  However, we
 want to invert for a model in a different format, p, so we need to adjust
 the kernels accordingly.
-
+420
 Let   m:    old model, as a function of depth, from MINEOS card
             multiple parameters - [vsv, vsh, vpv, vph, eta]
       p:    new model
@@ -157,13 +157,15 @@ def _build_partial_derivatives_matrix_sw(kernels:pd.DataFrame,
         G_MINEOS, depth, dm_dp_mat
     )
 
+    # Identify depth indices of interest
     model_d = np.round(np.cumsum(model.thickness), 3)
-    model_inds = np.logical_and(model_d > setup_model.depth_limits[0],
+    vs_depth_inds = np.logical_and(model_d >= setup_model.depth_limits[0],
                                 model_d < setup_model.depth_limits[1])
-    G_inversion_model_sw = G_inversion_model_sw[:, model_inds]
+    # Identify the indices for boundary layer depth parameters
+    bl_inds = (G_inversion_model_sw.shape[1]
+              - np.arange(len(setup_model.boundaries[0]), 0, -1))
 
-
-    return G_inversion_model_sw
+    return G_inversion_model_sw[:, np.append(vs_depth_inds, bl_inds)]
 
 def _integrate_dc_dvsv_dvsv_dp_indepth(G_MINEOS, depth, dm_dp_mat):
     """ Calcualte dc/dp by integrating over dc/dvsv * dvsv/dp in depth.
@@ -506,7 +508,7 @@ def _calculate_dm_ds(model:define_models.InversionModel,
     ([dm_0/ds_i; ...; dm_N/ds_i]), although most of these values will be zero.
 
     """
-    n_layers = model.vsv.size - 1 # last value of s is pinned (not inverted for)
+    n_layers = model.vsv.size
     dm_ds_mat = np.zeros((depth.size, n_layers))
 
     # Do dm/ds column by column

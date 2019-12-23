@@ -163,7 +163,7 @@ def test_damping(): #n_iter
 
                 setup_model = define_models.SetupModel('test_damp' + lab,
                     boundaries=(('Moho', 'LAB'), [3., t_LAB]),
-                    depth_limits=(0, 420),
+                    depth_limits=(30, 300),
                 )
                 #location = (35, -112)
                 obs, std_obs, periods = constraints.extract_observations(

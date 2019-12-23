@@ -43,9 +43,13 @@ I assume that these lat/lons are geographic.
 
 
 
-Surface wave data from the USArray, downloaded 2019.12.16 (https://doi.org/10.1029/2018GC008073)
+Surface wave data from the USArray, downloaded 2019.12.16
+(https://doi.org/10.1029/2018GC008073)
 
-Supplementary Information from Babikoff & Dalton, 2019.  There are nine phase velocity map files for the nine periods measured. The period is specified in the file name. Each file contains three columns with the following format: latitude, longitude, phase velocity in m/s.
+Supplementary Information from Babikoff & Dalton, 2019.  There are nine phase
+velocity map files for the nine periods measured. The period is specified in
+the file name. Each file contains three columns with the following format:
+latitude, longitude, phase velocity in m/s.
 
  - File names are in the format c_[period]s_BD19
  - Periods available: 25, 40, 50, 60, 100, 120, 140, 180

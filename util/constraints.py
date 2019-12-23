@@ -385,9 +385,9 @@ def get_vels_ShenRitzwoller2016(location):
         return
 
     i_lat = np.argmin(np.abs(ds.latitude.values - lat))
-    i_lon = np.argmin(np.abs(ds.latitude.values - lon))
+    i_lon = np.argmin(np.abs(ds.longitude.values - lon))
 
     thickness = np.hstack((np.array([0]), np.diff(ds.depth.values)))
     vsv = ds.vsv.values[:, i_lat, i_lon]
 
-    return thickness, vsv
+    return list(thickness), list(vsv)
