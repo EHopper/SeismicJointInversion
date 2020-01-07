@@ -137,7 +137,7 @@ class InversionModel(typing.NamedTuple):
               velocity at the bottom of the boundary and the thickness of the
               layer boundary itself, prescribed for an inversion run.
         d_inds:
-            - (n_velocities_inverted_for, ) np.array of Booleans
+            - (n_velocities_inverted_for, ) np.array of indices
             - Units:    n/a
             - Indices in .vsv identifying the depths within the depth_limits
               given by setup_model.  Note that if the upper depth limit is 0,

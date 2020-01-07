@@ -153,8 +153,8 @@ def test_damping(): #n_iter
     vs_SLall = vs_SLall.reshape((vs_lats.size, vs_lons.size, vs_deps.size))
 
 
-    for lat in [33]: #range(33, 41, 2):#range(34, 41):
-        for lon in [-111, -115]: #range(-115, -105, 2):
+    for lat in [40]:#[33]: #range(33, 41, 2):#range(34, 41):
+        for lon in [-115]:#[-111, -115]: #range(-115, -105, 2):
             for t_LAB in [5.]:#[30., 25., 20., 15., 10.]:
                 location = (lat, lon)
                 print('*********************** {}N, {}W, {}km LAB'.format(
@@ -163,7 +163,7 @@ def test_damping(): #n_iter
 
                 setup_model = define_models.SetupModel('test_damp' + lab,
                     boundaries=(('Moho', 'LAB'), [3., t_LAB]),
-                    depth_limits=(30, 300),
+                    depth_limits=(0, 300),
                 )
                 #location = (35, -112)
                 obs, std_obs, periods = constraints.extract_observations(
@@ -407,3 +407,41 @@ def test_MonteCarlo(n_MonteCarlo): #n_iter
         )
     )
     plt.close(f)
+
+def try_synth():
+    location = (40, -115)
+
+    setup_model = define_models.SetupModel('synth', min_layer_thickness=6,
+                                           depth_limits=(0, 200))
+    t, v = constraints.get_vels_ShenRitzwoller2016(location)
+    d = np.cumsum(t)
+    v[0:3] = v[3] # remove lowest velocity layer
+    v[64:200] = v[64] # add in a clear high velocity lid
+    t = list(t)
+    v = list(v)
+    define_models._fill_in_base_of_model(t, v, setup_model)
+    bi = np.array([63, 199])
+    t = np.array(t)
+    v = np.array(v)
+    thickness, vsv, boundary_inds = define_models._return_evenly_spaced_model(
+        t, v, bi, setup_model.min_layer_thickness,
+    )
+    m = define_models.InversionModel(
+        vsv = vsv[np.newaxis].T,
+        thickness = thickness[np.newaxis].T,
+        boundary_inds = np.array(boundary_inds),
+        invert_d_inds = define_models._find_depth_indices(
+            thickness, setup_model.depth_limits
+            ),
+    )
+    mineos_model = define_models.convert_inversion_model_to_mineos_model(
+        m, setup_model
+    )
+
+    # Get predicted values
+    rf_p = inversion._predict_RF_vals(m)
+
+    sw = constraints._extract_phase_vels((40, -115))
+    periods = sw.period.values
+    params = mineos.RunParameters(freq_max = 1000 / min(periods) + 1)
+    ph_vel_pred, n_runs = mineos.run_mineos(params, periods, setup_model.id)

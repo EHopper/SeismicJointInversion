@@ -162,8 +162,9 @@ def _build_partial_derivatives_matrix_sw(kernels:pd.DataFrame,
     vs_depth_inds = np.logical_and(model_d >= setup_model.depth_limits[0],
                                 model_d < setup_model.depth_limits[1])
     # Identify the indices for boundary layer depth parameters
-    bl_inds = (G_inversion_model_sw.shape[1]
-              - np.arange(len(setup_model.boundaries[0]), 0, -1))
+    bl_inds = [True] * len(setup_model.boundaries[0])
+        #(G_inversion_model_sw.shape[1]
+        #      - np.arange(len(setup_model.boundaries[0]), 0, -1))
 
     return G_inversion_model_sw[:, np.append(vs_depth_inds, bl_inds)]
 
