@@ -95,3 +95,124 @@ def plot_kernels(kernels, ax, field='vsv'):
     ax.legend()
     ax.set_ylim([200, 0])
     ax.set(xlabel='Kernels for ' + field, ylabel='Depth (km)')
+
+def setup_figure_layout(location, t_LAB):
+    f = plt.figure()
+    f.set_size_inches((15,7))
+    ax_c = f.add_axes([0.6, 0.6, 0.35, 0.3])
+    ax_dc = f.add_axes([0.6, 0.375, 0.35, 0.15])
+    ax_rf = f.add_axes([0.6, 0.1, 0.2, 0.2])
+    ax_m150 = f.add_axes([0.35, 0.3, 0.2, 0.6])
+    ax_mDeep = f.add_axes([0.35, 0.1, 0.2, 0.12])
+    ax_map = f.add_axes([0.84, 0.1, 0.1, 0.2])
+
+    lat, lon = location
+    ax_c.set_title(
+        '{:.1f}N, {:.1f}W:  {:.0f} km LAB'.format(lat, -lon, t_LAB)
+    )
+
+    return f, ax_c, ax_dc, ax_rf, ax_m150, ax_mDeep, ax_map
+
+def plot_area_map(location, ax_map):
+    vs_SL14 = pd.read_csv('data/earth_models/CP_SL14.csv',
+                           header=None).values
+    cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
+
+    im = ax_map.contourf(np.arange(-119, -100.9, 0.2),
+        np.arange(30, 45.1, 0.2), vs_SL14, levels=20,
+        cmap=plt.cm.RdBu, vmin=4, vmax=4.7)
+    ax_map.plot(location[1], location[0], 'k*')
+    ax_map.plot(cp_outline[:, 1], cp_outline[:, 0], 'k:')
+
+def plot_SL14_profile(location, ax):
+    # To save spave, have saved the lat, lon, depth ranges of the Schmandt & Lin
+    # model just as three lines in a csv
+    vs_SLall = pd.read_csv('data/earth_models/SchmandtLinVs_only.csv',
+                            header=None).values.flatten()
+    vs_lats = pd.read_csv('data/earth_models/SL_coords.csv', skiprows=0,
+                          nrows=1, header=None).values.flatten()
+    vs_lons = pd.read_csv('data/earth_models/SL_coords.csv', skiprows=1,
+                          nrows=1, header=None).values.flatten()
+    vs_deps = pd.read_csv('data/earth_models/SL_coords.csv', skiprows=2,
+                          nrows=1, header=None).values.flatten()
+    vs_SLall = vs_SLall.reshape((vs_lats.size, vs_lons.size, vs_deps.size))
+
+    lat, lon = location
+    vs_ilon = np.argmin(abs(vs_lons - lon))
+    vs_ilat = np.argmin(abs(vs_lats - lat))
+    ax.plot(vs_SLall[vs_ilat, vs_ilon, :], vs_deps,
+                 'k-', linewidth=3, label='SL14')
+
+def plot_damping_params(model_id, f):
+    save_name = 'output/{0}/{0}'.format(model_id)
+    damp_s = pd.read_csv(save_name + 'damp_s.csv')
+    damp_t = pd.read_csv(save_name + 'damp_t.csv')
+    n = 0
+    for label in ['roughness', 'to_m0', 'to_0_grad']:
+        ax_d = f.add_axes([0.05 + 0.1 * n, 0.3, 0.05, 0.6])
+        ax_d.plot(damp_s[label], damp_s.Depth, 'ko-', markersize=3)
+        ax_d.plot(damp_t[label], damp_t.Depth, 'ro', markersize=2)
+        ax_d.set(title=label)
+        ax_d.set_ylim([150, 0])
+        ax_d.xaxis.tick_top()
+        plt.rcParams.update({'axes.titlesize': 'xx-small',
+                             'axes.labelsize': 'xx-small',
+                             'xtick.labelsize': 'xx-small',
+                             'ytick.labelsize': 'xx-small'})
+        n += 1
+
+def plot_G(G, model, periods):
+
+    olabs = ['{:.0f} s'.format(p) for p in periods]
+    olabs += ['Moho tt', 'LAB tt', 'Moho dVs', 'LAB dVs']
+    mlabs = ['Vs at {:.0f} km'.format(d)
+             for d in np.cumsum(model.thickness[model.d_inds])]
+    mlabs += ['Moho depth', 'LAB depth']
+
+    # Plot all G as an image
+    f = plt.figure(figsize=(10, 5))
+    a = f.add_axes([0, 0, 1, 1])
+    a.text(0.475, 0.95, 'G matrix image')
+    ax1 = f.add_axes([0.1, 0.2, 0.65, 0.7])
+    im = ax1.imshow(G, vmin=-0.5, vmax=0.5)
+    ax1.set(xlabel='Model', ylabel='Observation')
+    ax1.set(yticks=range(G.shape[0]), yticklabels=olabs, xticks=range(G.shape[1]))
+    ax1.set_xticklabels(mlabs, rotation=90)
+    cb = plt.colorbar(im, f.add_axes([0.76, 0.25, 0.01, 0.6]))
+
+    ax2 = f.add_axes([0.875, 0.2, 0.04, 0.7])
+    im = ax2.imshow(G[:, -2:], vmin=-0.0003, vmax=0.0003)
+    ax2.set(xlabel='Model', ylabel='Observation')
+    ax2.set(yticks=range(G.shape[0]), yticklabels=olabs, xticks=range(2))
+    ax2.set_xticklabels(mlabs[-2:], rotation=90)
+    cb = plt.colorbar(im, f.add_axes([0.93, 0.25, 0.01, 0.6]))
+
+    f = plt.figure(figsize=(10, 5))
+    a = f.add_axes([0, 0, 1, 1])
+    a.text(0.45, 0.95, 'abs(G) as stacked bar')
+    ax1 = f.add_axes([0.1, 0.2, 0.4, 0.7])
+    pp = np.hstack((periods, periods[-1] + 10 + [0, 5, 10, 15]))
+    for i in range(G.shape[1]):
+        if i < 18 or i > G.shape[1] - 3:
+            plt.bar(pp, abs(G[:, i]), bottom=np.sum(abs(G[:, :i]), 1),
+                    width=3, label=mlabs[i])
+        else:
+            plt.bar(pp, abs(G[:, i]), bottom=np.sum(abs(G[:, :i]), 1), width=3)
+    plt.legend(fontsize='xx-small')
+    ax1.set(ylabel='abs(G)', xlabel='Observation', xticks=pp)
+    ax1.set_xlim(pp[0] - 2, pp[-1] + 2)
+    ax1.set_xticklabels(olabs, rotation=90)
+    ax1.set_title('Moho at {:.0f} km; LAB at {:.0f} km'.format(
+        np.sum(model.thickness[:model.boundary_inds[0] + 1]),
+        np.sum(model.thickness[:model.boundary_inds[1] + 1]),
+    ))
+
+    ax2 = f.add_axes([0.55, 0.2, 0.4, 0.7])
+    d = np.cumsum(model.thickness[:-1])
+    d = np.hstack((d, d[-1] + [6, 12]))
+    for i in range(G.shape[0]):
+        plt.bar(d, abs(G[i, :]), bottom=np.sum(abs(G[:i, :]), 0),
+                width=5, label=olabs[i])
+    plt.legend(fontsize='xx-small')
+    ax2.set(ylabel='abs(G)', xlabel='Model', xticks=d)
+    ax2.set_xticklabels(mlabs, rotation=90)

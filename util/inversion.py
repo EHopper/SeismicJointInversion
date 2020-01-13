@@ -60,14 +60,16 @@ def run_inversion(setup_model:define_models.SetupModel,
 
 def _inversion_iteration(setup_model:define_models.SetupModel,
                          model:define_models.InversionModel,
-                         location:tuple
+                         location:tuple,
+                         constraints:tuple,
                          ) -> define_models.InversionModel:
     """ Run a single iteration of the least squares
     """
 
-    obs, std_obs, periods = constraints.extract_observations(
-        location, setup_model.id, setup_model.boundaries, setup_model.vpv_vsv_ratio
-    )
+    # obs, std_obs, periods = constraints.extract_observations(
+    #     location, setup_model.id, setup_model.boundaries, setup_model.vpv_vsv_ratio
+    # )
+    obs, std_obs, periods = constraints
 
     # Build all of the inputs to the damped least squares
     # Run MINEOS to get phase velocities and kernels
@@ -108,8 +110,9 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
 
     return define_models.InversionModel(
         np.array(vsv)[:, np.newaxis], np.array(thickness)[:, np.newaxis],
-        np.array(bi)
-    )
+        np.array(bi),
+        define_models._find_depth_indices(thickness, setup_model.depth_limits)
+        ), G, obs#p, G, d, W, H_mat, h_vec
 
 
 def _predict_RF_vals(model:define_models.InversionModel):
@@ -159,7 +162,7 @@ def _build_model_vector(model:define_models.InversionModel,
               for - it is not a complete description of vs(z)!
     """
     d = np.round(np.cumsum(model.thickness), 3)
-    return np.vstack((model.vsv[np.logical_and(d > depth_limits[0],
+    return np.vstack((model.vsv[np.logical_and(d >= depth_limits[0],
                                                d < depth_limits[1])],
                       model.thickness[list(model.boundary_inds)]))
 
@@ -201,6 +204,7 @@ def _build_inversion_model_from_model_vector(p:np.array,
         vsv = new_vsv,
         thickness = new_thickness,
         boundary_inds = model.boundary_inds,
+        d_inds = np.array([])
     )
 
 
@@ -280,7 +284,7 @@ def _damped_least_squares(m0, G, d, W, H_mat, h_vec):
 
         where n_model_points = n_model_params * n_depth_points
             (model parameters are Vsv, Vsh, Vpv, Vph, eta (= F/(A-2L), anellipticity))
-
+p, G, d, W, H_mat, h_vec
     Damped least squares in the Menke (2012; eq. 345) notation:
     m = (G' * We * G  + ε^2 * Wm )^-1  (G' * We * d + ε^2 * Wm * <m>)
         - m:    new model

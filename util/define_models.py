@@ -338,6 +338,8 @@ def _return_evenly_spaced_model(t, vs, boundary_inds, min_layer_thickness):
         inter_boundary_depth = (sum(t[:bi[ib + 1] + 1])
                                 - sum(t[:bi[ib] + 2]))
         n_layers = max(int(inter_boundary_depth // min_layer_thickness), 1)
+        # if ib == 0:
+        #     n_layers *= 3 # Have denser spacing in the crust
         layer_t = inter_boundary_depth / n_layers
 
         # set uppermost value of Vs
@@ -668,4 +670,38 @@ def _set_model_indices(setup_model, model, **kwargs):
         asthenosphere = np.arange(lab_ind + 1, len(depth)),
         boundary_layers = len(depth) + np.arange(len(model.boundary_inds)),
         depth = list(depth)
+    )
+
+def save_model(model, fname):
+    save_dir = 'output/models/'
+
+    with open('{}{}.csv'.format(save_dir, fname), 'w') as fid:
+        fid.write('{}\n\n'.format(fname))
+        fid.write('Boundary Indices: \n')
+        for b in model.boundary_inds:
+            fid.write('{:},'.format(b))
+
+        fid.write('\n\nvsv,thickness,inverted_inds\n')
+        for i in range(len(model.vsv)):
+            fid.write('{:.2f},{:.2f},'.format(model.vsv.item(i), model.thickness.item(i)))
+            if i in model.d_inds:
+                fid.write('True\n')
+            else:
+                fid.write('False\n')
+
+        fid.close()
+
+def read_model(fname):
+    save_dir = 'output/models/'
+
+    with open('{}{}.csv'.format(save_dir, fname), 'r') as fid:
+        bi = pd.read_csv(fid, skiprows=3, header=None, nrows=1)
+    with open('{}{}.csv'.format(save_dir, fname), 'r') as fid:
+        params = pd.read_csv(fid, skiprows=5)
+
+    return InversionModel(
+        vsv = params.Vsv.values[:, np.newaxis],
+        thickness = params.Thickness.values[:, np.newaxis],
+        boundary_inds = bi.iloc[0,:-1].astype(int).values,
+        d_inds = np.arange(len(params.vsv))[params.inverted_inds.values],
     )
