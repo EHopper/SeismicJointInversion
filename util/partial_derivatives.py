@@ -244,7 +244,7 @@ def _integrate_dc_dvsv_dvsv_dp_indepth(G_MINEOS, depth, dm_dp_mat):
     #                 )
     #             )
 
-    # Speeding things up, given dx is constant
+    # Speeding things up, given dz is constant
     G_inversion_model = np.matmul(G_MINEOS, dm_dp_mat)
     G_inversion_model *= np.diff(depth[:2]) # multiply by depth step, dx
     i_corr = []
@@ -890,9 +890,9 @@ def _convert_kernels_d_deeperm_by_d_t(model:define_models.InversionModel,
 
     The product rule is d/dx (h(x)j(x)) = h'(x)j(x) + h(x)j'(x)
         d/dx (-ax/(c-x)):   h(x) = -ax      h'(x) = -a
-                            j(x) = 1/(c-x)  j'(x) = -1/(c-x)**2
-        d/dx (-ax/(c-x)) = -a/(c-x) + ax/(c-x)**2
-                         = (-a(c-x) + ax)/(c-x)**2
+                            j(x) = 1/(c-x)  j'(x) = 1/(c-x)**2
+        d/dx (-ax/(c-x)) = -a/(c-x) - ax/(c-x)**2
+                         = (-a(c-x) - ax)/(c-x)**2
                          = -ac/(c-x)**2
 
     The total derivative is therefore
