@@ -19,7 +19,7 @@ import os
 import glob
 import pandas as pd
 
-#import surface_waves
+from util import define_models
 
 
 # =============================================================================
@@ -100,6 +100,12 @@ class RunParameters(typing.NamedTuple):
 # =============================================================================
 #       Run MINEOS - calculate phase velocity, group velocity, kernels
 # =============================================================================
+def calculate_c_from_card(setup_model, model, periods):
+    params = RunParameters(freq_max = 1000 / min(periods) + 1)
+    _ = define_models.convert_inversion_model_to_mineos_model(model, setup_model)
+    c, _ = run_mineos(params, periods, setup_model.id)
+
+    return c
 
 def run_mineos_and_kernels(parameters:RunParameters, periods:np.array,
                            card_name:str):

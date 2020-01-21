@@ -68,15 +68,15 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
     # having different values for those two layers messes with things, as does
     # having variable damping within a layer
     # Already built into roughness_mat is that we do not smooth around BLs
-    sc = 1
-    _set_layer_values((sc, sc, sc,sc, sc), layers, damp_s, damp_t, 'roughness')
+    sc = 0.
+    _set_layer_values((sc / 5., sc / 5., sc,sc, sc), layers, damp_s, damp_t, 'roughness')
     roughness_mat, roughness_vec = _damp_constraints(
         _build_smoothing_constraints(model, setup_model), damp_s, damp_t
     )
 
     # Linear constraint equations
     # Damp towards starting model
-    sc = 0
+    sc = 0.
     _set_layer_values(
         (
             [sc] * (len(layers.sediment) - 1) + [sc],
@@ -90,11 +90,19 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
     damp_to_m0_mat, damp_to_m0_vec = _damp_constraints(
         _build_constraint_damp_to_m0(p), damp_s, damp_t
     )
-    sc = 0.
+
     # Damp towards starting model gradients in Vs
-    _set_layer_values((sc, sc, sc, sc, sc), layers, damp_s, damp_t, 'to_m0_grad')
-    damp_to_m0_grad_mat, damp_to_m0_grad_vec = _damp_constraints(
-        _build_constraint_damp_original_gradient(model), damp_s, damp_t
+    # sc = 0.
+    # _set_layer_values((sc, sc, sc, sc, sc), layers, damp_s, damp_t, 'to_m0_grad')
+    # damp_to_m0_grad_mat, damp_to_m0_grad_vec = _damp_constraints(
+    #     _build_constraint_damp_original_gradient(model), damp_s, damp_t
+    # )
+
+    # Damp towards model gradient = 0
+    sc = 1
+    _set_layer_values((sc, sc, sc, sc, sc), layers, damp_s, damp_t, 'to_0_grad')
+    damp_to_0_grad_mat, damp_to_0_grad_vec = _damp_constraints(
+        _build_constraint_damp_zero_gradient(model), damp_s, damp_t
     )
 
 
@@ -107,12 +115,12 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
     a_priori_mat = np.vstack((
         roughness_mat,
         damp_to_m0_mat,
-        damp_to_m0_grad_mat,
+        damp_to_0_grad_mat,
     ))
     a_priori_vec = np.vstack((
         roughness_vec,
         damp_to_m0_vec,
-        damp_to_m0_grad_vec,
+        damp_to_0_grad_vec,
     ))
 
     return W, a_priori_mat, a_priori_vec
@@ -294,15 +302,21 @@ def _build_smoothing_constraints(
     # Add smoothing at base of the model
     base_t = list(sum(t)); base_vs = list(model.vsv[-1])
     define_models._fill_in_base_of_model(base_t, base_vs, setup_model._replace(
-        depth_limits=(base_t[0], base_t[0] + 10)
+        depth_limits=(base_t[0], base_t[0] + 10) # Interpolate 10 km below base
     ))
     ir += 1
     banded_matrix[ir, ir - 1: ir + 1] = ([base_t[-1], -t[-1] - base_t[-1]])
     roughness_vector[ir] = -t[-1] * base_vs[-1]
 
     # At all discontinuities, reduce the smoothing constraints
-    smooth_less = list(model.boundary_inds) + list(model.boundary_inds + 1)
-    banded_matrix[smooth_less, :] *= 0.5
+    #smooth_less = list(model.boundary_inds) + list(model.boundary_inds + 1)
+    #banded_matrix[smooth_less, :] *= 0.
+    # At all discontinuties, replace the smoothing constraints with a repeat
+    # of smoothing the layer above and below the discontinuity
+    banded_matrix[model.boundary_inds, :] = banded_matrix[model.boundary_inds - 1, :]
+    banded_matrix[model.boundary_inds + 1, :] = banded_matrix[model.boundary_inds + 2, :]
+
+
     # Add columns to roughness_matrix to get it into the right shape
     # These columns can be filled with zeros as they will be mutlipliers
     # for the parameters controlling layer size
@@ -463,33 +477,93 @@ def _build_constraint_damp_original_gradient(
 
     return H, h, 'to_m0_grad'
 
-    # A note on multiplication in numpy:
-    #   numpy does everything element-wise unless you explicitly tell it not
-    #   to, e.g. by using np.matmul() to do matrix multiplication.
-    #   This means that it will broadcast arrays by repeating rows or columns
-    #   so they are the same shape as the matrix they are being multiplied by.
-    #   This broadcasting is ONLY done for matrices where one of the dimensions
-    #   is equal to 1 (i.e. row (1, n) or column (n, 1) vectors) OR for 1D
-    #   numpy arrays (i.e. (n,) arrays), which are treated as row vectors.
-    #   If the arrays cannot be broadcast to the same shape, the * operator
-    #   will return an error. Note that this element-wise behaviour means all
-    #   numpy * operations are commutative!
-    #   As such, for any c = a * b...
-    #       a.shape | b.shape | c.shape      | Result
-    # ______________|_________|______________|____________________________
-    #       (n,)    | (m,)    | (n==m,)      |  [a_1*b_1, ..., a_n*b_m]
-    #       (1, n)  | (m,)*   | (n==m, 1)    |  [[a_1*b_1, ..., a_n*b_m]]
-    #       (n, 1)  | (m,)*   | (n, m)       |  [[a_1*b_1, ..., a_1*b_m],
-    #               |         |              |   [a_n*b_1, ..., a_n*b_m]]
-    #       (n,)* **| (m, 1)  | (n, m)       |  [[a_1*b_1, ..., a_n*b_1],
-    #               |         |              |   [a_1*b_m, ..., a_n*b_m]]
-    #       (n, m)  | (p,)*   | (n, m==p)    |  [[a_11*b_1, ..., a_1m*b_p],
-    #               |         |              |   [a_n1*b_1, ..., a_nm*b_p]]
-    #       (n, m)  | (p, 1)  | (n==p, m)    |  [[a_11*b_1, ..., a_1m*b_1],
-    #               |         |              |   [a_n1*b_n, ..., a_nm*b_p]]
-    #       (n, m)  | (p, q)  | (n==p, m==q) |  [[a_11*b_11, ..., a_1m*b_1p],
-    #               |         |              |   [a_n1*b_p1, ..., a_nm*b_pq]]
-    #
-    #       * Same result for array.shape = (1, len) as (len,)
-    #               i.e. row vector acts the same as 1D array
-    #       ** This is to show commutative behaviour with example in row above.
+def _build_constraint_damp_zero_gradient(
+        model:define_models.InversionModel):
+    """ Damp Vsv gradients between layers to zero.
+
+    In H * m = h, we want to end up with
+            V_new_node1 - V_new_node0 = 0
+        (Via... (V_new_node1 - V_new_node0)/ t0 = 0)
+    As such, H is set to 1 in the node 1 column, and to -1 in the node 2 column;
+    h is zero always.
+
+    Note that this only considers a single gradient between two adjacent Vs
+    points at a time, so having adjacent layers of different thickness is
+    not an issue - all of this damping is for a single layer thickness.
+
+    However, if layer thickness can change (i.e. the layer above and the layer
+    below our boundary layer, t[model.bi] and t[model.bi + 2]), there is an
+    issue.  We're going to assume that the change in layer thickness is
+    going to be relatively small - perhaps this is ok??
+
+    Arguments:
+        model:
+            - InversionModel
+            - Units:    seismological
+
+    Returns:
+        H:
+            - (n_depth_points - 1, n_model_points) np.array
+            - Constraints matrix, H, in H * m = h.
+            - Set to to 1 in the node 1 column, and to -1 in the node 2 column.
+            - Note that only (n_depth_points - 1) rows in this matrix,
+              as every constraint is for two adjacent depth points.
+            - As last velocity point is fixed, to constrain the gradient at the
+              base of the model is just to damp to the last alterable value of
+              vs, i.e. last column for Vs should be
+                    V_node_end_new = V_at_base
+        h:
+            - (n_depth_points - 1, 1) np.array
+            - Constraints vector, h, in H * m = h.
+            - Set to zero except for last point.
+        'to_0_grad'
+            - str
+            - Label for this constraint.
+    """
+
+    n_depth_points = model.vsv.size - 1 # number of Vs nodes inverted for
+    n_model_points = n_depth_points + model.boundary_inds.size
+    H = np.zeros((n_model_points, n_model_points))
+
+    for i_d in range(n_depth_points - 1):
+        if i_d not in model.boundary_inds:
+            H[i_d, [i_d, i_d+1]] = np.array([1, -1])
+
+    H[i_d + 1, i_d + 1] = 1
+
+    h = np.zeros((n_model_points, 1))
+    h[i_d + 1] = model.vsv[-1] # to apply damping evenly, need to weight
+                               # last inverted Vs to fixed deepest Vs
+
+    return H, h, 'to_0_grad'
+
+# A note on multiplication in numpy:
+#   numpy does everything element-wise unless you explicitly tell it not
+#   to, e.g. by using np.matmul() to do matrix multiplication.
+#   This means that it will broadcast arrays by repeating rows or columns
+#   so they are the same shape as the matrix they are being multiplied by.
+#   This broadcasting is ONLY done for matrices where one of the dimensions
+#   is equal to 1 (i.e. row (1, n) or column (n, 1) vectors) OR for 1D
+#   numpy arrays (i.e. (n,) arrays), which are treated as row vectors.
+#   If the arrays cannot be broadcast to the same shape, the * operator
+#   will return an error. Note that this element-wise behaviour means all
+#   numpy * operations are commutative!
+#   As such, for any c = a * b...
+#       a.shape | b.shape | c.shape      | Result
+# ______________|_________|______________|____________________________
+#       (n,)    | (m,)    | (n==m,)      |  [a_1*b_1, ..., a_n*b_m]
+#       (1, n)  | (m,)*   | (n==m, 1)    |  [[a_1*b_1, ..., a_n*b_m]]
+#       (n, 1)  | (m,)*   | (n, m)       |  [[a_1*b_1, ..., a_1*b_m],
+#               |         |              |   [a_n*b_1, ..., a_n*b_m]]
+#       (n,)* **| (m, 1)  | (n, m)       |  [[a_1*b_1, ..., a_n*b_1],
+#               |         |              |   [a_1*b_m, ..., a_n*b_m]]
+#       (n, m)  | (p,)*   | (n, m==p)    |  [[a_11*b_1, ..., a_1m*b_p],
+#               |         |              |   [a_n1*b_1, ..., a_nm*b_p]]
+#       (n, m)  | (p, 1)  | (n==p, m)    |  [[a_11*b_1, ..., a_1m*b_1],
+#               |         |              |   [a_n1*b_n, ..., a_nm*b_p]]
+#       (n, m)  | (p, q)  | (n==p, m==q) |  [[a_11*b_11, ..., a_1m*b_1p],
+#               |         |              |   [a_n1*b_p1, ..., a_nm*b_pq]]
+#
+#       * Same result for array.shape = (1, len) as (len,)
+#               i.e. row vector acts the same as 1D array
+#       ** This is to show commutative behaviour with example in row above.

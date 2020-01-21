@@ -94,10 +94,13 @@ def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
     """ Make partial derivative matrix, G, for phase velocities and RFs
     """
 
+    g_sw = _build_partial_derivatives_matrix_sw(kernels, model, setup_model)
+    g_rf = _build_partial_derivatives_matrix_rf(model, setup_model)
+    print(g_sw.shape, g_rf.shape)
 
     return np.vstack((
-        _build_partial_derivatives_matrix_sw(kernels, model, setup_model),
-        _build_partial_derivatives_matrix_rf(model, setup_model)
+        g_sw,
+        g_rf        
     ))
 
 
