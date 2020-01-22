@@ -100,7 +100,7 @@ def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
 
     return np.vstack((
         g_sw,
-        g_rf        
+        g_rf
     ))
 
 
@@ -1058,8 +1058,8 @@ def _calculate_travel_time_partial(model, i_bl, G_rf):
     Travel time is the piecewise sum of distance / velocity.
 
     The travel time to the centre of the boundary layer, BL
-        tt = t_1 / (v_0 + v_1) / 2 + ... + t_BL / (v_BL-1 + v_BL) / 2
-                + (t_BL+1 / 2) / (3 * V_BL + V_BL+1) / 4
+        tt = t_1 / ((v_0 + v_1) / 2) + ... + t_BL / ((v_BL-1 + v_BL) / 2)
+                + (t_BL+1 / 2) / ((3 * V_BL + V_BL+1) / 4)
     Remember that t_i is the thickness of the layer between v_i-1 & v_i.
     Therefore, the variable thicknesses are t_BL (thickness of layer where the
     velocity at the base is v_BL).
