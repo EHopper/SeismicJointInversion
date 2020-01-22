@@ -19,7 +19,7 @@ import os
 import glob
 import pandas as pd
 
-from util import define_models
+#import surface_waves
 
 
 # =============================================================================
@@ -100,12 +100,6 @@ class RunParameters(typing.NamedTuple):
 # =============================================================================
 #       Run MINEOS - calculate phase velocity, group velocity, kernels
 # =============================================================================
-def calculate_c_from_card(setup_model, model, periods):
-    params = RunParameters(freq_max = 1000 / min(periods) + 1)
-    _ = define_models.convert_inversion_model_to_mineos_model(model, setup_model)
-    c, _ = run_mineos(params, periods, setup_model.id)
-
-    return c
 
 def run_mineos_and_kernels(parameters:RunParameters, periods:np.array,
                            card_name:str):
@@ -393,8 +387,7 @@ def _write_q_correction(params, save_name, l_run):
     """
     NOTE: qmod is probably complete bullshit!  Took Zach's qmod and then
     changed the 0 for q_mu in the inner core to 100000, because otherwise
-    get a divide by 0 error and a whole bunch on NaN.  Clearly, the Q of
-    a liquid should be pretty low (?!?) so this doesn't seem to make sense.
+    get a divide by 0 error and a whole bunch on NaN.
     BUT it does mean it runs ok.
 
     Josh says he thinks that running the Q correction might be falling out
