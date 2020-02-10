@@ -100,7 +100,7 @@ def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
 
     return np.vstack((
         g_sw,
-        g_rf        
+        g_rf
     ))
 
 
@@ -164,12 +164,13 @@ def _build_partial_derivatives_matrix_sw(kernels:pd.DataFrame,
     model_d = np.round(np.cumsum(model.thickness), 3)
     vs_depth_inds = np.logical_and(model_d >= setup_model.depth_limits[0],
                                 model_d < setup_model.depth_limits[1])
-    # Identify the indices for boundary layer depth parameters
-    bl_inds = [True] * len(setup_model.boundaries[0])
-        #(G_inversion_model_sw.shape[1]
-        #      - np.arange(len(setup_model.boundaries[0]), 0, -1))
+    # # Identify the indices for boundary layer depth parameters
+    # bl_inds = [True] * len(setup_model.boundaries[0])
+    #     #(G_inversion_model_sw.shape[1]
+    #     #      - np.arange(len(setup_model.boundaries[0]), 0, -1))
+    bl_inds = len(model.thickness) + np.arange(len(setup_model.boundaries[0]))
 
-    return G_inversion_model_sw[:, np.append(vs_depth_inds, bl_inds)]
+    return G_inversion_model_sw[:, np.append(model.d_inds, bl_inds)]
 
 def _integrate_dc_dvsv_dvsv_dp_indepth(G_MINEOS, depth, dm_dp_mat):
     """ Calcualte dc/dp by integrating over dc/dvsv * dvsv/dp in depth.
@@ -1009,7 +1010,7 @@ def _build_partial_derivatives_matrix_rf(model:define_models.InversionModel,
 
     n_boundary_layers = model.boundary_inds.size
     G_rf = np.zeros((n_boundary_layers * 2,
-                     model.vsv.size - 1 + n_boundary_layers))
+                     model.vsv.size + n_boundary_layers))
 
     i_bl = 0
     bnames, _ = setup_model.boundaries
@@ -1020,7 +1021,14 @@ def _build_partial_derivatives_matrix_rf(model:define_models.InversionModel,
         _calculate_dv_rf_partial(model, i_bl, G_rf)
         i_bl += 1
 
-    return G_rf
+    # # Identify depth indices of interest
+    # model_d = np.round(np.cumsum(model.thickness), 3)
+    # vs_depth_inds = np.logical_and(model_d >= setup_model.depth_limits[0],
+    #                             model_d < setup_model.depth_limits[1])
+    # # Identify the indices for boundary layer depth parameters
+    bl_inds = len(model.thickness) + np.arange(len(setup_model.boundaries[0]))
+
+    return G_rf[:, np.append(model.d_inds, bl_inds)]
 
 def _calculate_dv_rf_partial(model, i_bl, G_rf):
     """
@@ -1122,7 +1130,7 @@ def _calculate_travel_time_partial(model, i_bl, G_rf):
     )
 
     # Calculate partials for thicknesses
-    n_depth_points = model.vsv.size - 1
+    n_depth_points = model.vsv.size
     for i_t in range(i_bl + 1):
         ib = model.boundary_inds[i_t]
         G_rf[i_bl, n_depth_points + i_t] = (
