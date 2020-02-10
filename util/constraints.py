@@ -30,6 +30,9 @@ def extract_observations(location:tuple, id:str, boundaries:tuple, vpvs:float):
     #surface_waves = surface_waves.iloc[[3, 5, 7, 11, 12, 13], :]
     rfs = _extract_rf_constraints(location, id, boundaries, vpvs)
 
+    # Put in fake Moho info!!!! #
+    # rfs.loc[0, ('dv', 'dvstd')] = [0.085, 0.1]
+
     # Write to file
     if not os.path.exists('output/' + id):
         os.mkdir('output/' + id)
@@ -154,9 +157,13 @@ def _convert_amplitude_to_dv(amp, ampstd, rftype, boundary_width):
 
     return dv, dvstd
 
-def _extract_phase_vels(location: tuple):
+def _extract_phase_vels(location:tuple, phv_preloaded:tuple=(0,)):
 
-    phv = _load_observed_sw_constraints()
+    if phv_preloaded[0]:
+        phv = phv_preloaded[1]
+    else:
+        print('Loading phase velocities')
+        phv = _load_observed_sw_constraints()
 
     surface_waves = pd.DataFrame()
     for period in phv['period'].unique():
@@ -168,9 +175,15 @@ def _extract_phase_vels(location: tuple):
         .reset_index(drop=True))
     # Should actually load in some std!!!!  Going to do a random estimate
     for index, row in surface_waves.iterrows():
+        # Conservative estimate: below 50s, assume +- 0.025
+        # Else, assume that you will be able to see a 1% difference in phase
+        # over the 140 km (2 station spacings) distance travelled at about 4 km/s
         surface_waves.loc[index, 'std'] = (
-            phv[phv.period == row.period].ph_vel.std() / 2
+            max(0.025, abs(140 / (140 / 4 + row.period / 100) - 4) / 2)
         )
+        if row.period <=8:
+            surface_waves.loc[index, 'std'] *= 2
+        #     phv[phv.period == row.period].ph_vel.std() / 2
 
     return surface_waves.reset_index(drop=True)
 
@@ -373,15 +386,8 @@ def get_vels_ShenRitzwoller2016(location):
     if lon < 0: # Convert to °E if in °W
         lon += 360
 
-    nm = 'data/earth_models/US.2016.nc'
-    try:
-        ds = xr.open_dataset(nm)
-    except:
-        crusturl = 'https://doi.org/10.17611/DP/EMCUS2016'
-        print(
-            'You need to download the Shen & Ritzwoller (2016) model from'
-            + ' IRIS EMC\n\t{} \nand save to \n\t{}'.format(crusturl, nm)
-        )
+    ds = load_literature_vel_model('SR16')
+    if not ds:
         return
 
     i_lat = np.argmin(np.abs(ds.latitude.values - lat))
@@ -391,3 +397,123 @@ def get_vels_ShenRitzwoller2016(location):
     vsv = ds.vsv.values[:, i_lat, i_lon]
 
     return list(thickness), list(vsv)
+
+def load_literature_vel_model(ref:str):
+
+    if ref == 'SR16':
+        nm = 'data/earth_models/US.2016.nc'
+        url = 'https://doi.org/10.17611/DP/EMCUS2016'
+        ref = 'Shen & Ritzwoller, 2016 (10.1002/2016JB012887)'
+        v_field = 'vsv'
+        ref_v = np.array([])
+    elif ref == 'S15':
+        nm = 'data/earth_models/US-CrustVs-2015_kmps.nc'
+        url = 'https://doi.org/10.17611/DP/EMCUSCRUSTVS2015'
+        ref = 'Schmandt et al., 2015 (10.1002/2015GL066593)'
+        v_field = 'vs'
+        ref_v = np.array([])
+    elif ref == 'P14':
+        nm = 'data/earth_models/DNA13_percent.nc'
+        url = 'https://doi.org/10.17611/DP/9991615'
+        ref = 'Porrit et al., 2014 (10.1016/j.epsl.2013.10.034)'
+        v_field = 'vsvj'
+        ref_v = np.array([ # WUS model, Pollitz (2008) Fig. 17: 10.1029/2007JB005556
+            [2.40, 0], [2.45, 0.5], [3.18, 4.5], [3.20, 18], [3.90, 20],
+            [3.90, 33], [4.30, 35], [4.30, 60], [4.26, 65], [4.26, 215],
+            [4.65, 220], [4.65, 240], [4.74, 242], [4.74, 300]
+            ])
+    elif ref == 'P15':
+        nm = 'data/earth_models/US-Crust-Upper-mantle-Vs.Porter.Liu.Holt.2015_kmps.nc'
+        url = 'https://doi.org/10.17611/DP/EMCUCUMVPLH15MLROWCU'
+        ref = 'Porter et al., 2015 (10.1002/2015GL066950)'
+        v_field = 'vs'
+        ref_v = np.array([])
+    elif ref == 'F18':
+        nm = 'data/earth_models/csem-north-america-2019.12.01.nc'
+        url = 'https://doi.org/10.17611/dp/emccsemnamatl20191201'
+        ref = 'Fichtner et al., 2018 (10.1029/2018GL077338)'
+        v_field = 'vsv'
+        ref_v = np.array([])
+    elif ref == 'Y14':
+        nm = 'data/earth_models/SEMum-NA14_kmps.nc'
+        url = 'https://doi.org/10.17611/dp/EMCSEMUMNA14'
+        ref = 'Yuan et al., 2014 (10.1016/j.epsl.2013.11.057)'
+        v_field = 'Vs'
+        ref_v = np.array([])
+    elif ref == 'C15':
+        nm = 'data/earth_models/WUS-CAMH-2015.nc'
+        url = 'https://doi.org/10.17611/dp/EMCWUSCAMH2015'
+        ref = 'Chai et al., 2015 (10.1002/2015GL063733)'
+        v_field = 'vs'
+        ref_v = np.array([])
+
+
+
+    else:
+        print('Unknown reference - try again')
+        return
+
+
+    try:
+        ds = xr.open_dataset(nm)
+    except:
+
+        print(
+            'You need to download the {} model from'
+            + ' IRIS EMC\n\t{} \nand save to \n\t{}'.format(ref, url, nm)
+        )
+        return
+
+    if ref_v.any(): # Convert perturbations to absolute values
+        imax = np.argmax(ds.depth.values > ref_v[-1, 1])
+        ref_vz = np.interp(ds.depth.values[:imax], ref_v[:, 1], ref_v[:, 0])
+        dvs = ds[v_field].values[:imax, :, :]
+        vs = np.zeros_like(dvs)
+        for ila in range(dvs.shape[1]):
+            for ilo in range(dvs.shape[2]):
+                vs[:, ila, ilo] = (1 + (dvs[:, ila, ilo] / 100)) * ref_vz
+
+        ds = xr.Dataset(
+            {'vs': (['depth', 'latitude', 'longitude'],  vs)},
+            coords={'longitude': (['longitude'], ds.longitude.values),
+                    'latitude': (['latitude'], ds.latitude.values),
+                    'depth': ds.depth.values[:imax],
+                    }
+        )
+        v_field = 'vs'
+
+    if v_field != 'vs':
+        ds['vs'] = ds[v_field]
+
+    return ds
+
+
+def interpolate_lit_model(ref, z, lats, lons):
+    # Put the literature model on the same grid as the inversion model
+    ds = load_literature_vel_model(ref)
+    z_a = ds.depth.values
+    lats_a = ds.latitude.values
+    lons_a = ds.longitude.values
+    if lons_a[0] > 0:
+        lons_a -= 360
+
+    vs_a = np.zeros((len(lats), len(lons), len(z)))
+    ila = 0
+    ilo = 0
+    for lat in lats:
+        for lon in lons:
+
+            i_lat = np.argmin(np.abs(lats_a - lat))
+            i_lon = np.argmin(np.abs(lons_a - lon))
+            if abs(lats_a[i_lat] - lat) > 1:
+                print('Nearest latitude is {}'.format(lats_a[i_lat]))
+            if abs(lons_a[i_lon] - lon) > 1:
+                print('Nearest longitude is {}'.format(lons_a[i_lon]))
+
+            vs_a[ila, ilo, :] = np.interp(z, z_a, ds.vs.values[:, i_lat, i_lon])
+
+            ilo += 1
+        ila += 1
+        ilo = 0
+
+    return vs_a
