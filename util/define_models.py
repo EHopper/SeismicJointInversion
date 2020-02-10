@@ -423,7 +423,8 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model,
                                             **kwargs):
     """ Generate model that is used for all the MINEOS interfacing.
 
-    MINEOS requires radius, rho, vpv, vsv, vph, vsh, bulk and shear Q, and eta.
+    MINEOS requires radius, rho, vpv, vsv, vph, vsh, bulk and shear Q, and eta,
+    where eta is the shape factor and is 1 always for isotropic materials.
     Rows are ordered by increasing radius.  There should be some reference
     MINEOS card that can be loaded in and have this pasted on the bottom
     for using with MINEOS, as MINEOS requires a card that goes all the way to

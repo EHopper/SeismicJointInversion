@@ -248,7 +248,7 @@ def _integrate_dc_dvsv_dvsv_dp_indepth(G_MINEOS, depth, dm_dp_mat):
     #                 )
     #             )
 
-    # Speeding things up, given dx is constant
+    # Speeding things up, given dz is constant
     G_inversion_model = np.matmul(G_MINEOS, dm_dp_mat)
     G_inversion_model *= np.diff(depth[:2]) # multiply by depth step, dx
     i_corr = []
@@ -894,9 +894,9 @@ def _convert_kernels_d_deeperm_by_d_t(model:define_models.InversionModel,
 
     The product rule is d/dx (h(x)j(x)) = h'(x)j(x) + h(x)j'(x)
         d/dx (-ax/(c-x)):   h(x) = -ax      h'(x) = -a
-                            j(x) = 1/(c-x)  j'(x) = -1/(c-x)**2
-        d/dx (-ax/(c-x)) = -a/(c-x) + ax/(c-x)**2
-                         = (-a(c-x) + ax)/(c-x)**2
+                            j(x) = 1/(c-x)  j'(x) = 1/(c-x)**2
+        d/dx (-ax/(c-x)) = -a/(c-x) - ax/(c-x)**2
+                         = (-a(c-x) - ax)/(c-x)**2
                          = -ac/(c-x)**2
 
     The total derivative is therefore
@@ -1066,8 +1066,8 @@ def _calculate_travel_time_partial(model, i_bl, G_rf):
     Travel time is the piecewise sum of distance / velocity.
 
     The travel time to the centre of the boundary layer, BL
-        tt = t_1 / (v_0 + v_1) / 2 + ... + t_BL / (v_BL-1 + v_BL) / 2
-                + (t_BL+1 / 2) / (3 * V_BL + V_BL+1) / 4
+        tt = t_1 / ((v_0 + v_1) / 2) + ... + t_BL / ((v_BL-1 + v_BL) / 2)
+                + (t_BL+1 / 2) / ((3 * V_BL + V_BL+1) / 4)
     Remember that t_i is the thickness of the layer between v_i-1 & v_i.
     Therefore, the variable thicknesses are t_BL (thickness of layer where the
     velocity at the base is v_BL).
