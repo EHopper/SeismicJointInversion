@@ -88,16 +88,19 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     G = partial_derivatives._build_partial_derivatives_matrix(
         kernels, model, setup_model
     )
+    print('*****************')
 
     p = _build_model_vector(model, setup_model.depth_limits)
     predictions = np.concatenate((ph_vel_pred, _predict_RF_vals(model)))
+    print('G: {}, p: {}, preds: {}'.format(
+        G.shape, p.shape, predictions.shape
+    ))
     d = _build_data_misfit_vector(obs, predictions, p, G)
 
     # Build all of the weighting functions for damped least squares
     W, H_mat, h_vec = (
         weights.build_weighting_damping(std_obs, p, model, setup_model)
     )
-
     # Perform inversion
     p_new = _damped_least_squares(p, G, d, W, H_mat, h_vec)
 
@@ -161,9 +164,8 @@ def _build_model_vector(model:define_models.InversionModel,
             - This model, p, ONLY includes the parameters that we are inverting
               for - it is not a complete description of vs(z)!
     """
-    d = np.round(np.cumsum(model.thickness), 3)
-    return np.vstack((model.vsv[np.logical_and(d >= depth_limits[0],
-                                               d < depth_limits[1])],
+
+    return np.vstack((model.vsv[model.d_inds],
                       model.thickness[list(model.boundary_inds)]))
 
 def _build_inversion_model_from_model_vector(p:np.array,
@@ -204,7 +206,7 @@ def _build_inversion_model_from_model_vector(p:np.array,
         vsv = new_vsv,
         thickness = new_thickness,
         boundary_inds = model.boundary_inds,
-        d_inds = np.array([])
+        d_inds = model.d_inds,
     )
 
 
