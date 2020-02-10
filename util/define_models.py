@@ -254,11 +254,11 @@ def setup_starting_model(setup_model, location):
         np.array(t), np.array(vs), np.array(bi),
         setup_model.min_layer_thickness,
     )
+    depth_inds = _find_depth_indices(thickness, setup_model.depth_limits)
 
     # Add random noise
     _add_noise_to_starting_model(
-        thickness, vsv, boundary_inds,
-        _find_depth_indices(thickness, setup_model.depth_limits)
+        thickness, vsv, boundary_inds, depth_inds
     )
 
 
@@ -316,9 +316,9 @@ def _find_depth_indices(t, depth_limits):
     """
 
     d = np.round(np.cumsum(t), 3) # round to the nearest metre
-    # inds_boolean = np.logical_and(d >= depth_limits[0], d < depth_limits[1])
-    return [i for i in range(len(d))
-            if d[i] >= depth_limits[0] and d[i] < depth_limits[1]]
+    # argmax gives earliest index with maximum value in array (here 0s & 1s only)
+    return list(range(np.argmax(d >= depth_limits[0]),
+                      np.argmax(d >= depth_limits[1])))
 
 def _return_evenly_spaced_model(t, vs, boundary_inds, min_layer_thickness):
     """
@@ -385,7 +385,7 @@ def _add_noise_to_starting_model(t, vs, bi, d_inds):
     """
 
     # Perturb all Vs that we are inverting for
-    vs[d_inds] = _add_random_noise(np.array(vs[d_inds]), 0.05)
+    vs[d_inds] = _add_random_noise(np.array(vs[d_inds]), 0.2)
 
     # For thickness, as layer thickness can be very different, scale
     # perturbations by thickness of layer
@@ -396,7 +396,7 @@ def _add_noise_to_starting_model(t, vs, bi, d_inds):
     max_depth = sum(t)
     for i in range(len(t) - 1):
         if i - 1 not in bi and i - 1 in d_inds:
-            t[i] = _add_random_noise(np.array(t[i]), np.array(t[i]) / 4)
+            t[i] = _add_random_noise(np.array(t[i]), np.array(t[i]) / 10)
     t[-1] = max_depth - sum(t[:-1])
 
     return
@@ -700,8 +700,47 @@ def read_model(fname):
         params = pd.read_csv(fid, skiprows=5)
 
     return InversionModel(
-        vsv = params.Vsv.values[:, np.newaxis],
-        thickness = params.Thickness.values[:, np.newaxis],
+        vsv = params.vsv.values[:, np.newaxis],
+        thickness = params.thickness.values[:, np.newaxis],
         boundary_inds = bi.iloc[0,:-1].astype(int).values,
         d_inds = np.arange(len(params.vsv))[params.inverted_inds.values],
     )
+
+def load_all_models(z, lats, lons, t_LAB, lab=''):
+
+    vs = np.zeros((lats.size, lons.size, z.size))
+    bls = np.zeros((lats.size, lons.size, 4), dtype=float)
+    bis = np.zeros((lats.size, lons.size, 4), dtype=int)
+
+    i_lat = 0
+    i_lon = 0
+    for lat in lats:#range(34, 41):
+        for lon in lons:
+            fname = '{}N_{}W_{}kmLAB{}'.format(lat, lon, t_LAB, lab)
+            m = read_model(fname)
+            vs[i_lat, i_lon, :] = (
+                np.interp(
+                    z, np.cumsum(m.thickness).flatten(), m.vsv.flatten()
+                    )
+            )
+            depth_top_BL1 = np.sum(m.thickness[:m.boundary_inds[0] + 1])
+            width_BL1 = m.thickness[m.boundary_inds[0] + 1]
+            depth_top_BL2 = np.sum(m.thickness[:m.boundary_inds[1] + 1])
+            width_BL2 = m.thickness[m.boundary_inds[1] + 1]
+            bls[i_lat, i_lon, :] = [
+                depth_top_BL1 +  width_BL1 / 2, # Depth to Moho
+                depth_top_BL2 + width_BL2 / 2, # Depth to LAB
+                m.vsv[m.boundary_inds[0] + 1] / m.vsv[m.boundary_inds[0]] - 1, # Moho dV
+                m.vsv[m.boundary_inds[1] + 1] / m.vsv[m.boundary_inds[1]] - 1, # LAB dV
+                ]
+            bis[i_lat, i_lon, :] = [
+                int(np.argmax(z >= depth_top_BL1)), # Index of top of Moho
+                int(np.argmax(z >= depth_top_BL1 + width_BL1)), # Index of base of Moho
+                int(np.argmax(z >= depth_top_BL2)), # Index of top of LAB
+                int(np.argmax(z >= depth_top_BL2 + width_BL2)), # Index of base of LAB
+                ]
+            i_lon += 1
+        i_lat += 1
+        i_lon = 0
+
+    return vs, bls, bis
