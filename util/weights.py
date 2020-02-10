@@ -68,28 +68,28 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
     # having different values for those two layers messes with things, as does
     # having variable damping within a layer
     # Already built into roughness_mat is that we do not smooth around BLs
-    sc = 0.
-    _set_layer_values((sc / 5., sc / 5., sc,sc, sc), layers, damp_s, damp_t, 'roughness')
-    roughness_mat, roughness_vec = _damp_constraints(
-        _build_smoothing_constraints(model, setup_model), damp_s, damp_t
-    )
+    # sc = 0.
+    # _set_layer_values((sc / 5., sc / 5., sc,sc, sc), layers, damp_s, damp_t, 'roughness')
+    # roughness_mat, roughness_vec = _damp_constraints(
+    #     _build_smoothing_constraints(model, setup_model), damp_s, damp_t
+    # )
 
     # Linear constraint equations
     # Damp towards starting model
-    sc = 0.
-    _set_layer_values(
-        (
-            [sc] * (len(layers.sediment) - 1) + [sc],
-            [sc] * (len(layers.crust) - 1) + [sc],
-            [sc] * (len(layers.lithospheric_mantle) - 1) + [sc],
-            [sc] * len(layers.asthenosphere),
-            [sc * 0.01] * len(model.boundary_inds)
-        ),
-        layers, damp_s, damp_t, 'to_m0'
-    )
-    damp_to_m0_mat, damp_to_m0_vec = _damp_constraints(
-        _build_constraint_damp_to_m0(p), damp_s, damp_t
-    )
+    # sc = 0.
+    # _set_layer_values(
+    #     (
+    #         [sc] * (len(layers.sediment) - 1) + [sc],
+    #         [sc] * (len(layers.crust) - 1) + [sc],
+    #         [sc] * (len(layers.lithospheric_mantle) - 1) + [sc],
+    #         [sc] * len(layers.asthenosphere),
+    #         [sc * 0.01] * len(model.boundary_inds)
+    #     ),
+    #     layers, damp_s, damp_t, 'to_m0'
+    # )
+    # damp_to_m0_mat, damp_to_m0_vec = _damp_constraints(
+    #     _build_constraint_damp_to_m0(p), damp_s, damp_t
+    # )
 
     # Damp towards starting model gradients in Vs
     # sc = 0.
@@ -113,13 +113,13 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
 
     # Put all a priori constraints together
     a_priori_mat = np.vstack((
-        roughness_mat,
-        damp_to_m0_mat,
+        # roughness_mat,
+        # damp_to_m0_mat,
         damp_to_0_grad_mat,
     ))
     a_priori_vec = np.vstack((
-        roughness_vec,
-        damp_to_m0_vec,
+        # roughness_vec,
+        # damp_to_m0_vec,
         damp_to_0_grad_vec,
     ))
 
