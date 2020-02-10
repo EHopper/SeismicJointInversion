@@ -5,6 +5,7 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import scipy
 
 from util import define_models
 from util import mineos
@@ -285,21 +286,6 @@ def test_MonteCarlo(n_MonteCarlo): #n_iter
 
     print(trial + 1, ' TRIALS')
     save_name = 'output/{0}/{0}'.format(setup_model.id)
-    damp_s = pd.read_csv(save_name + 'damp_s.csv')
-    damp_t = pd.read_csv(save_name + 'damp_t.csv')
-    n = 0
-    for label in ['roughness', 'to_m0', 'to_m0_grad']:
-        ax_d = f.add_axes([0.025 + 0.0475 * n, 0.3, 0.0275, 0.6])
-        ax_d.plot(damp_s[label], damp_s.Depth, 'ko-', markersize=3)
-        ax_d.plot(damp_t[label], damp_t.Depth, 'ro', markersize=2)
-        ax_d.set(title=label)
-        ax_d.set_ylim([150, 0])
-        ax_d.xaxis.tick_top()
-        plt.rcParams.update({'axes.titlesize': 'xx-small',
-                             'axes.labelsize': 'xx-small',
-                             'xtick.labelsize': 'xx-small',
-                             'ytick.labelsize': 'xx-small'})
-        n += 1
 
     f.savefig(
         '/media/sf_VM_Shared/rftests/MC_{}N_{}W_{}kmLAB_{}trials.png'.format(
@@ -307,6 +293,136 @@ def test_MonteCarlo(n_MonteCarlo): #n_iter
         )
     )
 
+def run_plot_MC_inversion(setup_model, orig_model,
+                          obs, std_obs, periods, location,
+                          n_MonteCarlo=5, max_runs=10):
+
+    ic = list(range(len(obs) - 2 * len(setup_model.boundaries[0])))
+    i_rf = list(range(ic[-1] + 1, len(obs)))
+    t_LAB = setup_model.boundaries[1][1]
+
+    # Setup the figure and reference plots
+    f, ax_c, ax_dc, ax_rf, ax_m150, ax_mDeep, ax_map = (
+        plots.setup_figure_layout(location, t_LAB)
+    )
+    # Add extra axes for comparisons
+    ax_m1_150 = f.add_axes([0.15, 0.3, 0.15, 0.6])
+    ax_m1_Deep = f.add_axes([0.15, 0.1, 0.15, 0.12])
+    ax_diff_m150 = f.add_axes([0.05, 0.3, 0.05, 0.6])
+    ax_diff_mDeep = f.add_axes([0.05, 0.1, 0.05, 0.12])
+
+    plots.plot_area_map(location, ax_map)
+    # Plot on SR16 values
+    ax_m150.plot(orig_model.vsv, np.cumsum(orig_model.thickness), 'k-',
+                 linewidth=3, label='SR16')
+    ax_mDeep.plot(orig_model.vsv, np.cumsum(orig_model.thickness), 'k-',
+                  linewidth=3, label='SR16')
+    ax_m1_150.plot(orig_model.vsv, np.cumsum(orig_model.thickness), 'k-',
+                 linewidth=3, label='SR16')
+    ax_m1_Deep.plot(orig_model.vsv, np.cumsum(orig_model.thickness), 'k-',
+                  linewidth=3, label='SR16')
+
+
+    # Plot on data
+    plots.plot_ph_vel_data_std(
+        periods, obs[ic].flatten(), std_obs[ic].flatten(), 'data', ax_c
+    )
+    plots.plot_rf_data_std(obs[i_rf], std_obs[i_rf], 'data', ax_rf)
+    ax_dc.errorbar(periods, [0] * len(periods), yerr=std_obs[ic].flatten(),
+                   linestyle='--', color='k', ecolor='k')
+
+    for trial in range(n_MonteCarlo):
+        print('****** MC trial {} ******'.format(trial))
+        # Add noise to starting model
+        t = orig_model.thickness.copy()
+        v = orig_model.vsv.copy()
+        bi = orig_model.boundary_inds.copy()
+        di = define_models._find_depth_indices(t, setup_model.depth_limits)
+        define_models._add_noise_to_starting_model(t, v, bi, di)
+        model = define_models.InversionModel(v, t, bi, di)
+
+        # Plot starting model of this iteration
+        ax_m150.plot(model.vsv, np.cumsum(model.thickness), '-',
+                     color='#BDBDBD', linewidth=1)
+        ax_mDeep.plot(model.vsv, np.cumsum(model.thickness), '-',
+                     color='#BDBDBD', linewidth=1)
+        p = ax_m1_150.plot(model.vsv, np.cumsum(model.thickness), linewidth=0.5)
+        pcol = p[0].get_color()
+        ax_m1_Deep.plot(model.vsv, np.cumsum(model.thickness), linewidth=0.5)
+
+        dc = np.ones_like(periods)
+        old_dc = np.zeros_like(periods)
+        n = 0
+        while  np.sum(abs(dc - old_dc)) > 0.005 * periods.size and n < max_runs:
+            old_dc = dc.copy()
+            # Run inversion
+            print('****** ITERATION ' +  str(n) + ' ******')
+            model, G, o = inversion._inversion_iteration(setup_model, model, location,
+                                                      (obs, std_obs, periods))
+
+            # Read ouput file to check change in predicted phase velocities
+            c = mineos._read_qfile('output/{0}/{0}.q'.format(setup_model.id), periods)
+            dc = np.array([c[i] - obs[ic[i]] for i in range(len(c))])
+            n += 1
+            if n == 1:
+                plots.plot_model(model, 'MC{}_m{}'.format(trial, n), ax_m1_150,
+                                 (0, 150), True, pcol)
+                plots.plot_model(model, 'MC{}_m{}'.format(trial, n), ax_m1_Deep,
+                                 (150, setup_model.depth_limits[1]), False, pcol)
+
+        # Plot values for final model
+        plots.plot_model(model, 'MC{}_m{}'.format(trial, n), ax_m150, (0, 150))
+        plots.plot_model(model, 'MC{}_m{}'.format(trial, n), ax_mDeep,
+                         (150, setup_model.depth_limits[1]), False)
+        if trial == 0:
+            base_z = np.arange(0, setup_model.depth_limits[1], 0.5)
+            base_v = np.interp(base_z, np.cumsum(model.thickness), model.vsv.ravel())
+            orig_v = np.interp(base_z, np.cumsum(orig_model.thickness), orig_model.vsv.ravel())
+
+            # Plot on mismatch to SR16
+            ax_diff_m150.plot(orig_v - base_v, base_z, 'k--', label='SR16')
+            ax_diff_m150.xaxis.set_label_position('top')
+            ax_diff_m150.xaxis.tick_top()
+            ax_diff_m150.set(xlabel='Difference in Vsv (km/s)', ylabel='Depth (km)')
+            ax_diff_mDeep.plot(orig_v - base_v, base_z, 'k--', label='SR16')
+            ax_diff_mDeep.xaxis.set_label_position('top')
+            ax_diff_mDeep.xaxis.tick_top()
+            ax_diff_mDeep.set(xlabel='Difference in Vsv (km/s)', ylabel='Depth (km)')
+            maxdiff = 0
+
+        # Plot on difference compared to other MC trials
+        trial_v = np.interp(base_z, np.cumsum(model.thickness), model.vsv.ravel())
+        ax_diff_m150.plot(trial_v - base_v, base_z, '-',
+                          label='MC{}_m{}'.format(trial, n), color=pcol)
+        ax_diff_mDeep.plot(trial_v - base_v, base_z, '-',
+                           label='MC{}_m{}'.format(trial, n), color=pcol)
+        maxdiff = max(max(abs(trial_v - base_v)), maxdiff)
+
+
+        p_rf = inversion._predict_RF_vals(model)
+        plots.plot_rf_data(p_rf, 'MC{}_m{}'.format(trial, n), ax_rf)
+        c = mineos.calculate_c_from_card(setup_model, model, periods)
+        dc = [c[i] - obs[ic[i]] for i in range(len(c))]
+        plots.plot_ph_vel(periods, c, 'MC{}_m{}'.format(trial, n), ax_c)
+        plots.plot_dc(periods, dc, ax_dc)
+
+    # Tidy up the plots
+    ax_dc.set_ylim(max(max(abs(np.array(dc))) * 1.25, 0.06) * np.array([-1, 1]))
+    xl = maxdiff * 1.1 * np.array([-1, 1])
+    ax_diff_m150.set(ylim = [150, 0], xlim = xl)
+    ax_diff_mDeep.set(ylim = [setup_model.depth_limits[1], 150], xlim = xl)
+    plots.make_plot_symmetric_in_y_around_zero(ax_rf)
+    ax_m150.set_xlim([2, 5.5])
+    ax_mDeep.set_xlim([2, 5.5])
+    ax_m1_150.set_xlim([2, 5.5])
+    ax_m1_Deep.set_xlim([2, 5.5])
+    ax_c.set_ylim([2, 4.5])
+
+    f.savefig(
+        '/media/sf_VM_Shared/rftests/{}N_{}W_{}kmLAB{}_{}MC.png'.format(
+        location[0], -location[1], round(t_LAB), setup_model.id, n_MonteCarlo
+        )
+    )
 
 def run_plot_inversion(setup_model, model,
                        obs, std_obs, periods, location, m, max_runs=10):
@@ -314,8 +430,6 @@ def run_plot_inversion(setup_model, model,
     ic = list(range(len(obs) - 2 * len(setup_model.boundaries[0])))
     i_rf = list(range(ic[-1] + 1, len(obs)))
 
-    #setup_model = setup_model._replace(boundary_names = [])
-    save_name = 'output/{0}/{0}.q'.format(setup_model.id)
     t_LAB = model.thickness.item(model.boundary_inds[-1] + 1)
 
     # Setup the figure and reference plots
@@ -350,7 +464,7 @@ def run_plot_inversion(setup_model, model,
         plots.plot_model(model, 'm' + str(n), ax_mDeep,
                          (150, setup_model.depth_limits[1]), False)
 
-        # Plot predicted RF vals of previous iteration
+        # Plot predicted RF vals of this iteration
         p_rf = inversion._predict_RF_vals(model)
         plots.plot_rf_data(p_rf, 'm' + str(n), ax_rf)
 
@@ -360,7 +474,7 @@ def run_plot_inversion(setup_model, model,
                                                   (obs, std_obs, periods))
 
         # Plot predicted c from previous iteration (calculated for inversion)
-        c = mineos._read_qfile(save_name, periods)
+        c = mineos._read_qfile('output/{0}/{0}.q'.format(setup_model.id), periods)
         dc = np.array([c[i] - obs[ic[i]] for i in range(len(c))])
         plots.plot_ph_vel(periods, c, 'm' + str(n), ax_c)
         plots.plot_dc(periods, dc, ax_dc)
@@ -387,16 +501,20 @@ def run_plot_inversion(setup_model, model,
     ax_c.set_ylim([2, 4.5])
 
     # Plot on the damping parameters
-    plots.plot_damping_params(setup_model.id, f)
+    #plots.plot_damping_params(setup_model.id, f)
 
     # Print on the observed constraints
     obs_c_t = ['{:3.0f} s: {:.3f} {:s} {:.2f} km/s'.format(
         periods[i], obs.item(i), u'\u00B1', std_obs.item(i)
         ) for i in range(len(periods))]
-    obs_rf_t = ['Moho tt: {:3.1f} {:s} {:.2f} s'.format(obs.item(-4), u'\u00B1', std_obs.item(-4)),
-                'Moho dV: {:3.2f} {:s} {:.2f} km/s'.format(obs.item(-2), u'\u00B1', std_obs.item(-2)),
-                ' LAB tt: {:3.1f} {:s} {:.2f} s'.format(obs.item(-3), u'\u00B1', std_obs.item(-3)),
-                ' LAB dV: {:3.2f} {:s} {:.2f} km/s'.format(obs.item(-1), u'\u00B1', std_obs.item(-1))]
+    obs_rf_t = ['Moho tt: {:3.1f} {:s} {:.2f} s'.format(
+                        obs.item(-4), u'\u00B1', std_obs.item(-4)),
+                'Moho dV: {:3.0f} {:s} {:.0f} %'.format(
+                            obs.item(-2) * 100, u'\u00B1', std_obs.item(-2) * 100),
+                ' LAB tt: {:3.1f} {:s} {:.2f} s'.format(
+                            obs.item(-3), u'\u00B1', std_obs.item(-3)),
+                ' LAB dV: {:3.0f} {:s} {:.0f} %'.format(
+                            obs.item(-1) * 100, u'\u00B1', std_obs.item(-1) * 100)]
     ax_t = f.add_axes([0.05, 0.1, 0.3, 0.15])
     ax_t.set_axis_off()
     i = 0
@@ -418,28 +536,36 @@ def run_plot_inversion(setup_model, model,
     return model, G, o
 
 
-def try_run(location:tuple, t_LAB:float):
+def try_run(location:tuple, t_BLs:tuple):
 
-
-    sm = define_models.SetupModel('r_0_0g_05_lab5',
+    t_Moho, t_LAB = t_BLs
+    sm = define_models.SetupModel('_fakeMoho',
                                   min_layer_thickness=6,
-                                  depth_limits=(0, 350))
+                                  depth_limits=(0, 350),
+                                  boundaries=(('Moho','LAB'), [t_Moho, t_LAB]),
+                                  )
     t, v = constraints.get_vels_ShenRitzwoller2016(location)
-    d = np.cumsum(t)
+    #d = np.cumsum(t)
     #v[0:3] = [v[3]] * 3 # remove lowest velocity layer
     #v[64:200] = [v[64]] * (200 - 64) # add in a clear high velocity lid
     #v[64:] = [v[64]] * (len(v) - 64)
-    define_models._fill_in_base_of_model(t, v, sm)
+    # Add in boundary layers at arbitary places
     bi = np.array([63, 199])
-    t = np.array(t)
+    t[bi[0] + 1] = t_Moho
     t[bi[1] + 1] = t_LAB
-    v = np.hstack((
-        v[:200], np.interp(sum(t[:200]) + np.cumsum(t[200:]),
-                           [sum(t[:200]), sum(t)],
-                           [v[200], v[-1]]
-                           )
-    ))
-    # Smooth across base of model
+
+    define_models._fill_in_base_of_model(t, v, sm)
+    t = np.array(t)
+    v = np.array(v)
+
+    # Smooth from base of the lithosphere to the base of the model
+    # v = np.hstack((
+    #     v[:200], np.interp(sum(t[:200]) + np.cumsum(t[200:]),
+    #                        [sum(t[:200]), sum(t)],
+    #                        [v[200], v[-1]]
+    #                        )
+    # ))
+
     thickness, vsv, boundary_inds = define_models._return_evenly_spaced_model(
         t, v, bi, sm.min_layer_thickness,
     )
@@ -450,10 +576,10 @@ def try_run(location:tuple, t_LAB:float):
         boundary_inds = np.array(boundary_inds),
         d_inds = define_models._find_depth_indices(thickness, sm.depth_limits),
     )
-    mineos_model = define_models.convert_inversion_model_to_mineos_model(m, sm)
+    # mineos_model = define_models.convert_inversion_model_to_mineos_model(m, sm)
 
     # Get predicted values
-    rf_p = inversion._predict_RF_vals(m)
+    # rf_p = inversion._predict_RF_vals(m)
     obs, std_obs, periods = constraints.extract_observations(
             location, sm.id, sm.boundaries, sm.vpv_vsv_ratio
             )
@@ -472,14 +598,111 @@ def try_run(location:tuple, t_LAB:float):
     return run_plot_inversion(sm, m0, obs,
                        std_obs, periods, location, m, max_runs
                        )
+    #return run_plot_MC_inversion(sm, m, obs, std_obs, periods, location)
 
 def loop_through_locs():
 
-    for lat in range(34, 41, 1):#range(34, 41):
-        for lon in range(-115, -105, 1):
-            for t_LAB in [5.]:#[30., 25., 20., 15., 10.]:
+    for t_LAB in [5]:
+        for lat in range(33, 43, 1):
+            for lon in range(-115, -105, 1):
+                t_Moho = 3.
+                m, G, o = try_run((lat, lon), (t_Moho, t_LAB))
 
-                m, G, o = try_run((lat, lon), t_LAB)
-
-                fname = '{}N_{}W_{}kmLAB'.format(lat, lon, t_LAB)
+                fname = '{}N_{}W_{}kmLAB_fakeMoho'.format(lat, lon, t_LAB)
                 define_models.save_model(m, fname)
+
+def load_models(zmax=300):
+    z = np.arange(0, min((zmax, 300)), 0.5)
+    lats = np.arange(33, 43)
+    lons = np.arange(-115, -105)
+    t_LAB = 5
+    vs, bls, bis = define_models.load_all_models(z, lats, lons, t_LAB, '_newstd')
+
+    return vs, bls, bis, z, lats, lons
+
+def compare_models(ref):
+
+    #ref = 'S15', 'SR16'
+    ds = constraints.load_literature_vel_model(ref)
+    vs, bls, bis, z, lats, lons = load_models(ds.depth.values[-1])
+    vs_a = constraints.interpolate_lit_model(ref, z, lats, lons)
+
+    # for d in range(60, 100, 5):
+    #     plots.plot_map(vs - vs_a, lats, lons, z, d)
+    #     cl = plt.gci().get_clim()
+    #     #plt.clim(max(np.abs(cl)) * np.array([-1, 1]))
+    #     plt.clim([-0.3, 0.3])
+    #     plt.title('My model - {}'.format(ref))
+
+    return vs, vs_a, lats, lons, z
+
+def load_stuff():
+
+    z = np.arange(0, 300, 0.5)
+    lats = np.arange(33, 43)
+    lons = np.arange(-115, -105)
+    t_LAB = 5.
+    vs, bls, bis = define_models.load_all_models(z, lats, lons, t_LAB)
+
+    v_above_LAB = np.zeros_like(vs[:, :, 0])
+    v_below_LAB = np.zeros_like(v_above_LAB)
+    v_above_Moho = np.zeros_like(v_above_LAB)
+    v_below_Moho = np.zeros_like(v_above_LAB)
+    for ila in range(vs.shape[0]):
+        for ilo in range(vs.shape[1]):
+            v_above_Moho[ila, ilo] = vs[ila, ilo, bis[ila, ilo, 0]]
+            v_below_Moho[ila, ilo] = vs[ila, ilo, bis[ila, ilo, 1]]
+            v_above_LAB[ila, ilo] = vs[ila, ilo, bis[ila, ilo, 2]]
+            v_below_LAB[ila, ilo] = vs[ila, ilo, bis[ila, ilo, 3]]
+    return z, lats, lons, vs, bls, bis, v_above_LAB, v_below_LAB, v_above_Moho, v_below_Moho
+
+def get_vlayer():
+    z = np.arange(0, 300, 0.5)
+    lats = np.arange(33, 43)
+    lons = np.arange(-115, -105)
+    t_LAB = 5.
+    vs, bls, bis = define_models.load_all_models(z, lats, lons, t_LAB)
+    offset_km = 20
+
+    vlayer = np.zeros_like(vs[:, :, 0])
+    for ila in range(vs.shape[0]):
+        for ilo in range(vs.shape[1]):
+            Moho_top = bis[ila, ilo, 0]
+            Moho_base = bis[ila, ilo, 1]
+            LAB_top = bis[ila, ilo, 2]
+            LAB_base = bis[ila, ilo, 3]
+            offset = int(offset_km // np.diff(z[:2]))
+
+
+            dind = Moho_base + offset
+            vlayer[ila, ilo] = vs[ila, ilo, dind]
+    return vlayer
+
+def pull_Moho(ref):
+
+    ds = constraints.load_literature_vel_model(ref)
+    lats = ds.latitude.values
+    lons = ds.longitude.values
+    z = ds.depth.values
+    vs = ds.vs.values
+    moho_z = np.zeros_like(vs[0, :, :])
+    moho_dv = np.zeros_like(vs[0, :, :])
+    ila = 0
+    ilo = 0
+    iz = np.argmax(z > 20) # only returns index of first max val
+    for lat in lats:
+        for lon in lons:
+            Moho_ind = np.argmax(np.diff(vs[iz:, ila, ilo])) + iz
+            moho_z[ila, ilo] = z[Moho_ind]
+            maxi = 1 #np.argmax(vs[Moho_ind:Moho_ind + int(10 / np.diff(z[:2])), ila, ilo])
+            moho_dv[ila, ilo] = (
+                vs[Moho_ind + maxi, ila, ilo] - vs[Moho_ind, ila, ilo])
+                    #vs[Moho_ind + maxi, ila, ilo] / vs[Moho_ind, ila, ilo] - 1)
+            ilo += 1
+        ila += 1
+        ilo = 0
+
+    if lons[0] > 180:
+        lons -= 360
+
+    return moho_z, moho_dv, lats, lons

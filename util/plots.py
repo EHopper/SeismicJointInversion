@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import sklearn.cluster as sklclust
+
 
 from util import define_models
 from util import mineos
@@ -9,15 +11,21 @@ from util import partial_derivatives
 from util import weights
 from util import constraints
 
+
 def make_fig():
     plt.figure(figsize=(10,8))
     return plt.subplot(1, 1, 1)
 
-def plot_model(model, label, ax, depth_range=(), iflegend=True):
+def plot_model(model, label, ax, depth_range=(), iflegend=True, col=False):
     depth = np.cumsum(model.thickness)
     for ib in model.boundary_inds:
         ax.axhline(depth[ib], linestyle=':', color='#e0e0e0')
-    line, = ax.plot(model.vsv, depth, '-o', markersize=2, label=label)
+
+    if col:
+        ax.plot(model.vsv, depth, '-o', markersize=2, label=label, color=col)
+    else:
+        line, = ax.plot(model.vsv, depth, '-o', markersize=2, label=label)
+
     if depth_range:
         ax.set_ylim([depth_range[1], depth_range[0]])
     else:
@@ -117,6 +125,7 @@ def plot_area_map(location, ax_map):
     vs_SL14 = pd.read_csv('data/earth_models/CP_SL14.csv',
                            header=None).values
     cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
+    cp_outline = np.vstack((cp_outline, cp_outline[0, :]))
 
     im = ax_map.contourf(np.arange(-119, -100.9, 0.2),
         np.arange(30, 45.1, 0.2), vs_SL14, levels=20,
@@ -216,3 +225,362 @@ def plot_G(G, model, periods):
     plt.legend(fontsize='xx-small')
     ax2.set(ylabel='abs(G)', xlabel='Model', xticks=d)
     ax2.set_xticklabels(mlabs, rotation=90)
+
+
+def plot_results_map(depth, t_LAB=5., vmi=0, vma=0, ifsave=False):
+    f = plt.figure(figsize=(6, 6))
+    ax_map = f.add_axes([0.1, 0.2, 0.8, 0.7])
+
+    z = np.arange(0, 300, 5)
+    lats = np.arange(33, 43)
+    lons = np.arange(-115, -105)
+    vs, bls, bis = define_models.load_all_models(z, lats, lons, t_LAB)
+    cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
+    cp_outline = np.vstack((cp_outline, cp_outline[0, :]))
+    idep = np.argmin(abs(z - depth))
+
+    if vmi == 0:
+        if z[idep] < 40:
+            vmi = 3.
+            vma = 4.
+        else:
+            vmi = 3.75
+            vma = 4.5
+    im = ax_map.imshow(vs[:, :, idep], cmap=plt.cm.RdBu, aspect=1.4,
+                       vmin=vmi, vmax=vma)
+    ax_map.set(xticks=range(len(lons)), xticklabels = abs(lons),
+               yticks=range(len(lats)), yticklabels = lats,
+               xlabel='Longitude (W)', ylabel='Latitude (N)')
+    c = plt.colorbar(im, cax=f.add_axes([0.15, 0.1, 0.7, 0.02]),
+                      orientation='horizontal')
+    c.ax.set_xlabel('Vsv (km/s)')
+    ax_map.set_title('Velocity slice at {} km'.format(z[idep]))
+    ax_map.set_ylim((0, len(lats) - 1))
+    ax_map.plot(cp_outline[:, 1] - lons[0],
+                cp_outline[:, 0] - lats[0], 'k:')
+
+    if ifsave:
+        plt.savefig(
+            '/media/sf_VM_Shared/rftests/map_{}kmLAB_{}kmDepth.png'.format(
+            t_LAB, z[idep]
+            )
+        )
+    return ax_map
+
+def plot_BLs_map(t_LAB=5.):
+    f = plt.figure(figsize=(14, 6))
+    ax_bl1 = f.add_axes([0.1, 0.2, 0.4, 0.7])
+    ax_bl2 = f.add_axes([0.55, 0.2, 0.4, 0.7])
+
+    z = np.arange(0, 300, 5)
+    lats = np.arange(33, 43)
+    lons = np.arange(-115, -105)
+    vs, bls, bis = define_models.load_all_models(z, lats, lons, t_LAB)
+    cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
+    cp_outline = np.vstack((cp_outline, cp_outline[0, :]))
+
+    im = ax_bl1.imshow(bls[:, :, 0], cmap=plt.cm.RdBu, aspect=1.4)
+    ax_bl1.set(xticks=range(len(lons)), xticklabels = abs(lons),
+               yticks=range(len(lats)), yticklabels = lats,
+               xlabel='Longitude (W)', ylabel='Latitude (N)')
+    c1 = plt.colorbar(im, cax=f.add_axes([0.15, 0.1, 0.3, 0.02]),
+                      orientation='horizontal')
+    c1.ax.set_xlabel('Moho Depth (km)')
+    ax_bl1.set_title('Moho Depth')
+    ax_bl1.set_ylim((0, len(lats) - 1))
+    ax_bl1.plot(cp_outline[:, 1] - lons[0],
+                cp_outline[:, 0] - lats[0], 'k:')
+
+    im2 = ax_bl2.imshow(bls[:, :, 1], cmap=plt.cm.RdBu, aspect=1.4)
+    ax_bl2.set(xticks=range(len(lons)), xticklabels = abs(lons),
+               yticks=range(len(lats)), yticklabels = lats,
+               xlabel='Longitude (W)', ylabel='Latitude (N)')
+    c2 = plt.colorbar(im2, cax=f.add_axes([0.6, 0.1, 0.3, 0.02]),
+                      orientation='horizontal')
+    c2.ax.set_xlabel('LAB Depth (km)')
+    ax_bl2.set_title('LAB Depth')
+    ax_bl2.set_ylim((0, len(lats) - 1))
+    ax_bl2.plot(cp_outline[:, 1] - lons[0],
+                cp_outline[:, 0] - lats[0], 'k:')
+
+    plt.savefig(
+        '/media/sf_VM_Shared/rftests/map_BLdepths.png'
+    )
+
+def plot_BLs_dVs_map(t_LAB=5.):
+    f = plt.figure(figsize=(14, 6))
+    ax_bl1 = f.add_axes([0.1, 0.2, 0.4, 0.7])
+    ax_bl2 = f.add_axes([0.55, 0.2, 0.4, 0.7])
+
+    z = np.arange(0, 300, 5)
+    lats = np.arange(33, 43)
+    lons = np.arange(-115, -105)
+    vs, bls, bis = define_models.load_all_models(z, lats, lons, t_LAB)
+    cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
+    cp_outline = np.vstack((cp_outline, cp_outline[0, :]))
+
+    im = ax_bl1.imshow(bls[:, :, 2] * 100, cmap=plt.cm.RdBu_r, aspect=1.4,
+                       vmin=0, vmax=np.quantile(bls[:, :, 2], 0.95) * 100)
+    ax_bl1.set(xticks=range(len(lons)), xticklabels = abs(lons),
+               yticks=range(len(lats)), yticklabels = lats,
+               xlabel='Longitude (W)', ylabel='Latitude (N)')
+    c1 = plt.colorbar(im, cax=f.add_axes([0.15, 0.1, 0.3, 0.02]),
+                      orientation='horizontal')
+    c1.ax.set_xlabel('Moho dVs (%)')
+    ax_bl1.set_title('Moho dVs')
+    ax_bl1.set_ylim((0, len(lats) - 1))
+    ax_bl1.plot(cp_outline[:, 1] - lons[0],
+                cp_outline[:, 0] - lats[0], 'k:')
+
+    im2 = ax_bl2.imshow(bls[:, :, 3] * 100, cmap=plt.cm.RdBu, aspect=1.4,
+                        vmin=np.quantile(bls[:, :, 3], 0.05) * 100, vmax=0)
+    ax_bl2.set(xticks=range(len(lons)), xticklabels = abs(lons),
+               yticks=range(len(lats)), yticklabels = lats,
+               xlabel='Longitude (W)', ylabel='Latitude (N)')
+    c2 = plt.colorbar(im2, cax=f.add_axes([0.6, 0.1, 0.3, 0.02]),
+                      orientation='horizontal')
+    c2.ax.set_xlabel('LAB dVs (%)')
+    ax_bl2.set_title('LAB dVs')
+    ax_bl2.set_ylim((0, len(lats) - 1))
+    ax_bl2.plot(cp_outline[:, 1] - lons[0],
+                cp_outline[:, 0] - lats[0], 'k:')
+
+    plt.savefig(
+        '/media/sf_VM_Shared/rftests/map_BLdVs.png'
+    )
+
+
+def plot_map(vs, lats, lons, z, depth, label='', vmi=0, vma=0):
+    f = plt.figure(figsize=(6, 6))
+    ax_map = f.add_axes([0.1, 0.2, 0.8, 0.7])
+    idep = np.argmin(abs(z - depth))
+    if vmi == 0:
+        if z[idep] < 40:
+            vmi = 3.
+            vma = 4.
+        else:
+            vmi = 3.75
+            vma = 4.5
+
+
+    im = plt.imshow(vs[:, :, idep], cmap=plt.cm.RdBu, aspect=1.4,
+                    vmin=vmi, vmax=vma)
+    ax_map.set(xticks=range(len(lons)), xticklabels = abs(lons),
+               yticks=range(len(lats)), yticklabels = lats,
+               xlabel='Longitude (W)', ylabel='Latitude (N)')
+
+    c = plt.colorbar(im, cax=f.add_axes([0.15, 0.075, 0.7, 0.02]),
+                      orientation='horizontal')
+    c.ax.set_xlabel('Vsv (km/s)')
+    ax_map.set_title('Velocity slice at {} km'.format(z[idep]))
+    ax_map.set_ylim((0, len(lats) - 1))
+
+    cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
+    cp_outline = np.vstack((cp_outline, cp_outline[0, :]))
+    ax_map.plot(cp_outline[:, 1] - lons[0],
+                cp_outline[:, 0] - lats[0], 'k:')
+
+    plt.savefig(
+        '/media/sf_VM_Shared/rftests/map_{}_{}kmDepth.png'.format(
+        label, z[idep]
+        )
+    )
+
+def plot_map_2D(vals, lats, lons, vmi=0, vma=0):
+    f = plt.figure(figsize=(6, 6))
+    ax_map = f.add_axes([0.1, 0.2, 0.8, 0.7])
+
+    im = plt.imshow(vals[:, :], cmap=plt.cm.RdBu, aspect=1.4,
+                    vmin=vmi, vmax=vma)
+    lon_inc = len(lons) // 10
+    lat_inc = len(lats) // 10
+    ax_map.set(xticks=range(0, len(lons), lon_inc), xticklabels = abs(lons[::lon_inc]),
+               yticks=range(0,len(lats), lat_inc), yticklabels = lats[::lat_inc],
+               xlabel='Longitude (W)', ylabel='Latitude (N)')
+
+    c = plt.colorbar(im, cax=f.add_axes([0.15, 0.075, 0.7, 0.02]),
+                      orientation='horizontal')
+    ax_map.set_ylim((0, len(lats) - 1))
+
+    cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
+    cp_outline = np.vstack((cp_outline, cp_outline[0, :]))
+    ax_map.plot(convert_latlons(cp_outline[:, 1], lons),
+                convert_latlons(cp_outline[:, 0], lats), 'k:')
+
+    return ax_map
+
+def plot_map_2D_r(vals, lats, lons, vmi=0, vma=0):
+    f = plt.figure(figsize=(6, 6))
+    ax_map = f.add_axes([0.1, 0.2, 0.8, 0.7])
+
+    im = plt.imshow(vals[:, :], cmap=plt.cm.RdBu_r, aspect=1.4,
+                    vmin=vmi, vmax=vma)
+    lon_inc = len(lons) // 10
+    lat_inc = len(lats) // 10
+    ax_map.set(xticks=range(0, len(lons), lon_inc), xticklabels = abs(lons[::lon_inc]),
+               yticks=range(0,len(lats), lat_inc), yticklabels = lats[::lat_inc],
+               xlabel='Longitude (W)', ylabel='Latitude (N)')
+
+    c = plt.colorbar(im, cax=f.add_axes([0.15, 0.075, 0.7, 0.02]),
+                      orientation='horizontal')
+    ax_map.set_ylim((0, len(lats) - 1))
+
+    cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
+    cp_outline = np.vstack((cp_outline, cp_outline[0, :]))
+    ax_map.plot(convert_latlons(cp_outline[:, 1], lons),
+                convert_latlons(cp_outline[:, 0], lats), 'k:')
+
+    return ax_map
+
+def convert_latlons(map_points, loc_vector):
+    return (map_points - loc_vector[0]) / np.diff(loc_vector[:2])
+
+def plot_phase_vels_margins():
+    # locs = [(39,-113), (38,-113), (37, -114), (36, -113), (35, -113),
+    #         (35, -112), (34, -111), (34, -110), (34, -109), (35, -108),
+    #         (35, -107), (36, -107), (37, -107), (38, -108), (39, -107)]
+    locs = []
+    for lat in range(34, 41):
+        for lon in [-114, -113, -108, -107]:
+            locs += [(lat, lon)]
+
+    phv_all = constraints._load_observed_sw_constraints()
+
+    i = 0
+    for loc in locs:
+        a = constraints._extract_phase_vels(loc, (1, phv_all))
+        if i == 0:
+            phv = np.zeros((len(a), len(locs)))
+        phv[:, i] = a.ph_vel.values
+        i += 1
+    cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
+    cp_outline = np.vstack((cp_outline, cp_outline[0, :]))
+
+    f = plt.figure(figsize=(15, 6))
+    ax_m = f.add_axes([0.35, 0.1, 0.3, 0.8])
+    ax_m.plot(cp_outline[:, 1], cp_outline[:, 0], 'k-')
+
+    yl = ax_m.get_ylim()
+    yl = (yl[0], max(lat + 1.5, yl[1]))
+    ax_m.set_ylim(yl)
+
+    i = 0
+    for loc in locs:
+        p = ax_m.plot(loc[1], loc[0], '^')
+        if loc[1] < -110:
+            st_x = 0.02
+        else:
+            st_x = 0.67
+        if i % 2:
+            st_x += 0.125
+        st_y = float((loc[0] - yl[0])/(np.diff(yl))) + 0.01
+
+        aa = f.add_axes([st_x, st_y, 0.18, 0.15])
+        _plot_c_one_colour(phv, a.period, i, p, aa)
+        aa.set_axis_off()
+
+        i += 1
+
+    return
+
+def _plot_c_one_colour(phv, periods, i, p, ax):
+
+    for ip in range(phv.shape[1]):
+        ax.plot(periods, phv[:, ip], color='#E4E4E4')
+    ax.plot(periods, phv[:, i], '-o', color=p[0].get_color(), markersize=2)
+    ax.plot(periods[10], phv[10, i], '*', color=p[0].get_color())
+
+def plot_all_v_models_on_map():
+    z = np.arange(0, 300, 0.5)
+    lats = np.arange(33, 43)
+    lons = np.arange(-115, -105)
+    t_LAB = 5.
+    #vs, bls, bis = define_models.load_all_models(z, lats, lons, t_LAB)
+    vs = constraints.interpolate_lit_model('C15', z, lats, lons)
+    cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
+    cp_outline = np.vstack((cp_outline, cp_outline[0, :]))
+    f = plt.figure(figsize=(10, 12))
+    a = f.add_axes([0.1, 0.1, 0.8, 0.8], aspect=1.2)
+    a.plot(cp_outline[:, 1], cp_outline[:, 0], 'k-')
+    a.set(xlim=[lons[0]-0.5, lons[-1]+0.5], ylim=[lats[0]-0.5, lats[-1]+0.5],
+          xlabel='Longitude (W)', ylabel='Latitude (N)')
+
+    vlim = (3.5, 4.7)
+    zlim = (0, 150)
+
+    vz = vs[:, :, (zlim[0] <= z) & (z < zlim[1])]
+    maxv = (np.quantile(np.quantile(vz, 0.75, 0), 0.75, 0) - vlim[0]) / np.diff(vlim) - 0.5
+    minv = (np.quantile(np.quantile(vz, 0.25, 0), 0.25, 0) - vlim[0]) / np.diff(vlim) - 0.5
+    maxv[maxv < -0.5] = -0.5
+    minv[minv < -0.5] = -0.5
+
+    for ila in range(len(lats)):
+        for ilo in range(len(lons)):
+
+            v = (vz[ila, ilo, :] - vlim[0]) / np.diff(vlim) - 0.5
+            v[v < -0.5] = -0.5
+            v += lons[ilo]
+            pz = np.linspace(lats[ila] + 0.5, lats[ila] - 0.5, len(v))
+            a.fill(np.append(maxv + lons[ilo], minv[::-1] + lons[ilo]),
+                   np.append(pz, pz[::-1]), color='#8B8B8B')
+            a.plot(v, pz, 'r-', linewidth=1)
+
+            a.plot(lons[ilo] + np.array([-0.5, -0.5, 0.5, 0.5, -0.5]),
+                   lats[ila] + np.array([-0.5, 0.5, 0.5, -0.5, -0.5]),
+                   color='#F7F7F7', linewidth=2)
+
+def plot_v_model_comparison_on_map():
+    z = np.arange(0, 300, 0.5)
+    lats = np.arange(33, 43)
+    lons = np.arange(-115, -105)
+    t_LAB = 5.
+
+    vs, bls, bis = define_models.load_all_models(z, lats, lons, t_LAB)
+    lit_models = ('Y14','P14','P15','C15','S15','SR16','F18')
+    vs_lit = np.zeros((vs.shape[0], vs.shape[1], vs.shape[2], len(lit_models)))
+
+    cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
+    cp_outline = np.vstack((cp_outline, cp_outline[0, :]))
+    f = plt.figure(figsize=(8, 12))
+    a = f.add_axes([0.1, 0.1, 0.7, 0.8], aspect=1.2)
+    a.plot(cp_outline[:, 1], cp_outline[:, 0], '-', color='#BDBDBD')
+    a.set(xlim=[lons[0]-0.5, lons[-1]+0.5], ylim=[lats[0]-0.5, lats[-1]+0.5],
+          xlabel='Longitude (W)', ylabel='Latitude (N)')
+
+    a_leg = f.add_axes([0.85, 0.3, 0.1, 0.4])
+    i = 0
+    cols = []
+    for mod in lit_models:
+        vs_lit[:, :, :, i] = constraints.interpolate_lit_model(mod, z, lats, lons)
+        p = a_leg.plot([0, 1], [i] * 2)
+        cols += [p[0].get_color()]
+        a_leg.text(1.5, i, mod, va='center')
+        i += 1
+    a_leg.set_axis_off()
+    a_leg.set_xlim([0, 3])
+
+    vlim = (3.5, 4.7)
+    zlim = (0, 150)
+
+    vz = vs[:, :, (zlim[0] <= z) & (z < zlim[1])]
+    vs_lit_z = vs_lit[:, :, (zlim[0] <= z) & (z < zlim[1]), :]
+
+    for ila in range(len(lats)):
+        for ilo in range(len(lons)):
+            pz = np.linspace(lats[ila] + 0.5, lats[ila] - 0.5, vz.shape[2])
+            i = 0
+            for mod in lit_models:
+                a.plot(_scale_vel_profile(vs_lit_z[ila, ilo, :, i], vlim, lons[ilo]),
+                       pz, linewidth=2, color=cols[i])
+                i += 1
+            a.plot(_scale_vel_profile(vz[ila, ilo, :], vlim, lons[ilo]),
+                   pz, 'k-', linewidth=2)
+
+            a.plot(lons[ilo] + np.array([-0.5, -0.5, 0.5, 0.5, -0.5]),
+                   lats[ila] + np.array([-0.5, 0.5, 0.5, -0.5, -0.5]),
+                   color='#F7F7F7', linewidth=2)
+
+def _scale_vel_profile(v, vlim, lon):
+    v_sv = (v - vlim[0]) / np.diff(vlim) - 0.5
+    v_sv[v_sv < -0.5] = -0.5
+    return v_sv + lon
