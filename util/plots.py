@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import sklearn.cluster as sklclust
+import scipy.interpolate
+import sklearn.linear_model
 
 
 from util import define_models
@@ -199,8 +201,9 @@ def plot_G(G, model, periods):
     f = plt.figure(figsize=(10, 5))
     a = f.add_axes([0, 0, 1, 1])
     a.text(0.45, 0.95, 'abs(G) as stacked bar')
-    ax1 = f.add_axes([0.1, 0.2, 0.4, 0.7])
-    pp = np.hstack((periods, periods[-1] + 10 + [0, 5, 10, 15]))
+    ax1 = f.add_axes([0.1, 0.2, 0.8, 0.7])
+    # pp = np.hstack((periods, periods[-1] + 10 + [0, 5, 10, 15]))
+    pp = periods
     for i in range(G.shape[1]):
         if i < 18 or i > G.shape[1] - 3:
             plt.bar(pp, abs(G[:, i]), bottom=np.sum(abs(G[:, :i]), 1),
@@ -216,7 +219,8 @@ def plot_G(G, model, periods):
         np.sum(model.thickness[:model.boundary_inds[1] + 1]),
     ))
 
-    ax2 = f.add_axes([0.55, 0.2, 0.4, 0.7])
+    f = plt.figure(figsize=(10, 5))
+    ax2 = f.add_axes([0.1, 0.2, 0.8, 0.7])
     d = np.cumsum(model.thickness[:-1])
     d = np.hstack((d, d[-1] + [6, 12]))
     for i in range(G.shape[0]):
@@ -359,9 +363,10 @@ def plot_map(vs, lats, lons, z, depth, label='', vmi=0, vma=0):
             vmi = 3.
             vma = 4.
         else:
-            vmi = 3.75
-            vma = 4.5
-
+            # vmi = 3.75
+            # vma = 4.5
+            vmi = np.mean(vs[:, :, idep] - 0.2)
+            vma = np.mean(vs[:, :, idep] + 0.2)
 
     im = plt.imshow(vs[:, :, idep], cmap=plt.cm.RdBu, aspect=1.4,
                     vmin=vmi, vmax=vma)
@@ -373,12 +378,12 @@ def plot_map(vs, lats, lons, z, depth, label='', vmi=0, vma=0):
                       orientation='horizontal')
     c.ax.set_xlabel('Vsv (km/s)')
     ax_map.set_title('Velocity slice at {} km'.format(z[idep]))
-    ax_map.set_ylim((0, len(lats) - 1))
+    ax_map.set_ylim((-0.5, len(lats) - 0.5))
+    ax_map.set_xlim((-0.5, len(lons) - 0.5))
 
-    cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
-    cp_outline = np.vstack((cp_outline, cp_outline[0, :]))
-    ax_map.plot(cp_outline[:, 1] - lons[0],
-                cp_outline[:, 0] - lats[0], 'k:')
+    _plot_States(ax_map, lats, lons)
+    _plot_Colorado_Plateau(ax_map, lats, lons)
+
 
     plt.savefig(
         '/media/sf_VM_Shared/rftests/map_{}_{}kmDepth.png'.format(
@@ -386,20 +391,46 @@ def plot_map(vs, lats, lons, z, depth, label='', vmi=0, vma=0):
         )
     )
 
+
+def _plot_Colorado_Plateau(ax_map, lats, lons):
+    cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
+    cp_outline = np.vstack((cp_outline, cp_outline[0, :]))
+    ax_map.plot(convert_latlons(cp_outline[:, 1], lons),
+                convert_latlons(cp_outline[:, 0], lats), 'k:')
+
+def _plot_States(ax_map, lats, lons):
+    states = ['Nevada', 'New_Mexico', 'Arizona', 'Utah', 'Oklahoma']
+    # states = ['Washington', 'Oregon', 'California', 'Nevada',
+    #           'Idaho', 'Utah', 'Arizona',
+    #           'Montana', 'Wyoming', 'Colorado', 'New_Mexico',
+    #           'North_Dakota', 'South_Dakota', 'Nebraska', 'Kansas', 'Oklahoma', 'Texas',
+    #           'Minnesota', 'Iowa', 'Missouri', 'Arkansas', 'Louisiana',
+    #           'Michigan_UP', 'Wisconsin', 'Illinois','Mississippi',
+    #           'Michigan_LP', 'Indiana', 'Ohio', 'Kentucky', 'Tennessee', 'Alabama']
+    for state in states:
+        border = pd.read_csv('data/earth_models/US_States/' + state + '.csv',
+                             header=None).values
+        ax_map.plot(convert_latlons(border[:, 1], lons),
+                    convert_latlons(border[:, 0], lats), '-',
+                    linewidth=0.5, color='#d4d4d4')
+
 def plot_map_2D(vals, lats, lons, vmi=0, vma=0):
     f = plt.figure(figsize=(6, 6))
     ax_map = f.add_axes([0.1, 0.2, 0.8, 0.7])
+    im = _plot_map(vals, lats, lons, plt.cm.RdBu, vmi, vma, ax_map)
+    c = plt.colorbar(im, cax=f.add_axes([0.15, 0.075, 0.7, 0.02]),
+                      orientation='horizontal')
 
-    im = plt.imshow(vals[:, :], cmap=plt.cm.RdBu, aspect=1.4,
-                    vmin=vmi, vmax=vma)
-    lon_inc = len(lons) // 10
-    lat_inc = len(lats) // 10
+    return ax_map
+
+def _plot_map(vals, lats, lons, cbar, vmi, vma, ax_map):
+    im = plt.imshow(vals[:, :], cmap=cbar, aspect=1.4, vmin=vmi, vmax=vma)
+    lon_inc = max(1, len(lons) // 10)
+    lat_inc = max(1, len(lats) // 10)
     ax_map.set(xticks=range(0, len(lons), lon_inc), xticklabels = abs(lons[::lon_inc]),
                yticks=range(0,len(lats), lat_inc), yticklabels = lats[::lat_inc],
                xlabel='Longitude (W)', ylabel='Latitude (N)')
 
-    c = plt.colorbar(im, cax=f.add_axes([0.15, 0.075, 0.7, 0.02]),
-                      orientation='horizontal')
     ax_map.set_ylim((0, len(lats) - 1))
 
     cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
@@ -407,28 +438,15 @@ def plot_map_2D(vals, lats, lons, vmi=0, vma=0):
     ax_map.plot(convert_latlons(cp_outline[:, 1], lons),
                 convert_latlons(cp_outline[:, 0], lats), 'k:')
 
-    return ax_map
+    return im
+
 
 def plot_map_2D_r(vals, lats, lons, vmi=0, vma=0):
     f = plt.figure(figsize=(6, 6))
     ax_map = f.add_axes([0.1, 0.2, 0.8, 0.7])
-
-    im = plt.imshow(vals[:, :], cmap=plt.cm.RdBu_r, aspect=1.4,
-                    vmin=vmi, vmax=vma)
-    lon_inc = len(lons) // 10
-    lat_inc = len(lats) // 10
-    ax_map.set(xticks=range(0, len(lons), lon_inc), xticklabels = abs(lons[::lon_inc]),
-               yticks=range(0,len(lats), lat_inc), yticklabels = lats[::lat_inc],
-               xlabel='Longitude (W)', ylabel='Latitude (N)')
-
+    im = _plot_map(vals, lats, lons, plt.cm.RdBu_r, vmi, vma, ax_map)
     c = plt.colorbar(im, cax=f.add_axes([0.15, 0.075, 0.7, 0.02]),
                       orientation='horizontal')
-    ax_map.set_ylim((0, len(lats) - 1))
-
-    cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
-    cp_outline = np.vstack((cp_outline, cp_outline[0, :]))
-    ax_map.plot(convert_latlons(cp_outline[:, 1], lons),
-                convert_latlons(cp_outline[:, 0], lats), 'k:')
 
     return ax_map
 
@@ -491,12 +509,14 @@ def _plot_c_one_colour(phv, periods, i, p, ax):
     ax.plot(periods[10], phv[10, i], '*', color=p[0].get_color())
 
 def plot_all_v_models_on_map():
-    z = np.arange(0, 300, 0.5)
-    lats = np.arange(33, 43)
-    lons = np.arange(-115, -105)
-    t_LAB = 5.
-    #vs, bls, bis = define_models.load_all_models(z, lats, lons, t_LAB)
-    vs = constraints.interpolate_lit_model('C15', z, lats, lons)
+    z = np.arange(0, 350, 0.5)
+    lats = np.arange(34, 41)
+    lons = np.arange(-114, -106)
+    t_LAB = 5
+    vs_older, bls, bis = define_models.load_all_models(z, lats, lons, 5, '_highQ')
+    vs_old, bls, bis = define_models.load_all_models(z, lats, lons, 5, '_damped')
+    vs, bls, bis = define_models.load_all_models(z, lats, lons, t_LAB, '_smoothed')
+    #vs = constraints.interpolate_lit_model('P15', z, lats, lons)
     cp_outline = pd.read_csv('data/earth_models/CP_outline.csv').values
     cp_outline = np.vstack((cp_outline, cp_outline[0, :]))
     f = plt.figure(figsize=(10, 12))
@@ -505,25 +525,74 @@ def plot_all_v_models_on_map():
     a.set(xlim=[lons[0]-0.5, lons[-1]+0.5], ylim=[lats[0]-0.5, lats[-1]+0.5],
           xlabel='Longitude (W)', ylabel='Latitude (N)')
 
-    vlim = (3.5, 4.7)
-    zlim = (0, 150)
+    vlim = (3.2, 4.8)
+    zlim = (0, 350)
 
     vz = vs[:, :, (zlim[0] <= z) & (z < zlim[1])]
-    maxv = (np.quantile(np.quantile(vz, 0.75, 0), 0.75, 0) - vlim[0]) / np.diff(vlim) - 0.5
-    minv = (np.quantile(np.quantile(vz, 0.25, 0), 0.25, 0) - vlim[0]) / np.diff(vlim) - 0.5
+    #iiz =  vz.shape[2] #np.argmax(z > 120) #
+    vsold = vs_old[:, :, (zlim[0] <= z) & (z < zlim[1])]
+    vsolder = vs_older[:, :, (zlim[0] <= z) & (z < zlim[1])]
+    # maxv = (np.quantile(np.quantile(vz, 0.75, 0), 0.75, 0) - vlim[0]) / np.diff(vlim) - 0.5
+    # minv = (np.quantile(np.quantile(vz, 0.25, 0), 0.25, 0) - vlim[0]) / np.diff(vlim) - 0.5
+
+    lit_models = ('Y14', 'P14','P15','C15','S15','SR16','F18')
+    vs_lit = np.zeros((vs.shape[0], vs.shape[1], vs.shape[2], len(lit_models)))
+
+    i = 0
+    for mod in lit_models:
+        vs_lit[:, :, :, i] = constraints.interpolate_lit_model(mod, z, lats, lons)
+        i += 1
+    i = 0
+    for mod in lit_models:
+        ds = constraints.load_literature_vel_model(mod)
+        z_a = ds.depth.values
+        if zlim[0] < z_a[0]:
+            iz = np.argmax(z_a[0] < z)
+            vs_lit[:, :, :iz, i] = np.median(vs_lit[:, :, :iz, :], 3)
+        if z_a[-1] < zlim[1]:
+            iz = np.argmax(z_a[-1] < z)
+            vs_lit[:, :, iz:, i] = np.median(vs_lit[:, :, iz:, :], 3)
+        i += 1
+    vs_lit_z = vs_lit[:, :, (zlim[0] <= z) & (z < zlim[1]), :]
+    maxv = (np.max(vs_lit_z, 3) - vlim[0]) / np.diff(vlim) - 0.5
+    minv = (np.min(vs_lit_z, 3) - vlim[0]) / np.diff(vlim) - 0.5
     maxv[maxv < -0.5] = -0.5
     minv[minv < -0.5] = -0.5
 
+
     for ila in range(len(lats)):
         for ilo in range(len(lons)):
+            pz = np.linspace(lats[ila] + 0.5, lats[ila] - 0.5, vz.shape[2])
+            # a.fill(np.append(maxv + lons[ilo], minv[::-1] + lons[ilo]),
+            #        np.append(pz, pz[::-1]), color='#8B8B8B')
+            a.fill(np.append(maxv[ila, ilo, :] + lons[ilo],
+                             minv[ila, ilo, ::-1] + lons[ilo]),
+                   np.append(pz, pz[::-1]), color='#8B8B8B')
 
-            v = (vz[ila, ilo, :] - vlim[0]) / np.diff(vlim) - 0.5
+            v = (vsolder[ila, ilo, :] - vlim[0]) / np.diff(vlim) - 0.5
             v[v < -0.5] = -0.5
             v += lons[ilo]
-            pz = np.linspace(lats[ila] + 0.5, lats[ila] - 0.5, len(v))
-            a.fill(np.append(maxv + lons[ilo], minv[::-1] + lons[ilo]),
-                   np.append(pz, pz[::-1]), color='#8B8B8B')
+            a.plot(v, pz, 'c-', linewidth=1.5)
+
+            v = (vsold[ila, ilo, :] - vlim[0]) / np.diff(vlim) - 0.5
+            v[v < -0.5] = -0.5
+            v += lons[ilo]
+            a.plot(v, pz, 'b-', linewidth=1)
+
+            v = (vz[ila, ilo, :] - vlim[0]) / np.diff(vlim) - 0.5
+            ilab = np.argmax(z > bls[ila, ilo, 1] + 5)
+            # im = np.argmax(np.diff(v[ilab:-200]) <= 0) + ilab#np.argmin(v[ilab:]) + ilab
+            v[v < -0.5] = -0.5
+            v += lons[ilo]
+            a.plot([lons[ilo]] * len(pz), pz, 'k-', linewidth=0.5)
+            a.plot(lons[ilo] + [-0.5, 0.5], [lats[ila]] * 2, 'k-', linewidth=0.5)
             a.plot(v, pz, 'r-', linewidth=1)
+            # a.plot(v[:iiz], pz[:iiz], 'r-', linewidth=1)
+            # if im > ilab:
+            #     a.plot(v, pz, 'b-', linewidth=1)
+
+
+
 
             a.plot(lons[ilo] + np.array([-0.5, -0.5, 0.5, 0.5, -0.5]),
                    lats[ila] + np.array([-0.5, 0.5, 0.5, -0.5, -0.5]),
@@ -584,3 +653,75 @@ def _scale_vel_profile(v, vlim, lon):
     v_sv = (v - vlim[0]) / np.diff(vlim) - 0.5
     v_sv[v_sv < -0.5] = -0.5
     return v_sv + lon
+
+def plot_cross_section(v, v_grid, coords):
+    z, lats, lons = v_grid
+    fn = scipy.interpolate.RegularGridInterpolator((lats, lons, z), v)
+
+    lo_q = np.linspace(coords[0][1], coords[1][1], 50)
+    la_q = np.linspace(coords[0][0], coords[1][0], 50)
+    v_q = np.zeros((lo_q.size, z.size))
+
+    for id in range(len(z)):
+        v_q[:, id] = fn([[la_q[i], lo_q[i], z[id]] for i in range(len(lo_q))])
+
+    # Calculate LAB depth
+    lab_d = np.zeros_like(la_q)
+    lab_amp = np.zeros_like(la_q)
+    for i in range(len(la_q)):
+        rfs = constraints._extract_rf_constraints(
+            (la_q[i], lo_q[i]), '', (['LAB'], [5]), 1.75
+        )
+
+        lab_d[i] = z[
+            np.argmax(np.cumsum(
+                    np.diff(z)
+                    / np.mean(np.vstack((v_q[i, :-1], v_q[i, 1:])), 0))
+                > rfs.tt[0])
+        ]
+        lab_amp[i] = abs(rfs.dv[0])
+
+    lab_amp /= min(lab_amp) / 2
+
+    f = plt.figure(figsize=(14, 4))
+    a = f.add_axes([0.05, 0.2, 0.5, 0.8], aspect=1/50)
+    if np.abs(np.diff(la_q[[0, -1]])) < np.abs(np.diff(lo_q[[0, -1]])):
+        x_pts = lo_q
+        x_lab = 'Longitude (E)'
+    else:
+        x_pts = la_q
+        x_lab = 'Latitude (N)'
+
+    vmi = 3.75
+    vma = 4.65
+    v_q[v_q < vmi] = vmi
+    v_q[v_q > vma] = vma
+    im = a.contourf(x_pts, z, v_q.T, 20, cmap=plt.cm.RdBu, vmin=vmi, vmax=vma)
+    #a.plot(x_pts, lab_d, 'k+')
+    for i in range(len(la_q)):
+        a.plot(x_pts[i], lab_d[i], 'k+', markersize=lab_amp[i])
+    a.set(ylabel='Depth (km)', xlabel=x_lab, ylim=[150, 0])
+    c = plt.colorbar(im, cax=f.add_axes([0.1, 0.15, 0.4, 0.02]),
+                      orientation='horizontal')
+    c.ax.set_xlabel('Vsv (km/s)')
+
+    a2 = f.add_axes([0.65, 0.15, 0.3, 0.8], aspect=1.4)
+    id = np.argmax(75 <= z)
+    im2 = _plot_map(v[:, :, id], lats, lons, plt.cm.RdBu, vmi, vma, a2)
+    c2 = plt.colorbar(im2, cax=f.add_axes([0.95, 0.2, 0.005, 0.7]),
+                      orientation='vertical')
+    c2.ax.set_ylabel('Vsv at 75 km depth (km/s)')
+    a2.plot(convert_latlons(lo_q, lons), convert_latlons(la_q, lats), 'k-')
+
+
+def plot_correlation(x, y, ax, lab):
+
+    lm = sklearn.linear_model.LinearRegression().fit(x.ravel()[:, np.newaxis],
+                                                     y.ravel()[:, np.newaxis])
+    lab = lab + '   {:.2f} x + {:.2f}; R2 = {:.2f}'.format(
+        lm.coef_[0, 0], lm.intercept_[0],
+        lm.score(x.ravel()[:, np.newaxis], y.ravel()[:, np.newaxis])
+    )
+    xl = np.array([[x.min(), x.max()]]).T
+    ax.plot(xl, lm.predict(xl), '--', color='#EBEBEB')
+    ax.plot(x.ravel(), y.ravel(), '.', label=lab)

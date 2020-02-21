@@ -27,7 +27,6 @@ def extract_observations(location:tuple, id:str, boundaries:tuple, vpvs:float):
     """
 
     surface_waves = _extract_phase_vels(location)
-    #surface_waves = surface_waves.iloc[[3, 5, 7, 11, 12, 13], :]
     rfs = _extract_rf_constraints(location, id, boundaries, vpvs)
 
     # Put in fake Moho info!!!! #
@@ -515,5 +514,6 @@ def interpolate_lit_model(ref, z, lats, lons):
             ilo += 1
         ila += 1
         ilo = 0
+    # print('Model {} depth limits: {:.0f}-{:.0f} km'.format(ref, z_a[0], z_a[-1]))
 
     return vs_a

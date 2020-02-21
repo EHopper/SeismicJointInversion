@@ -97,11 +97,19 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     ))
     d = _build_data_misfit_vector(obs, predictions, p, G)
 
+    # Remove constraint on Moho strength
+    # G = np.vstack((G[:-2, :], G[-1, :]))
+    # d = np.vstack((d[:-2], d[-1]))
+    # std_obs = np.vstack((std_obs[:-2], std_obs[-1]))
+
     # Build all of the weighting functions for damped least squares
     W, H_mat, h_vec = (
         weights.build_weighting_damping(std_obs, p, model, setup_model)
     )
     # Perform inversion
+    # print('G: {}, p: {}, W: {}, d: {}, H_mat: {}, h_vec: {}'.format(
+    #     G.shape, p.shape, W.shape, d.shape, H_mat.shape, h_vec.shape
+    # ))
     p_new = _damped_least_squares(p, G, d, W, H_mat, h_vec)
 
     model = _build_inversion_model_from_model_vector(p_new, model)

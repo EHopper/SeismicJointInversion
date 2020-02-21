@@ -19,7 +19,7 @@ import os
 import glob
 import pandas as pd
 
-#import surface_waves
+from util import define_models
 
 
 # =============================================================================
@@ -77,7 +77,9 @@ class RunParameters(typing.NamedTuple):
         qmod_path:
             - str
             - Path to the standard qmod file for attenuation corrections.
-            - Default value = './data/earth_models/qmod'
+            - Default value = './data/earth_models/qmod_highQ'
+            - Default value has such high Q throughout the Earth that it is
+              equivalent to not doing a Q correction
         bin_path:
             - str
             - Path to the FORTRAN executables for MINEOS
@@ -94,12 +96,18 @@ class RunParameters(typing.NamedTuple):
     l_increment_standard: int = 2
     l_increment_failed: int = 2
     max_run_N: int = 500
-    qmod_path: str = './data/earth_models/qmod'
+    qmod_path: str = './data/earth_models/qmod_highQ'
     bin_path: str = '../MINEOS/bin'
 
 # =============================================================================
 #       Run MINEOS - calculate phase velocity, group velocity, kernels
 # =============================================================================
+def calculate_c_from_card(setup_model, model, periods):
+    params = RunParameters(freq_max = 1000 / min(periods) + 1)
+    _ = define_models.convert_inversion_model_to_mineos_model(model, setup_model)
+    c, _ = run_mineos(params, periods, setup_model.id)
+
+    return c
 
 def run_mineos_and_kernels(parameters:RunParameters, periods:np.array,
                            card_name:str):

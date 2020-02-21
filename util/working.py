@@ -536,10 +536,10 @@ def run_plot_inversion(setup_model, model,
     return model, G, o
 
 
-def try_run(location:tuple, t_BLs:tuple):
+def try_run(location:tuple, t_BLs:tuple, id:str):
 
     t_Moho, t_LAB = t_BLs
-    sm = define_models.SetupModel('_fakeMoho',
+    sm = define_models.SetupModel(id,
                                   min_layer_thickness=6,
                                   depth_limits=(0, 350),
                                   boundaries=(('Moho','LAB'), [t_Moho, t_LAB]),
@@ -602,21 +602,30 @@ def try_run(location:tuple, t_BLs:tuple):
 
 def loop_through_locs():
 
+    broken = ((33, -115), (41, -108))
+    id = '_smoothed'
     for t_LAB in [5]:
         for lat in range(33, 43, 1):
-            for lon in range(-115, -105, 1):
+            for lon in range(-117, -102):#range(-117, -102, 1):
+
+                if (lat, lon) in broken:
+                    continue
                 t_Moho = 3.
-                m, G, o = try_run((lat, lon), (t_Moho, t_LAB))
+                fname = '{}N_{}W_{}kmLAB{}'.format(lat, lon, t_LAB, id)
 
-                fname = '{}N_{}W_{}kmLAB_fakeMoho'.format(lat, lon, t_LAB)
-                define_models.save_model(m, fname)
+                if not os.path.isfile('output/models/{}.csv'.format(fname)):
+                    print('Doing {}, {}!'.format(lat, lon))
+                    m, G, o = try_run((lat, lon), (t_Moho, t_LAB), id)
+                    define_models.save_model(m, fname)
+                else:
+                    print('Done {}, {} already!'.format(lat, lon))
 
-def load_models(zmax=300):
-    z = np.arange(0, min((zmax, 300)), 0.5)
-    lats = np.arange(33, 43)
-    lons = np.arange(-115, -105)
+def load_models(zmax=350):
+    z = np.arange(0, min((zmax, 350)), 0.5)
+    lats = np.arange(34, 41)#(33, 41)
+    lons = np.arange(-114, -106)#(-117, -102)
     t_LAB = 5
-    vs, bls, bis = define_models.load_all_models(z, lats, lons, t_LAB, '_newstd')
+    vs, bls, bis = define_models.load_all_models(z, lats, lons, t_LAB, '_smoothed')
 
     return vs, bls, bis, z, lats, lons
 
@@ -640,41 +649,67 @@ def load_stuff():
 
     z = np.arange(0, 300, 0.5)
     lats = np.arange(33, 43)
-    lons = np.arange(-115, -105)
-    t_LAB = 5.
-    vs, bls, bis = define_models.load_all_models(z, lats, lons, t_LAB)
+    lons = np.arange(-115, -102)
+    t_LAB = 5
+    vs, bls, bis = define_models.load_all_models(z, lats, lons, t_LAB, '_highQ')
+    half_tlab_i = int(t_LAB / np.diff(z[:2]) / 2)
 
     v_above_LAB = np.zeros_like(vs[:, :, 0])
     v_below_LAB = np.zeros_like(v_above_LAB)
     v_above_Moho = np.zeros_like(v_above_LAB)
     v_below_Moho = np.zeros_like(v_above_LAB)
+    av_grad_SCLM = np.zeros_like(v_above_LAB)
+    max_grad_SCLM = np.zeros_like(v_above_LAB)
+    min_grad_SCLM = np.zeros_like(v_above_LAB)
     for ila in range(vs.shape[0]):
         for ilo in range(vs.shape[1]):
             v_above_Moho[ila, ilo] = vs[ila, ilo, bis[ila, ilo, 0]]
             v_below_Moho[ila, ilo] = vs[ila, ilo, bis[ila, ilo, 1]]
             v_above_LAB[ila, ilo] = vs[ila, ilo, bis[ila, ilo, 2]]
             v_below_LAB[ila, ilo] = vs[ila, ilo, bis[ila, ilo, 3]]
-    return z, lats, lons, vs, bls, bis, v_above_LAB, v_below_LAB, v_above_Moho, v_below_Moho
+            av_grad_SCLM[ila, ilo] = (
+                (v_above_LAB[ila, ilo] - v_below_Moho[ila, ilo])
+                / (z[bis[ila, ilo, 2]] - z[bis[ila, ilo, 1]])
+            )
+            max_grad_SCLM[ila, ilo] = (
+                max(
+                    np.diff(vs[ila, ilo, bis[ila, ilo, 1]:bis[ila, ilo, 2] + 1])
+                    / np.diff(z[:2])
+                )
+            )
+            min_grad_SCLM[ila, ilo] = (
+                min(
+                    np.diff(vs[ila, ilo, bis[ila, ilo, 1]:bis[ila, ilo, 2] + 1])
+                    / np.diff(z[:2])
+                )
+            )
+    return (z, lats, lons, vs, bls, bis, v_above_LAB, v_below_LAB, v_above_Moho,
+            v_below_Moho, av_grad_SCLM, max_grad_SCLM, min_grad_SCLM)
 
-def get_vlayer():
+def get_vlayer(offset_km=-5, layer='LAB'):
     z = np.arange(0, 300, 0.5)
     lats = np.arange(33, 43)
-    lons = np.arange(-115, -105)
-    t_LAB = 5.
-    vs, bls, bis = define_models.load_all_models(z, lats, lons, t_LAB)
-    offset_km = 20
+    lons = np.arange(-115, -102)
+    t_LAB = 5
+    vs, bls, bis = define_models.load_all_models(z, lats, lons, t_LAB, '_highQ')
+    # offset_km = -5
 
     vlayer = np.zeros_like(vs[:, :, 0])
     for ila in range(vs.shape[0]):
         for ilo in range(vs.shape[1]):
-            Moho_top = bis[ila, ilo, 0]
-            Moho_base = bis[ila, ilo, 1]
-            LAB_top = bis[ila, ilo, 2]
-            LAB_base = bis[ila, ilo, 3]
+            if offset_km <= 0:
+                if layer == 'Moho': # above top of Moho
+                    BL = bis[ila, ilo, 0]
+                if layer == 'LAB': # above top of LAB
+                    BL = bis[ila, ilo, 2]
+            else:
+                if layer == 'Moho': # below bottom of Moho
+                    BL = bis[ila, ilo, 1]
+                if layer == 'LAB': # below bottom of LAB
+                    BL = bis[ila, ilo, 3]
+
             offset = int(offset_km // np.diff(z[:2]))
-
-
-            dind = Moho_base + offset
+            dind = BL + offset
             vlayer[ila, ilo] = vs[ila, ilo, dind]
     return vlayer
 

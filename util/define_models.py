@@ -735,10 +735,10 @@ def load_all_models(z, lats, lons, t_LAB, lab=''):
                 m.vsv[m.boundary_inds[1] + 1] / m.vsv[m.boundary_inds[1]] - 1, # LAB dV
                 ]
             bis[i_lat, i_lon, :] = [
-                int(np.argmax(z >= depth_top_BL1)), # Index of top of Moho
-                int(np.argmax(z >= depth_top_BL1 + width_BL1)), # Index of base of Moho
-                int(np.argmax(z >= depth_top_BL2)), # Index of top of LAB
-                int(np.argmax(z >= depth_top_BL2 + width_BL2)), # Index of base of LAB
+                int(np.argmax(depth_top_BL1 < z) - 1), # Index of top of Moho
+                int(np.argmax(depth_top_BL1 + width_BL1 <= z)), # Index of base of Moho
+                int(np.argmax(depth_top_BL2 < z) - 1), # Index of top of LAB
+                int(np.argmax(depth_top_BL2 + width_BL2 <= z)), # Index of base of LAB
                 ]
             i_lon += 1
         i_lat += 1
