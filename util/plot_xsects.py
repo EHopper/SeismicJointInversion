@@ -63,23 +63,81 @@ def plot_all(coords):
                 convert_latlons(lat_xsect, lats), 'k-')
 
     # Plot depth sections
-    vs_P14 = interpolate_lit_model('P14', z, lats, lons)
-    depth_locs = ((45, -111), (40.7, -117.5), (39.3, -111), (37.2, -100.9))
+    # vs_P14 = interpolate_lit_model('P14', z, lats, lons)
+    depth_locs = ((45, -111), (40.7, -117.5), (39, -109.8), (37.2, -100.9))
+    box_depths = ((75, 105), (75, 105), (120, 150), (120, 150))
     y = 0.75
     dist = 2
-    for location in depth_locs:
-        ax_z = f.add_axes([0.8, y, 0.1, 0.15])
-        _plot_depth_section(location, dist, vs_P14, lats, lons, z, ax_z)
-        _plot_depth_section(location, dist, vs[:, :, z < 150], lats, lons,
-                            z[z < 150], ax_z)
-        ax_z.set(xlim=[3.5, 4.75], ylim=[300, 0],
-                 xlabel='Depth (km)', ylabel='Vs (km/s)')
+    for location, depth_range in zip(depth_locs, box_depths):
+        iz = list(range(np.argmax(depth_range[0] <= z), np.argmax(depth_range[1] < z)))
+        ax_z = f.add_axes([0.74, y, 0.075, 0.15])
+        # vs_mean, vs_std = _plot_depth_section(location, dist, vs_P14,
+        #                                       lats, lons, z, ax_z)
+        # print('{}. Mean vel {}-{} km: {:.2f} +- {:.2f} km/s'.format(
+        #     depth_locs.index(location), depth_range[0], depth_range[1],
+        #     np.mean(vs_mean[iz]), np.mean(vs_std[iz])
+        # ))
+        vs_mean, vs_std = _plot_depth_section(location, dist, vs[:, :, z <= 150],
+                            lats, lons, z[z <= 150], ax_z)
+        print('{}. Mean vel {}-{} km: {:.2f} +- {:.2f} km/s'.format(
+            depth_locs.index(location), depth_range[0], depth_range[1],
+            np.mean(vs_mean[iz]), np.mean(vs_std[iz])
+        ))
+        ax_z.plot(np.mean(vs_mean[iz]) + np.array([-0.2, 0.2, 0.2, -0.2, -0.2]),
+                  [depth_range[0], depth_range[0], depth_range[1], depth_range[1], depth_range[0]],
+                  'k--')
+        ax_z.set(xlim=[3.7, 4.8], ylim=[300, 0],
+                 ylabel='Depth (km)', xlabel='Vs (km/s)')
+
+        ax_z.plot()
+        ax_z.plot()
+        ax_map.text(convert_latlons(location[1], lons),
+                    convert_latlons(location[0], lats),
+                    '{:.0f}'.format(depth_locs.index(location) + 1))
+        ax_map.plot(convert_latlons(location[1], lons),
+                    convert_latlons(location[0], lats), 'k.')
+        ax_z.text(2.5, 10, '{:.0f}.'.format(depth_locs.index(location) + 1))
+        y -= 0.22
+
+        if depth_locs.index(location) > 0:
+            i = np.argmax(xpts > location[1])
+            ax_xsect.plot(xpts[i], -50, 'k.', markersize=10)
+            ax_xsect.text(xpts[i], -60,
+                          '{:.0f}'.format(depth_locs.index(location) + 1),
+                           horizontalalignment='center')
+            ax_xsect.plot(xpts[[i-2, i+2, i+2, i-2, i-2]],
+                [depth_range[0], depth_range[0], depth_range[1], depth_range[1], depth_range[0]],
+                'k--')
+            ax_xsectQ.plot(xpts[[i-2, i+2, i+2, i-2, i-2]],
+                [depth_range[0], depth_range[0], depth_range[1], depth_range[1], depth_range[0]],
+                'k--')
+
+    y = 0.75
+    for location, depth_range in zip(depth_locs, box_depths):
+        z2 = z[z > 50].copy()
+        iz = list(range(np.argmax(depth_range[0] <= z2), np.argmax(depth_range[1] < z2)))
+        ax_z = f.add_axes([0.9, y, 0.075, 0.15])
+        q_mean, q_std = _plot_depth_section(location, dist, 1 / q[:, :, z > 50],
+                            lats, lons, z2, ax_z)
+        print('{}. Mean Qinv {}-{} km: {:.2f} +- {:.2f}'.format(
+            depth_locs.index(location), depth_range[0], depth_range[1],
+            np.mean(q_mean[iz]), np.mean(q_std[iz])
+        ))
+        ax_z.plot(np.mean(q_mean[iz]) + np.array([-30, 30, 30, -30, -30]),
+                  [depth_range[0], depth_range[0], depth_range[1], depth_range[1], depth_range[0]],
+                  'k--')
+        ax_z.set(xlim=[0, 250], ylim=[300, 0],
+                 ylabel='Depth (km)', xlabel='Q')
+
+        ax_z.plot()
+        ax_z.plot()
         ax_map.text(convert_latlons(location[1], lons),
                     convert_latlons(location[0], lats),
                     '{:.0f}'.format(depth_locs.index(location) + 1))
         ax_map.plot(convert_latlons(location[1], lons),
                     convert_latlons(location[0], lats), 'k.')
         y -= 0.22
+
 
     return #ax_map, ax_xsect
 
@@ -91,6 +149,8 @@ def _plot_depth_section(location, dist, vs, lats, lons, z, ax_z):
     ax_z.fill(np.append(vs_mean + vs_std, vs_mean[::-1] - vs_std[::-1]),
            np.append(z, z[::-1]), color='#d4d4d4')
     ax_z.plot(vs_mean, z, '-', label=location)
+
+    return vs_mean, vs_std
 
 
 
