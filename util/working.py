@@ -602,14 +602,16 @@ def try_run(location:tuple, t_BLs:tuple, id:str):
 
 def loop_through_locs():
 
-    broken = ((33, -115), (41, -108))
-    id = '_smoothed'
+    broken = ((37, -107), (39, -106), (40, -108), (41, -108), (41, -107))#((33, -115), (41, -108))
+    id = '_noMohoLAB'
     for t_LAB in [5]:
         for lat in range(33, 43, 1):
             for lon in range(-117, -102):#range(-117, -102, 1):
 
                 if (lat, lon) in broken:
+                    print('{}, {} is broken'.format(lat, lon))
                     continue
+
                 t_Moho = 3.
                 fname = '{}N_{}W_{}kmLAB{}'.format(lat, lon, t_LAB, id)
 

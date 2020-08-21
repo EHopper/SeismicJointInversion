@@ -100,7 +100,7 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
 
     # Damp towards model gradient = 0
     sc = 1
-    _set_layer_values((sc/4, sc/4, sc, 0, 0), layers, damp_s, damp_t, 'to_0_grad')
+    _set_layer_values((sc, sc, sc, 0, 0), layers, damp_s, damp_t, 'to_0_grad')
     damp_to_0_grad_mat, damp_to_0_grad_vec = _damp_constraints(
         _build_constraint_damp_zero_gradient(model), damp_s, damp_t
     )

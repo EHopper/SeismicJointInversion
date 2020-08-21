@@ -98,9 +98,9 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     d = _build_data_misfit_vector(obs, predictions, p, G)
 
     # Remove constraint on Moho strength
-    # G = np.vstack((G[:-2, :], G[-1, :]))
-    # d = np.vstack((d[:-2], d[-1]))
-    # std_obs = np.vstack((std_obs[:-2], std_obs[-1]))
+    G = G[:-2, :]#np.vstack((G[:-2, :], G[-1, :]))
+    d = d[:-2]#np.vstack((d[:-2], d[-1]))
+    std_obs = std_obs[:-2]#np.vstack((std_obs[:-2], std_obs[-1]))
 
     # Build all of the weighting functions for damped least squares
     W, H_mat, h_vec = (
