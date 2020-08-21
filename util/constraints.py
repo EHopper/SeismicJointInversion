@@ -3,12 +3,11 @@
 This includes observed phase velocities and constraints pulled from receiver
 function observations.
 """
-
-import typing
-import numpy as np
-import pandas as pd
 import re
 import os
+
+import numpy as np
+import pandas as pd
 import xarray as xr # for loading netcdf
 
 

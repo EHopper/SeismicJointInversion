@@ -1,8 +1,21 @@
-# Required libraries:
-(remember to install with pip3 for Python 3!)
-- numpy
+# Description
+Here, we (Hopper & Gaherty, in prep) present a new joint inversion of two seismic datasets. Surface-wave phase velocities provide volumetric constraints on absolute velocities in the upper mantle. Common-conversion-point  (CCP) images of S-to-P converted phases (receiver functions) place these velocities in the context of a layered lithosphere-asthenosphere system, quantifying the change in physical characteristics across the boundary.  
+
+Our philosophy in this inversion is to capitalise on our geological intuition that, to first order, the shallow velocity structure of the Earth can be described by three layers coinciding with the crust, lithospheric mantle, and asthenospheric mantle. The boundaries between these layers are clearly observed in receiver function studies.  By modelling such observations, we constrain the travel time to and velocity contrast across these boundaries.
+
+Furthermore, we use the lack of significant converted wave signals from depths other than these boundaries. We infer that there are no sharp changes in velocity (i.e. velocity gradients tend to zero) within each layer. This allows us to produce stable inversions without relying on a complex web of ad hoc regularisation.
+
+We follow the inversion framework of Russell et al. (2019) and Menke (2012).
+
+# Installation
+This codebase is written in Python 3. (So remember to install libraries with pip3!)
+Python 3.6.9
+
+## Required libraries:
+- numpy (1.18.2)
+- pandas (0.24.2)
 - urllib.request
-- xarray
+- xarray (0.12.1)
 - random
 - unittest
 - parameterized.parameterized
