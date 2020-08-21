@@ -9,25 +9,27 @@ We follow the inversion framework of Russell et al. (2019) and Menke (2012).
 
 # Installation
 This codebase is written in Python 3. (So remember to install libraries with pip3!)
-Python 3.6.9
+-Python (3.6.9)
 
 ## Required libraries:
+- Libraries that should come with Python
+  - re
+  - os
+  - unittest
+  - typing
+  - shutil
+  - glob
+  - subprocess
+  - random
 - numpy (1.18.2)
 - pandas (0.24.2)
-- urllib.request
+- matplotlib (3.1.0)
+- scipy (1.4.1)
+- sklearn (0.22.1)
 - xarray (0.12.1)
-- random
-- unittest
-- parameterized.parameterized
-- pandas
-- pathlib
-- xarray
-- os
-- itertools
-- spectrum
-- scipy
+- parameterized (0.7.0)
 
-
+# Usage
 Plan for inversion:
 
 1. Get it working with surface wave data only first.
