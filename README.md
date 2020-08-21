@@ -9,7 +9,7 @@ We follow the inversion framework of Russell et al. (2019) and Menke (2012).
 
 # Installation
 This codebase is written in Python 3. (So remember to install libraries with pip3!)
--Python (3.6.9)
+- Python (3.6.9)
 
 ## Required libraries:
 - Libraries that should come with Python
@@ -30,66 +30,54 @@ This codebase is written in Python 3. (So remember to install libraries with pip
 - parameterized (0.7.0)
 
 # Usage
-Plan for inversion:
+## Overview
+This is an iterative linearised least-squares inversion.  That is, a linear regression that we solve using a gradient descent algorithm using an L2 loss function.
 
-1. Get it working with surface wave data only first.
+The observations (target):
+- Surface wave tomography
+  - Phase velocities at some number of periods
+  - In this study, we use Rayleigh wave observations from Jin & Gaherty (2015) and Babikoff & Dalton (2018); ambient noise observations from Ekstrom (2017)
+- Receiver functions
+  - Vertical travel time lag (e.g. P wave - Ps wave; Sp wave - S wave) from centre of boundary
+  - Velocity contrast across boundary given assumed boundary thickness
+    - A discontinuous velocity change will give a higher amplitude converted phase than a velocity contrast that is spread over > 10 km vertically
+  - In this study, we use Ps observations of the Moho from Shen & Ritzwoller (2013) and Sp observations from Hopper & Fischer (2018)
 
-    a. Set up starting velocity model
-    b. Set up forward model for surface waves  (d = Gm)
-          - go from velocity model to predicted phase velocities
-    c. Set up the inversion (m = (G'G)^-1 G'd)
-          - go from misfit to observations to updated model (see below)
-    d. Repeat b & c with updated starting model
+The model parameters we are solving for (weights in regression):
+- Shear wave velocities at given depths
+  - Assume velocities are linearly interpreted between nodes
+- Depth of boundaries constrained by receiver function observations, e.g. Moho and LAB
 
+The inversion is described more fully (including equations) in this Google Doc: https://docs.google.com/document/d/1xAM5oSZ7ZpLm0aam-XU4YlqknUbjJGVrNO-GHMUYPa8/edit?usp=sharing
 
+## The process, to first order
+1. Define your basic model parameters
+   - define_models.SetupModel() - see docstring
+   - Includes things like the Vp/Vs ratio (default = 1.75); depth range of model (default = 0 to 400 km); the width of the boundary layers (default = 3 km for Moho; 10 km for LAB)
+2. Extract your observations (target variables) from saved data
+   - constraints.extract_observations() - see docstring
+   - Given a location, will pull RF data and surface wave data from previously saved files
+   - Details of the data that you need to download is saved in data/obs_dispersion/README and data/RFconstraints/README
+3. Define your starting model
+  - define_models.InversionModel() - see docstring
+  - This defines the shear velocity as a function of depth by listing velocities at the edges of layers, layer thicknesses, and the indices of your RF constrained boundaries
+  - Note that as this inversion has no regularisation of model length (i.e. no ridge regularisation), the result is very insensitive to the actual starting model. It is just important to initialise it with the correct format.
+4. Iteratively perform the inversion
+   - inversion.\_inversion_iteration() - see docstring
+   - Can either iterate some set number of times, or break out of loop when the new model is sufficiently similar to the starting model at that iteration
+     - Note that you should always set an upper limit to number of iterations, as there are some locations (normally with very slow phase velocities at the shortest periods) which will not converge
+  - Steps at this stage
+    - Pass the starting model to MINEOS to calculate surface wave kernels and predicted phase velocities
+    - Calculate the partial derivatives for gradient descent using the surface wave kernels and the starting model
+    - Calculate regularisation matrices (see step 5)
+    - Perform the damped least-squares inversion (gradient descent step)
+    - Build a new model from the output and reformat it
+5. Set regularisation
+   - weights.build_weighting_damping() - see docstring
+   - Various regularisation options are actually coded up here, but the only ones with non-zero coefficients are from weights.\_build_constraint_damp_zero_gradient()
+     - That is, we are only regularising by damping to zero gradient outside of the boundary layers
+     - The strength of this regularisation can be adjusted for the crust, lithosphere, and asthenosphere via weights.\_set_layer_values()
+6. There are various plotting codes to look at the intermediate and final outputs in plots.py
 
-      More on that inversion...
-          - m = (G' * We * G  + ε^2 * Wm )^-1  (G' * We * d + ε^2 * Wm * <m>)
-          - G matrix is the Frechet kernels for each model parameter as rows,
-            with each row representing a different period
-            (n_periods x n_depth_points*n_model_parameters matrix)
-          - Model is a column vector with the model parameters as f(depth)
-          - Actually we're damping towards a model, m, instead of dm
-                G(m-m0) = dobs - d0
-                Gm = G*m0 + dobs - d0
-                Gm = Ddobs
-          - Data: dCL = observed_phase_vel(i_period) - MINEOS_phase_vel(i_period)
-                  dCR - as dCL but for Rayleigh not Love
-                  dobs = [dCL, dCR]'*1000; (misfit in m/s)
-
-                  Dd = G*m0
-                  DdCL = Dd(Love_periods)' + dCL
-                  DdCR = Dd(Rayleigh periods)' + dCR
-                  Ddobs = [DdCL, DdCR]';
-          - Inversion formulated as...
-                  F * m_est  = f
-                  F  	=   [    sqrt(We) * G ;    εD   ]
-                  f 	=   [    sqrt(We) * d ;    εD<m>   ]
-                  (Wm 	=   D' * D  (model damping weighting matrix))
-                  Where D = H, D<m> = h (constraint equations & damping)
-
-                  H is (n_constraints x n_depth_points*n_model_parameters)
-                    H = stack of all individual constraints (e.g. second order
-                        smoothing, a priori info)
-                  h is (n_constraints x 1) vector
-                    h = zero, often
-                  Both H and h are multiplied by layer specific damping parameters
-                  (ε in above equation), often called damp_XXXXX - a preset constant
-                  These are then further damped by 'epsilon_HhD' (= 1), so can control
-                  overall significance of a priori constraints vs. data constraints
-
-                  We is (n_periods x n_periods) matrix for weighting the data
-                    We = diagonal matrix, where the value is 1/std(data at that period)
-                  Data are further damped by 'epsilon_Gmd_vec' (set to about 0.1,
-                  but dependent on period here).
-
-                  F = [epsilon_Gmd_vec * sqrt(We) * GG;     epsilon_HhD * H]
-                  f = [epsilon_Gmd_vec * sqrt(We) * Ddobs;  epsilon_HhD * h]
-
-                  Finv = (F'*F + epsilon_0norm * eye(NF, NF)) \ F';
-                      This is damped least squares: m = (G'G + ε^2 I) G' d
-                      epsilon_0norm = 1e-11, hardwired.
-
-                  So in addition to all of the data quality, layer, and
-                  data vs. a priori specific damping, there is general damping
-                  applied to the final inversion.
+\
+Note: working.py contains functions that I have been using to play around with this code.  In particular, working.try_run() is basically the series of steps listed above, but with a lot of other stuff in there to make useful plots along the way.
