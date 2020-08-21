@@ -1,7 +1,7 @@
 # Required libraries:
 (remember to install with pip3 for Python 3!)\
-*numpy\
-*urllib.request\
+-numpy\
+-urllib.request\
 *xarray\
 *random\
 *unittest\
