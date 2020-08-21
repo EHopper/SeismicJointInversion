@@ -59,9 +59,9 @@ The inversion is described more fully (including equations) in this Google Doc: 
    - Given a location, will pull RF data and surface wave data from previously saved files
    - Details of the data that you need to download is saved in data/obs_dispersion/README and data/RFconstraints/README
 3. Define your starting model
-  - define_models.InversionModel() - see docstring
-  - This defines the shear velocity as a function of depth by listing velocities at the edges of layers, layer thicknesses, and the indices of your RF constrained boundaries
-  - Note that as this inversion has no regularisation of model length (i.e. no ridge regularisation), the result is very insensitive to the actual starting model. It is just important to initialise it with the correct format.
+   - define_models.InversionModel() - see docstring
+   - This defines the shear velocity as a function of depth by listing velocities at the edges of layers, layer thicknesses, and the indices of your RF constrained boundaries
+   - Note that as this inversion has no regularisation of model length (i.e. no ridge regularisation), the result is very insensitive to the actual starting model. It is just important to initialise it with the correct format.
 4. Iteratively perform the inversion
    - inversion.\_inversion_iteration() - see docstring
    - Can either iterate some set number of times, or break out of loop when the new model is sufficiently similar to the starting model at that iteration
