@@ -1,12 +1,12 @@
 # Required libraries:
 (remember to install with pip3 for Python 3!)\
-*numpy
-*urllib.request
-*xarray
-*random
-*unittest
-*parameterized.parameterized
-*pandas
+*numpy\
+*urllib.request\
+*xarray\
+*random\
+*unittest\
+*parameterized.parameterized\
+*pandas\
 *pathlib
 *xarray
 *os
