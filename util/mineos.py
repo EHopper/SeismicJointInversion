@@ -5,7 +5,18 @@ from a given starting velocity model using MINEOS.  Basically a translation
 of Zach Eilon's MATLAB wrapper - https://github.com/eilonzach/matlab_to_mineos.
 
 Classes:
-    RunParameters, with fields
+    RunParameters   - Parameters needed to run MINEOS
+        Rayleigh_or_Love            - Label for either Rayleigh or Love
+        phase_or_group_velocity     - Label for either phase or group velocity
+        l_min                       - Minimum angular order
+        l_max                       - Expected max angular order
+        freq_min                    - Minimum frequency
+        freq_max                    - Maximum frequency
+        l_increment_standard        - Ad hoc parameter used in circumventing MINEOS bug
+        l_increment_failed          - Ad hoc parameter used in circumventing MINEOS bug
+        max_run_N                   - Ad hoc parameter used in circumventing MINEOS bug
+        qmod_path                   - Path to qmod file for attenuation corrections
+        bin_path                    - Path to the FORTRAN executables for MINEOS
 
 Functions:
 
@@ -102,7 +113,34 @@ class RunParameters(typing.NamedTuple):
 # =============================================================================
 #       Run MINEOS - calculate phase velocity, group velocity, kernels
 # =============================================================================
-def calculate_c_from_card(setup_model, model, periods):
+def calculate_c_from_card(setup_model: define_models.SetupModel,
+                          model: define_models.InversionModel,
+                          periods: np.array) -> np.array:
+    """ Calculate phase velocities from the inversion models.
+
+    MINEOS-compatible Earth models, called 'cards', can be generated using define_models.convert_inversion_model_to_mineos_model(). This writes the card to disk, starting from the models used in the rest of the inversion. The name of the card is passed to run_mineos() with an array of periods at which to calculate the predicted phase velocity, c.
+
+    Arguments:
+        setup_model
+            - define_models.SetupModel
+            - Units:    seismological (km/s, km)
+            - Initial model constraints, including fixed parameters describing
+              the relationship between Vsv and other model parameters used
+              by MINEOS.
+        model
+            - define_models.InversionModel
+            - Units:    seismological (km/s, km)
+            - Starting iteration of velocity (Vsv) model
+        periods
+            - (n_periods, ) np.array
+            - Units:    seconds
+            - Array of periods at which we want to calculate phase velocity
+    Returns:
+        c
+            - (n_periods, ) np.array
+            - Units:    km/s
+            - Calculated phase velocities at each input period
+    """
     params = RunParameters(freq_max = 1000 / min(periods) + 1)
     _ = define_models.convert_inversion_model_to_mineos_model(model, setup_model)
     c, _ = run_mineos(params, periods, setup_model.id)
@@ -111,6 +149,8 @@ def calculate_c_from_card(setup_model, model, periods):
 
 def run_mineos_and_kernels(parameters:RunParameters, periods:np.array,
                            card_name:str):
+    """ Calculate phase velocities and kernels for a given card.
+    """
 
     ph_vel, n_runs = run_mineos(parameters, periods, card_name)
     kernels = run_kernels(parameters, periods, ph_vel, card_name, n_runs)

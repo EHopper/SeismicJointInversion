@@ -1,10 +1,10 @@
 """ Pipeline for running the inversion
 """
 
-import pathlib
-import sys
-
-
-base_dir = pathlib.Path.home() / 'Documents/SurfaceWaves/INVERSION/'
-
-sys.path.insert(0, str(bin_dir / 'functions'))
+from util import define_models
+from util import mineos
+from util import inversion
+from util import partial_derivatives
+from util import weights
+from util import constraints
+from util import plots

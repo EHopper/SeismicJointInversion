@@ -1,9 +1,26 @@
 """ Generate Earth models to work with surface_waves
 
 Classes:
-    InversionModel - Vsv at certain depths
-    MINEOSModel - Vsv, Vsh, Vpv, Vph, Eta finely sampled in radius
-
+    1. SetupModel
+        - Fixed input parameters for the velocity model
+        - Fields:
+            id                  - Unique name for the run, used for saving
+            boundaries          - Tuple, (boundary_names, boundary_widths)
+                boundary_names      - Tuple of labels for each of the boundaries
+                boundary_widths     - List with (fixed) widths of the boundary layers
+            depth_limits        - Top and base of the model that we are solving for
+            min_layer_thickness - Minimum thickness of the layers in the model
+            vsv_vsh_ratio       - Ratio of Vsv to Vsh
+            vpv_vsv_ratio       - Ratio of Vpv to Vsv
+            vpv_vph_ratio       - Ratio of Vpv to Vph
+            ref_card_csv_name   - Path to a reference full MINEOS model card
+    2. InversionModel
+        - Shear velocity model
+        - Fields:
+            vsv                 - Shear velocities, given at model nodes
+            thickness           - Layer thicknesses between the model nodes
+            boundary_inds       - Indices of boundaries of special interest, e.g. Moho, LAB
+            d_inds              - List of Booleans indicating whether the velocity at a model node is being solved for
 Functions:
 
 
@@ -25,26 +42,18 @@ from util import constraints
 # =============================================================================
 
 class SetupModel(typing.NamedTuple):
-    """ Vsv model interpolated between defined values at given depths.
+    """ Fixed input parameters for a velocity model.
 
-    The inversion model is made up of a vector of Vsv values at certain
-    points, s.  The depth of certain layers (e.g. Moho, LAB) is also allowed
-    to vary - the indices of these layers are given in .boundary_inds - by
-    varying the thickness of the overlying layers, t.
-    Thus, the actual model that goes into the least squares inversion,
-    m = [s; t] = np.vstack((InversionModel.vsv,
-                    InversionModel.thickness[InversionModel.boundary_inds -1]))
+    This records values that will remain fixed for a given inversion.  This includes an id, various fixed values around the boundaries in velocity (e.g. Moho, LAB), and various parameters needed to convert between the Vsv model of the crust and uppermost mantle calculated by the inversion and the earth model used by MINEOS.
 
-    We also set a linear scaling from Vsv to Vsh, from Vsv to Vpv, and from
-    Vpv to Vph, and assume a constant value of Eta.
+    MINEOS is used to calculate the predicted phase velocities and associated kernels. This needs a full earth model (i.e. surface to the core; Vsv, Vsh, Vpv, Vph, eta).  Here, we set the depth limits of the model to invert, a reference earth model to use outside of that range, and a linear scaling from Vsv to Vsh, from Vsv to Vpv, and from Vpv to Vph.  These all have default values if the user has no preference. Eta is fixed, assuming
 
     Fields:
         id:
             - str
             - Unique name of model for saving things.
         boundaries:
-            - tuple of length 3, where each item in the tuple is a tuple or list
-              with (n_boundary_depths_inverted_for) items in it
+            - tuple of length 2, where each item in the tuple is a tuple or list with (n_boundary_depths_inverted_for) items in it
             - Items in tuple:
                 boundary names:
                     - Units: none
@@ -52,23 +61,19 @@ class SetupModel(typing.NamedTuple):
                     - Default = ('Moho', 'LAB')
                 boundary widths:
                     - Units: kilometres
-                    - (Fixed) width of the boundary layer.  This is fixed for a given
-                      inversion (though we will allow the depth of the boundary layer
-                      as a whole to change).
+                    - (Fixed) width of the boundary layer.  This is fixed for a given inversion (though we will allow the depth of the boundary layer as a whole to change).
                     - Default = [3., 10.]
         depth_limits:
             - (length 2) tuple
             - Units:    km
             - Top and base of the model that we are inverting for.
-            - Outside of this range, the model is fixed to our starting MINEOS
-              model card (which extends throughout the whole Earth).
+            - Outside of this range, the model is fixed to our starting MINEOS model card (which extends throughout the whole Earth).
             - Default value = (0, 300)
         min_layer_thickness:
             - float
             - Units:    km
             - Default value: 6
-            - Minimum thickness of the layer, should cover several (three)
-              knots in the MINEOS model card.
+            - Minimum thickness of the layer, should cover several (three) knots in the MINEOS model card.
         vsv_vsh_ratio:
             - float
             - Units:    dimensionless
@@ -84,10 +89,8 @@ class SetupModel(typing.NamedTuple):
         ref_card_csv_name:
             - str
             - Default value: 'data/earth_model/prem.csv'
-            - Path to a .csv file containing the information for the reference
-              full MINEOS model card that we'll be altering.
-            - This could be some reference Earth model (e.g. PREM), or some
-              more specific local model.
+            - Path to a .csv file containing the information for the reference full MINEOS model card that we'll be altering.
+            - This could be some reference Earth model (e.g. PREM), or some more specific local model.
             - Note that this csv file should be in SI units (m, kg.m^-3, etc)
 
     """
@@ -105,7 +108,13 @@ class SetupModel(typing.NamedTuple):
 
 
 class InversionModel(typing.NamedTuple):
-    """ Model that will actually go into the inversion.
+    """ Vsv model interpolated between defined values at given depths.
+
+    The inversion model is made up of a vector of Vsv values (InversionModel.vsv, referred to as 's' in the documentation) at certain depths (defined as the sum of overlying layer thicknesses, InversionModel.thickness).  The depth of certain layers (e.g. Moho, LAB) is also allowed to vary (the indices of these layers are given in .boundary_inds) by varying the thickness of the overlying layers (referred to as 't' in the documentation).
+
+    Thus, the actual model that goes into the least squares inversion is
+        m = [s; t] = np.vstack((InversionModel.vsv,
+                                InversionModel.thickness[InversionModel.boundary_inds -1]))
 
     Fields:
         vsv:
@@ -118,7 +127,7 @@ class InversionModel(typing.NamedTuple):
             - Units:    km
             - Thickness of layer above defined vsv point, such that
               depth of .vsv[i] point is at sum(thickness[:i+1]) km.
-                Note that this means the sum of thicknesses up to the ith point.
+                Note that this means the sum of thicknesses up to and including the ith point.
             - That is, as the first .vsv point is defined at the surface, the
               first value of .thickness will be 0 always.
         boundary_inds:
@@ -201,7 +210,7 @@ class ModelLayerIndices(typing.NamedTuple):
 # =============================================================================
 
 
-def setup_starting_model(setup_model, location):
+def setup_starting_model(setup_model: SetupModel, location: tuple):
     """ Convert from SetupModel to InversionModel.
 
     SetupModel is the bare bones of what we want to constrain for the starting
@@ -270,7 +279,7 @@ def setup_starting_model(setup_model, location):
                           )
 
 
-def _add_BLs_to_surface_starting_model(t, vs, setup_model):
+def _add_BLs_to_surface_starting_model(t:list, vs:list, setup_model:SetupModel):
 
     _, bwidths = setup_model.boundaries
     n_bounds = len(bwidths)
@@ -292,7 +301,7 @@ def _add_BLs_to_surface_starting_model(t, vs, setup_model):
 
     return boundary_inds
 
-def _fill_in_base_of_model(t, vs, setup_model):
+def _fill_in_base_of_model(t:list, vs:list, setup_model:SetupModel):
 
     ref_model =  pd.read_csv(setup_model.ref_card_csv_name)
     ref_depth = (ref_model['radius'].iloc[-1] - ref_model['radius']) * 1e-3
@@ -311,7 +320,7 @@ def _fill_in_base_of_model(t, vs, setup_model):
 
     return
 
-def _find_depth_indices(t, depth_limits):
+def _find_depth_indices(t:list, depth_limits:tuple):
     """
     """
 
@@ -320,7 +329,8 @@ def _find_depth_indices(t, depth_limits):
     return list(range(np.argmax(d >= depth_limits[0]),
                       np.argmax(d >= depth_limits[1])))
 
-def _return_evenly_spaced_model(t, vs, boundary_inds, min_layer_thickness):
+def _return_evenly_spaced_model(t:np.array, vs:np.array, boundary_inds:np.array,
+                                min_layer_thickness:float):
     """
     Important to keep the boundary layer thicknesses the same.
     """

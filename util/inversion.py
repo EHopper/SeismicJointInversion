@@ -50,26 +50,26 @@ def run_inversion(setup_model:define_models.SetupModel,
     """
 
     model = define_models.setup_starting_model(setup_model)
+    obs_constraints = constraints.extract_observations(
+        location, setup_model.id, setup_model.boundaries, setup_model.vpv_vsv_ratio
+    )
 
     for i in range(n_iterations):
         # Still need to pass setup_model as it has info on e.g. vp/vs ratio
         # needed to convert from InversionModel to MINEOS card
-        model = _inversion_iteration(setup_model, model, location)
+        model = _inversion_iteration(setup_model, model, obs_constraints)
 
     return model
 
 def _inversion_iteration(setup_model:define_models.SetupModel,
                          model:define_models.InversionModel,
-                         location:tuple,
-                         constraints:tuple,
+                         obs_constraints:tuple,
                          ) -> define_models.InversionModel:
     """ Run a single iteration of the least squares
     """
 
-    # obs, std_obs, periods = constraints.extract_observations(
-    #     location, setup_model.id, setup_model.boundaries, setup_model.vpv_vsv_ratio
-    # )
-    obs, std_obs, periods = constraints
+
+    obs, std_obs, periods = obs_constraints
 
     # Build all of the inputs to the damped least squares
     # Run MINEOS to get phase velocities and kernels
