@@ -8,6 +8,7 @@ Furthermore, we use the lack of significant converted wave signals from depths o
 We follow the inversion framework of Russell et al. (2019) and Menke (2012).
 
 # Installation
+## Version
 This codebase is written in Python 3. (So remember to install libraries with pip3!)
 - Python (3.6.9)
 
@@ -28,6 +29,15 @@ This codebase is written in Python 3. (So remember to install libraries with pip
 - sklearn (0.22.1)
 - xarray (0.12.1)
 - parameterized (0.7.0)
+
+## Other requirements:
+You must have MINEOS installed.  As particular in/output formats and paths are assumed, clone https://github.com/EHopper/MINEOS (you will need to compile locally) into the same directory as this repo.
+
+## Testing:
+After installing, run test_pipeline (>> python3 test_pipeline.py) in the base directory of this repo.  For all tests to run correctly, you will also need to download the following files:
+- Shen & Ritzwoller, 2016 (10.1002/2016JB012887) velocity model
+  - Download from https://doi.org/10.17611/DP/EMCUS2016
+  - Save as [this repo]/data/earth_models/US.2016.nc
 
 # Usage
 ## Overview
