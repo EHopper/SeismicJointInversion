@@ -15,7 +15,7 @@ Classes:
             vpv_vph_ratio       - Ratio of Vpv to Vph
             ref_card_csv_name   - Path to a reference full MINEOS model card
     2. VsvModel
-        - Shear velocity model
+        - Shear velocity model with
         - Fields:
             vsv                 - Shear velocities, given at model nodes
             thickness           - Layer thicknesses between the model nodes
@@ -112,14 +112,14 @@ class ModelParams(typing.NamedTuple):
 
 
 
-class InversionModel(typing.NamedTuple):
-    """ Vsv model interpolated between defined values at given depths.
+class VsvModel(typing.NamedTuple):
+    """ Vsv model with some additional information for the inversion.
 
-    The inversion model is made up of a vector of Vsv values (InversionModel.vsv, referred to as 's' in the documentation) at certain depths (defined as the sum of overlying layer thicknesses, InversionModel.thickness).  The depth of certain layers (e.g. Moho, LAB) is also allowed to vary (the indices of these layers are given in .boundary_inds) by varying the thickness of the overlying layers (referred to as 't' in the documentation).
+    The Vsv model is made up of a vector of Vsv values (VsvModel.vsv; referred to as 's' in the documentation) at certain depths (defined as the sum of overlying layer thicknesses, VsvModel.thickness).  Boundary depths (e.g. Moho, LAB) are allowed to vary by solving for the thickness of the directly overlying layers (the indices of these layers are given in .boundary_inds; the mutable widths of these layers are referred to as 't' in the documentation).  All other values in VsvModel.thickness are not inverted for.  However, these values will be updated throughout the inversion as the model is adjusted to keep all layers approximately the same thickness via _return_evenly_spaced_model().
 
     Thus, the actual model that goes into the least squares inversion is
-        m = [s; t] = np.vstack((InversionModel.vsv,
-                                InversionModel.thickness[InversionModel.boundary_inds -1]))
+        m = [s; t] = np.vstack((VsvModel.vsv,
+                                VsvModel.thickness[VsvModel.boundary_inds -1]))
 
     Fields:
         vsv:
@@ -130,33 +130,19 @@ class InversionModel(typing.NamedTuple):
         thickness:
             - (n_layers, 1) np.array
             - Units:    km
-            - Thickness of layer above defined vsv point, such that
-              depth of .vsv[i] point is at sum(thickness[:i+1]) km.
+            - Thickness of layer above defined vsv point, such that depth of .vsv[i] point is at sum(thickness[:i+1]) km.
                 Note that this means the sum of thicknesses up to and including the ith point.
-            - That is, as the first .vsv point is defined at the surface, the
-              first value of .thickness will be 0 always.
+            - That is, as the first .vsv point is defined at the surface, the first value of .thickness will be 0 always.
         boundary_inds:
             - (n_boundary_depths_inverted_for, ) np.array of integers
             - Units:    n/a
-            - Indices in .vsv and .thickness identifying the boundaries of
-              special interest, e.g. Moho, LAB.  For these boundaries, we
-              will want to specifically prescribe the width of the layer
-              (originally set as ModelParams.boundary_widths), and to invert for
-              the thickness of the overlying layer (i.e. the depth to the top
-              of this boundary).
-            - That is, InversionModel.(vsv|thickness)[boundary_inds[i]] is
-              the velocity at the top of the boundary and the thickness of the
-              layer above it, defining depth.
-            - InversionModel.(vsv|thickness)[boundary_inds[i + 1]] is the
-              velocity at the bottom of the boundary and the thickness of the
-              layer boundary itself, prescribed for an inversion run.
+            - Indices in .vsv and .thickness identifying the boundaries of special interest, e.g. Moho, LAB.  For these boundaries, we will want to specifically prescribe the width of the layer (originally set as ModelParams.boundary_widths), and to invert for the thickness of the overlying layer (i.e. the depth to the top of this boundary).
+            - That is, VsvModel.vsv[boundary_inds[i]] is the velocity at the top of the boundary and VsvModel.thickness[boundary_inds[i]] is the thickness of the layer above it, defining boundary depth.
+            - VsvModel.vsv[boundary_inds[i + 1]] is the velocity at the bottom of the boundary and VsvModel.thickness[boundary_inds[i + 1]] is the thickness of the boundary layer itself, fixed for an inversion run in ModelParams.boundaries.
         d_inds:
             - (n_velocities_inverted_for, ) np.array of indices
             - Units:    n/a
-            - Indices in .vsv identifying the depths within the depth_limits
-              given by model_params.  Note that if the upper depth limit is 0,
-              this will be all [True, True, True, ...., True, False] - that is,
-              everything but the last velocity value is inverted for.
+            - Indices in VsvModel.vsv identifying the depths within ModelParams.depth_limits.  Note that if the upper depth limit is 0 (i.e. inversion starts at the free surface), this will be all [True, True, True, ...., True, False] - that is, everything but the last velocity value is inverted for.  The last velocity value is never inverted for as this is pinned to the value taken from ModelParams.ref_card_csv_name.
 
 
     """
@@ -216,13 +202,13 @@ class ModelLayerIndices(typing.NamedTuple):
 
 
 def setup_starting_model(model_params: ModelParams, location: tuple):
-    """ Convert from ModelParams to InversionModel.
+    """ Convert from ModelParams to VsvModel.
 
     ModelParams is the bare bones of what we want to constrain for the starting
     model, which is in a different format to the model that we actually want
     to invert, m = np.vstack(
-                    (InversionModel.vsv[InversionModel.d_inds],
-                     InversionModel.thickness[InversionModel.boundary_inds)
+                    (VsvModel.vsv[VsvModel.d_inds],
+                     VsvModel.thickness[VsvModel.boundary_inds)
                      )
 
     Calculate appropriate layer thicknesses such that the inversion will have
@@ -243,7 +229,7 @@ def setup_starting_model(model_params: ModelParams, location: tuple):
 
     Returns:
         inversion_model:
-            - InversionModel
+            - VsvModel
             - Units:    seismological, i.e. km, km/s
             - Model primed for use in the inversion.
     """
@@ -278,7 +264,7 @@ def setup_starting_model(model_params: ModelParams, location: tuple):
     )
 
 
-    return InversionModel(vsv = vsv[np.newaxis].T,
+    return VsvModel(vsv = vsv[np.newaxis].T,
                           thickness = thickness[np.newaxis].T,
                           boundary_inds = np.array(boundary_inds),
                           d_inds = _find_depth_indices(thickness,
@@ -460,7 +446,7 @@ def convert_inversion_model_to_mineos_model(inversion_model, model_params,
 
     Arguments:
         - inversion_model:
-            - InversionModel
+            - VsvModel
             - Units:    seismological
         - model_params:
             - ModelParams
@@ -659,7 +645,7 @@ def _set_model_indices(model_params, model, **kwargs):
             - ModelParams
             - Units:    seismological
         - model:
-            - InversionModel
+            - VsvModel
             - Units:    seismological
         - kwargs:
             - key word arguments of format
@@ -730,7 +716,7 @@ def read_model(fname):
     with open('{}{}.csv'.format(save_dir, fname), 'r') as fid:
         params = pd.read_csv(fid, skiprows=5)
 
-    return InversionModel(
+    return VsvModel(
         vsv = params.vsv.values[:, np.newaxis],
         thickness = params.thickness.values[:, np.newaxis],
         boundary_inds = bi.iloc[0,:-1].astype(int).values,

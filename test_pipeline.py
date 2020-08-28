@@ -43,7 +43,7 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(actual.ref_card_csv_name,
                          expected.ref_card_csv_name)
 
-    def assertInversionModelEqual(self, actual, expected):
+    def assertVsvModelEqual(self, actual, expected):
         np.testing.assert_allclose(actual.vsv, expected.vsv)
         # Cannot compare values == 0 to relative precision via. assert_allclose
         self.assertEqual(actual.thickness[0], expected.thickness[0])
@@ -526,7 +526,7 @@ class PipelineTest(unittest.TestCase):
     @parameterized.expand([
         (
             'Simple',
-            define_models.InversionModel(
+            define_models.VsvModel(
                 vsv = np.array([[3.5, 4, 4.5, 4.6, 4.7]]).T,
                 thickness = np.array([[0., 30., 40., 50., 20.]]).T,
                 boundary_inds = [], d_inds=[],
@@ -552,7 +552,7 @@ class PipelineTest(unittest.TestCase):
         ),
         (
             'Moho & LAB',
-            define_models.InversionModel(
+            define_models.VsvModel(
                 vsv = np.array([[3.5, 3.6, 4., 4.2, 4.4, 4.3, 4.35, 4.4]]).T,
                 thickness = np.array([[0., 30., 10., 22., 22., 15., 22., 22.]]).T,
                 boundary_inds = np.array([1, 4]), d_inds=[],
@@ -589,7 +589,7 @@ class PipelineTest(unittest.TestCase):
     @parameterized.expand([
         (
             'Simple',
-            define_models.InversionModel(
+            define_models.VsvModel(
                 vsv = np.array([[3.5, 4, 4.5, 4.6, 4.7]]).T,
                 thickness = np.array([[0, 30, 40, 50, 10]]).T,
                 boundary_inds = [], d_inds=[],
@@ -633,7 +633,7 @@ class PipelineTest(unittest.TestCase):
     @parameterized.expand([
         (
             'Simple',
-            define_models.InversionModel(
+            define_models.VsvModel(
                 vsv = np.array([[3.5, 4, 4.5, 4.6, 4.7]]).T,
                 thickness = np.array([[0, 30, 40, 55, 10]]).T,
                 boundary_inds = [], d_inds=[],
@@ -677,7 +677,7 @@ class PipelineTest(unittest.TestCase):
     @parameterized.expand([
         (
             'Moho & LAB',
-            define_models.InversionModel(
+            define_models.VsvModel(
                 vsv = np.array([[3.5, 3.6, 4., 4.2, 4.4, 4.3, 4.35, 4.4]]).T,
                 thickness = np.array([[0., 30., 10., 22., 21., 15., 23., 24.]]).T,
                 boundary_inds = np.array([1, 4]), d_inds=[],
@@ -714,7 +714,7 @@ class PipelineTest(unittest.TestCase):
     @parameterized.expand([
         (
             'Moho & LAB',
-            define_models.InversionModel(
+            define_models.VsvModel(
                 vsv = np.array([[3.5, 3.6, 4., 4.2, 4.4, 4.3, 4.35, 4.4]]).T,
                 thickness = np.array([[0., 30., 10., 22., 21., 15., 23., 24.]]).T,
                 boundary_inds = np.array([1, 4]), d_inds=[],
@@ -875,7 +875,7 @@ class PipelineTest(unittest.TestCase):
     @parameterized.expand([
         (
             'simple',
-            define_models.InversionModel(
+            define_models.VsvModel(
                 vsv = np.array([3] * 13)[:, np.newaxis],
                 thickness = np.array(
                     [0] + [6] * 3
@@ -954,7 +954,7 @@ class PipelineTest(unittest.TestCase):
     @parameterized.expand([
         (
             'simple',
-            define_models.InversionModel(
+            define_models.VsvModel(
                 vsv = np.array([1, 2, 3, 4, 5, 6., 7., 8.])[:, np.newaxis],
                 thickness = np.array([6., 6., 6., 6., 6., 6., 6., 6.])[:, np.newaxis],
                 boundary_inds = np.array([2, 4]), d_inds=[],

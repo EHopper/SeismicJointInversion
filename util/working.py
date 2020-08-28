@@ -339,7 +339,7 @@ def run_plot_MC_inversion(model_params, orig_model,
         bi = orig_model.boundary_inds.copy()
         di = define_models._find_depth_indices(t, model_params.depth_limits)
         define_models._add_noise_to_starting_model(t, v, bi, di)
-        model = define_models.InversionModel(v, t, bi, di)
+        model = define_models.VsvModel(v, t, bi, di)
 
         # Plot starting model of this iteration
         ax_m150.plot(model.vsv, np.cumsum(model.thickness), '-',
@@ -570,7 +570,7 @@ def try_run(location:tuple, t_BLs:tuple, id:str):
         t, v, bi, sm.min_layer_thickness,
     )
 
-    m = define_models.InversionModel(
+    m = define_models.VsvModel(
         vsv = vsv[np.newaxis].T,
         thickness = thickness[np.newaxis].T,
         boundary_inds = np.array(boundary_inds),
@@ -585,7 +585,7 @@ def try_run(location:tuple, t_BLs:tuple, id:str):
             )
     #ph_vel_pred = mineos.calculate_c_from_card(sm, m, periods)
 
-    m0 = define_models.InversionModel(
+    m0 = define_models.VsvModel(
             vsv = vsv[np.newaxis].T * 0 + vsv[-1],
             thickness = thickness[np.newaxis].T,
             boundary_inds = np.array(boundary_inds),

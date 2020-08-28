@@ -62,12 +62,13 @@ The inversion is described more fully (including equations) in this Google Doc: 
 
 ## The process, to first order
 1. Define your basic model parameters
-   - define_models.SetupModel() - see docstring
+   - define_models.ModelParams() - see docstring
    - Includes things like the Vp/Vs ratio (default = 1.75); depth range of model (default = 0 to 400 km); the width of the boundary layers (default = 3 km for Moho; 10 km for LAB)
 2. Extract your observations (target variables) from saved data
    - constraints.extract_observations() - see docstring
    - Given a location, will pull RF data and surface wave data from previously saved files
-   - Details of the data that you need to download is saved in data/obs_dispersion/README and data/RFconstraints/README
+   - Details of the data that you need to download is saved in data/obs_dispersion/README
+   - The RF constraints need to be processed a bit more before going into the inversion, so they are included in this repo as data/RFconstraints/a_priori_constraints.csv.  There are details in data/RFconstraints/README about how I made that file.
 3. Define your starting model
    - define_models.InversionModel() - see docstring
    - This defines the shear velocity as a function of depth by listing velocities at the edges of layers, layer thicknesses, and the indices of your RF constrained boundaries

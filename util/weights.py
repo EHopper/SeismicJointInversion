@@ -46,7 +46,7 @@ class ModelLayerValues(typing.NamedTuple):
 
 
 def build_weighting_damping(std_obs:np.array, p:np.array,
-                            model:define_models.InversionModel,
+                            model:define_models.VsvModel,
                             model_params:define_models.ModelParams):
     """
     """
@@ -231,7 +231,7 @@ def _build_error_weighting_matrix(obs_std):
     return np.diag(1 / obs_std)
 
 def _build_smoothing_constraints(
-        model:define_models.InversionModel,
+        model:define_models.VsvModel,
         model_params:define_models.ModelParams) -> (np.array, np.array):
     """ Build the matrices needed to minimise second derivative of the model.
 
@@ -256,7 +256,7 @@ def _build_smoothing_constraints(
 
     Arguments:
         model:
-            - define_models.InversionModel
+            - define_models.VsvModel
             - model.vsv.size = n_depth_points + 1 (deepest Vs is fixed)
             - model.boundary_inds.size = n_boundary_layers
         model_params:
@@ -413,7 +413,7 @@ def _build_constraint_damp_to_m0(m:np.array) -> (np.array, np.array):
     return H, h, 'to_m0'
 
 def _build_constraint_damp_original_gradient(
-        model:define_models.InversionModel):
+        model:define_models.VsvModel):
     """ Damp Vsv gradients between layers to starting model values.
 
     In H * m = h, we want to end up with
@@ -433,7 +433,7 @@ def _build_constraint_damp_original_gradient(
 
     Arguments:
         model:
-            - InversionModel
+            - VsvModel
             - Units:    seismological
 
     Returns:
@@ -480,7 +480,7 @@ def _build_constraint_damp_original_gradient(
     return H, h, 'to_m0_grad'
 
 def _build_constraint_damp_zero_gradient(
-        model:define_models.InversionModel):
+        model:define_models.VsvModel):
     """ Damp Vsv gradients between layers to zero.
 
     In H * m = h, we want to end up with
@@ -500,7 +500,7 @@ def _build_constraint_damp_zero_gradient(
 
     Arguments:
         model:
-            - InversionModel
+            - VsvModel
             - Units:    seismological
 
     Returns:

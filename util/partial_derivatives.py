@@ -89,7 +89,7 @@ from util import define_models
 from util import constraints
 
 def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
-                                      model:define_models.InversionModel,
+                                      model:define_models.VsvModel,
                                       model_params:define_models.ModelParams):
     """ Make partial derivative matrix, G, for phase velocities and RFs
     """
@@ -106,7 +106,7 @@ def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
 
 
 def _build_partial_derivatives_matrix_sw(kernels:pd.DataFrame,
-                                      model:define_models.InversionModel,
+                                      model:define_models.VsvModel,
                                       model_params:define_models.ModelParams):
     """ Make partial derivative matrix, G, from the Frechet kernels.
 
@@ -130,7 +130,7 @@ def _build_partial_derivatives_matrix_sw(kernels:pd.DataFrame,
                         depth column in km; period column in seconds
             - Rayleigh wave kernels calculated in MINEOS
         model:
-            - define_models.InversionModel
+            - define_models.VsvModel
             - Units:    seismological (km/s, km)
             - Current iteration of velocity (Vsv) model
         model_params:
@@ -377,7 +377,7 @@ def _hstack_frechet_kernels(kernels, period:float):
     return np.hstack((vsv, vsh, vpv, vph, eta))
 
 def _convert_to_model_kernels(depth:np.array,
-                              model:define_models.InversionModel):
+                              model:define_models.VsvModel):
     """ Convert from Frechet kernels as function of v(z) to function of p.
 
     The Frechet kernels from MINEOS are given at the same depths as those in
@@ -435,7 +435,7 @@ def _convert_to_model_kernels(depth:np.array,
             - Units:    kilometres
             - Depth vector for MINEOS kernel.
         model:
-            - define_models.InversionModel
+            - define_models.VsvModel
             - Units:    seismological (i.e. vsv in km/s, thickness in km)
             - Remember that the field boundary_inds contains the indices of
               the boundaries that we are inverting the depth/width of.  So if
@@ -472,7 +472,7 @@ def _convert_to_model_kernels(depth:np.array,
     return dm_dp_mat
 
 
-def _calculate_dm_ds(model:define_models.InversionModel,
+def _calculate_dm_ds(model:define_models.VsvModel,
                      depth:np.array):
     """
 
@@ -533,7 +533,7 @@ def _calculate_dm_ds(model:define_models.InversionModel,
     return dm_ds_mat
 
 
-def _calculate_dm_dt(model:define_models.InversionModel,
+def _calculate_dm_dt(model:define_models.VsvModel,
                      depth:np.array):
     """
         To convert the MINEOS kernels (dc/dm) to inversion model kernels (dc/dp),
@@ -605,7 +605,7 @@ def _calculate_dm_dt(model:define_models.InversionModel,
 
     return dm_dt_mat
 
-def _convert_kernels_d_shallowerm_by_d_s(model:define_models.InversionModel,
+def _convert_kernels_d_shallowerm_by_d_s(model:define_models.VsvModel,
                                          i:int, depth:np.array,
                                          dm_ds_mat:np.array):
     """ Find dm/ds for the model card points above the boundary layer.
@@ -625,14 +625,14 @@ def _convert_kernels_d_shallowerm_by_d_s(model:define_models.InversionModel,
 
     Arguments:
         model:
-            - define_models.InversionModel
+            - define_models.VsvModel
             - Units:    seismological (km/s and km)
             - Model in layout ready for easy conversion to column vector
               to be used in least squares inversion.
         i:
             - int
             - Units:    n/a
-            - Index in InversionModel for which we are calculating the column
+            - Index in VsvModel for which we are calculating the column
               of partial derivatives.
         depth:
             - (n_card_depths, ) np.array
@@ -684,14 +684,14 @@ def _convert_kernels_d_deeperm_by_d_s(model, i, depth, dm_ds_mat):
 
     Arguments:
         model:
-            - define_models.InversionModel
+            - define_models.VsvModel
             - Units:    seismological (km/s and km)
             - Model in layout ready for easy conversion to column vector
               to be used in least squares inversion.
         i:
             - int
             - Units:    n/a
-            - Index in InversionModel for which we are calculating the column
+            - Index in VsvModel for which we are calculating the column
               of partial derivatives.
         depth:
             - (n_card_depths, ) np.array
@@ -723,7 +723,7 @@ def _convert_kernels_d_deeperm_by_d_s(model, i, depth, dm_ds_mat):
                                  /model.thickness[i+1])
     return dm_ds_mat
 
-def _convert_kernels_d_shallowerm_by_d_t(model:define_models.InversionModel,
+def _convert_kernels_d_shallowerm_by_d_t(model:define_models.VsvModel,
                                          i:int, depth:np.array,
                                          dm_dt_mat:np.array) -> np.array:
     """ Find dm/dt for the model card points above the boundary layer.
@@ -740,14 +740,14 @@ def _convert_kernels_d_shallowerm_by_d_t(model:define_models.InversionModel,
 
     Arguments:
         model:
-            - define_models.InversionModel
+            - define_models.VsvModel
             - Units:    seismological (km/s and km)
             - Model in layout ready for easy conversion to column vector
               to be used in least squares inversion.
         i:
             - int
             - Units:    n/a
-            - Index in InversionModel for which we are calculating the column
+            - Index in VsvModel for which we are calculating the column
               of partial derivatives.
         depth:
             - (n_card_depths, ) np.array
@@ -792,7 +792,7 @@ def _convert_kernels_d_shallowerm_by_d_t(model:define_models.InversionModel,
     return dm_dt_mat
 
 def _convert_kernels_d_withinboundarym_by_d_t(
-        model:define_models.InversionModel, i:int, depth:np.array,
+        model:define_models.VsvModel, i:int, depth:np.array,
         dm_dt_mat:np.array) -> np.array:
     """ Find dm/dt for the model card points within the boundary layer.
 
@@ -807,14 +807,14 @@ def _convert_kernels_d_withinboundarym_by_d_t(
 
     Arguments:
         model:
-            - define_models.InversionModel
+            - define_models.VsvModel
             - Units:    seismological (km/s and km)
             - Model in layout ready for easy conversion to column vector
               to be used in least squares inversion.
         i:
             - int
             - Units:    n/a
-            - Index in InversionModel for which we are calculating the column
+            - Index in VsvModel for which we are calculating the column
               of partial derivatives.
         depth:
             - (n_card_depths, ) np.array
@@ -855,7 +855,7 @@ def _convert_kernels_d_withinboundarym_by_d_t(
 
     return dm_dt_mat
 
-def _convert_kernels_d_deeperm_by_d_t(model:define_models.InversionModel,
+def _convert_kernels_d_deeperm_by_d_t(model:define_models.VsvModel,
                                       i:int, depth:np.array,
                                       dm_dt_mat:np.array) -> np.array:
     """ Find dm/dt for the model card points below the boundary layer.
@@ -914,14 +914,14 @@ def _convert_kernels_d_deeperm_by_d_t(model:define_models.InversionModel,
 
     Arguments:
         model:
-            - define_models.InversionModel
+            - define_models.VsvModel
             - Units:    seismological (km/s and km)
             - Model in layout ready for easy conversion to column vector
               to be used in least squares inversion.
         i:
             - int
             - Units:    n/a
-            - Index in InversionModel for which we are calculating the column
+            - Index in VsvModel for which we are calculating the column
               of partial derivatives.
         depth:
             - (n_card_depths, ) np.array
@@ -998,7 +998,7 @@ def _scale_dvsv_dp_to_other_variables(dvsv_dp_mat:np.array,
     ))
 
 
-def _build_partial_derivatives_matrix_rf(model:define_models.InversionModel,
+def _build_partial_derivatives_matrix_rf(model:define_models.VsvModel,
                                          model_params:define_models.ModelParams):
     """
     We have two bits of data for each model boundary layer:

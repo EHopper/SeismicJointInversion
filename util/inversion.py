@@ -44,7 +44,7 @@ def run_with_no_inputs():
 
 def run_inversion(model_params:define_models.ModelParams,
                   location:tuple,
-                  n_iterations:int=5) -> (define_models.InversionModel):
+                  n_iterations:int=5) -> (define_models.VsvModel):
     """ Set the inversion running over some number of iterations.
 
     """
@@ -56,15 +56,15 @@ def run_inversion(model_params:define_models.ModelParams,
 
     for i in range(n_iterations):
         # Still need to pass model_params as it has info on e.g. vp/vs ratio
-        # needed to convert from InversionModel to MINEOS card
+        # needed to convert from VsvModel to MINEOS card
         model = _inversion_iteration(model_params, model, obs_constraints)
 
     return model
 
 def _inversion_iteration(model_params:define_models.ModelParams,
-                         model:define_models.InversionModel,
+                         model:define_models.VsvModel,
                          obs_constraints:tuple,
-                         ) -> define_models.InversionModel:
+                         ) -> define_models.VsvModel:
     """ Run a single iteration of the least squares
     """
 
@@ -119,14 +119,14 @@ def _inversion_iteration(model_params:define_models.ModelParams,
         model_params.min_layer_thickness
     )
 
-    return define_models.InversionModel(
+    return define_models.VsvModel(
         np.array(vsv)[:, np.newaxis], np.array(thickness)[:, np.newaxis],
         np.array(bi),
         define_models._find_depth_indices(thickness, model_params.depth_limits)
         ), G, obs#p, G, d, W, H_mat, h_vec
 
 
-def _predict_RF_vals(model:define_models.InversionModel):
+def _predict_RF_vals(model:define_models.VsvModel):
     """
     """
     travel_time = np.zeros_like(model.boundary_inds).astype(float)
@@ -148,13 +148,13 @@ def _predict_RF_vals(model:define_models.InversionModel):
 
 
 
-def _build_model_vector(model:define_models.InversionModel,
+def _build_model_vector(model:define_models.VsvModel,
                         depth_limits:tuple) -> (np.array):
     """ Make model into column vector [s; t].
 
     Arguments:
         model:
-            - define_models.InversionModel
+            - define_models.VsvModel
             - Units:    seismological (km/s, km)
             - Input Vs model
 
@@ -177,12 +177,12 @@ def _build_model_vector(model:define_models.InversionModel,
                       model.thickness[list(model.boundary_inds)]))
 
 def _build_inversion_model_from_model_vector(p:np.array,
-        model:define_models.InversionModel):
-    """ Make column vector, [s; t] into InversionModel format.
+        model:define_models.VsvModel):
+    """ Make column vector, [s; t] into VsvModel format.
 
     Arguments:
         model:
-            - define_models.InversionModel
+            - define_models.VsvModel
             - Units:    seismological (km/s, km)
             - Input Vs model
         p:
@@ -192,13 +192,13 @@ def _build_inversion_model_from_model_vector(p:np.array,
 
     Returns:
         model:
-            - define_models.InversionModel
+            - define_models.VsvModel
             - Units:    seismological (km/s, km)
             - Vs model with values updated from p.
     """
 
     if model.boundary_inds.size == 0:
-        return define_models.InversionModel(
+        return define_models.VsvModel(
             vsv = np.vstack((p.copy(), model.vsv[-1])),
             thickness = model.thickness,
             boundary_inds = model.boundary_inds
@@ -210,7 +210,7 @@ def _build_inversion_model_from_model_vector(p:np.array,
     new_thickness[model.boundary_inds + 2] -= dt
     new_vsv = np.vstack((p[:-len(model.boundary_inds)].copy(), model.vsv[-1]))
 
-    return define_models.InversionModel(
+    return define_models.VsvModel(
         vsv = new_vsv,
         thickness = new_thickness,
         boundary_inds = model.boundary_inds,

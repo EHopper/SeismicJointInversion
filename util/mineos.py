@@ -114,7 +114,7 @@ class RunParameters(typing.NamedTuple):
 #       Run MINEOS - calculate phase velocity, group velocity, kernels
 # =============================================================================
 def calculate_c_from_card(model_params: define_models.ModelParams,
-                          model: define_models.InversionModel,
+                          model: define_models.VsvModel,
                           periods: np.array) -> np.array:
     """ Calculate phase velocities from the inversion models.
 
@@ -128,7 +128,7 @@ def calculate_c_from_card(model_params: define_models.ModelParams,
               the relationship between Vsv and other model parameters used
               by MINEOS.
         model
-            - define_models.InversionModel
+            - define_models.VsvModel
             - Units:    seismological (km/s, km)
             - Starting iteration of velocity (Vsv) model
         periods
