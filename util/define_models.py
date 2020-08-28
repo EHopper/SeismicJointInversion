@@ -243,6 +243,8 @@ def setup_starting_model(setup_model: SetupModel, location: tuple):
             - Model primed for use in the inversion.
     """
     # Set up directory to save to
+    if not os.path.exists('output'):
+        os.mkdir('output')
     if not os.path.exists('output/' + setup_model.id):
         os.mkdir('output/' + setup_model.id)
     else:
@@ -287,7 +289,7 @@ def _fill_in_base_of_model(t:list, vs:list, setup_model:SetupModel):
         t[i] = setup_model.depth_limits[1] - sum(t[:i])
         vs = vs[:i + 1]
         t = t[:i + 1]
-        return 
+        return
 
 
 
@@ -464,6 +466,8 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model,
             - Units:    km
             - Depth of the Moho - needed to define density structure
     """
+    if not os.path.exists('output'):
+        os.mkdir('output')
     if not os.path.exists('output/' + setup_model.id):
         os.mkdir('output/' + setup_model.id)
         print("This test ID hasn't been used before!")

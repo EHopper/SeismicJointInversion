@@ -319,6 +319,8 @@ class PipelineTest(unittest.TestCase):
         actual_output_dir = 'output/testcase/'
 
         # Copy the test card into the right directory for the workflow
+        if not os.path.exists('output'):
+            os.mkdir('output')
         if os.path.exists(actual_output_dir):
             shutil.rmtree(actual_output_dir)
 
