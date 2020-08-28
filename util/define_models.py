@@ -256,7 +256,7 @@ def setup_starting_model(setup_model: SetupModel, location: tuple):
     _fill_in_base_of_model(t, vs, setup_model)
 
     # Add on the boundary layers at arbitrary depths (will be fixed by inversion)
-    bi = _add_BLs_to_surface_starting_model(t, vs, setup_model)
+    bi = _add_BLs_to_starting_model(t, setup_model)
 
     # Fix the model spacing
     thickness, vsv, boundary_inds = _return_evenly_spaced_model(
@@ -278,8 +278,37 @@ def setup_starting_model(setup_model: SetupModel, location: tuple):
                                                        setup_model.depth_limits),
                           )
 
+def _fill_in_base_of_model(t:list, vs:list, setup_model:SetupModel):
 
-def _add_BLs_to_surface_starting_model(t:list, vs:list, setup_model:SetupModel):
+    if sum(t) >= setup_model.depth_limits[1]:
+        i = np.argmax(np.cumsum(t) >= setup_model.depth_limits[1])
+        vs[i] = np.interp(setup_model.depth_limits[1],
+                          sum(t[:i - 1]) + np.cumsum(t[i - 1:i + 2]), vs[i - 1:i + 2])
+        t[i] = setup_model.depth_limits[1] - sum(t[:i])
+        vs = vs[:i + 1]
+        t = t[:i + 1]
+        return 
+
+
+
+    ref_model =  pd.read_csv(setup_model.ref_card_csv_name)
+    ref_depth = (ref_model['radius'].iloc[-1] - ref_model['radius']) * 1e-3
+    ref_vs = ref_model['vsv'] * 1e-3
+    # Remove discontinuities and make depth increasing for purposes of interp
+    ref_depth[np.append(np.diff(ref_depth), -1) == 0] += 0.01
+    ref_depth = ref_depth.iloc[::-1].values
+    ref_vs = ref_vs.iloc[::-1].values
+
+    remaining_depth = setup_model.depth_limits[1] - sum(t)
+    n_layers = int(remaining_depth // setup_model.min_layer_thickness)
+    thickness_to_end = [remaining_depth / n_layers] * n_layers
+    vs += list(np.interp(sum(t) + np.cumsum(thickness_to_end), ref_depth, ref_vs))
+    t += thickness_to_end
+
+
+    return
+
+def _add_BLs_to_starting_model(t:list, setup_model:SetupModel):
 
     _, bwidths = setup_model.boundaries
     n_bounds = len(bwidths)
@@ -301,24 +330,6 @@ def _add_BLs_to_surface_starting_model(t:list, vs:list, setup_model:SetupModel):
 
     return boundary_inds
 
-def _fill_in_base_of_model(t:list, vs:list, setup_model:SetupModel):
-
-    ref_model =  pd.read_csv(setup_model.ref_card_csv_name)
-    ref_depth = (ref_model['radius'].iloc[-1] - ref_model['radius']) * 1e-3
-    ref_vs = ref_model['vsv'] * 1e-3
-    # Remove discontinuities and make depth increasing for purposes of interp
-    ref_depth[np.append(np.diff(ref_depth), 0) == 0] += 0.01
-    ref_depth = ref_depth.iloc[::-1].values
-    ref_vs = ref_vs.iloc[::-1].values
-
-    remaining_depth = setup_model.depth_limits[1] - sum(t)
-    n_layers = int(remaining_depth // setup_model.min_layer_thickness)
-    thickness_to_end = [remaining_depth / n_layers] * n_layers
-    vs += list(np.interp(sum(t) + np.cumsum(thickness_to_end), ref_depth, ref_vs))
-    t += thickness_to_end
-
-
-    return
 
 def _find_depth_indices(t:list, depth_limits:tuple):
     """

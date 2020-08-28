@@ -245,12 +245,14 @@ def _build_smoothing_constraints(
             (t2*v1 - t2*v0)/(t1*t2) - (v2*t1 - v1*t1)/(t1*t2) = 0
             -t2 * v0 + (t1 + t2) * v1 - t1 * v2 = 0
 
-    As such, row i in H should be [..., -t_i+1, t_i + t_i+1, -t_i, ...]
+    As such, row i in H should be
+                    [..., -t_i+1, t_i + t_i+1, -t_i, ...]
+    (or, equivalently, [..., t_i+1, -t_i - t_i+1, t_i, ...], as the value on the other side of the equation is 0).
 
 
-    Note that Josh says this can be better captured by a linear constraint
+    Note: Josh says this can be better captured by a linear constraint
     preserving layer gradients (and therefore stopping the model from getting
-    any rougher).  So perhaps this can just be removed.
+    any rougher).
 
     Arguments:
         model:
@@ -289,7 +291,7 @@ def _build_smoothing_constraints(
     roughness_vector = np.zeros((n_depth_points + n_BLs, 1))
 
     # Make and edit the banded matrix (roughness equations)
-    banded_matrix = np.zeros((n_depth_points, n_depth_points)) #_make_banded_matrix(n_depth_points, (1, -2, 1))
+    banded_matrix = np.zeros((n_depth_points, n_depth_points))
     t = model.thickness
     # NOTE: around the boundary layers, layer thickness isn't equal
     for ir in range(1, n_depth_points - 1):

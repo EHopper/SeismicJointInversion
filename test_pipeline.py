@@ -17,7 +17,7 @@ from util import weights
 from util import constraints
 
 skipMINEOS = False
-skip_influx = False
+
 
 class PipelineTest(unittest.TestCase):
 
@@ -107,64 +107,51 @@ class PipelineTest(unittest.TestCase):
             expected
         )
 
-    # test_append_BLs_to_surface_starting_model
-    @parameterized.expand([
-        (
-            'basic model',
-            define_models.SetupModel('testcase'),
-            ([0], [4.3]),
-            ([0., 12., 3., 12., 10.], [4.3, 4.3, 4.3, 4.3, 4.3], [1, 3]),
-        ),
-        (
-            'crustal model on top',
-            define_models.SetupModel('testcase'),
-            ([0., 5., 15., 16.], [2.4, 3.2, 3.4, 4.0]),
-            ([0., 5., 15., 16.,  12., 3., 12., 10.],
-             [2.4, 3.2, 3.4, 4.0, 4.0, 4.0, 4.0, 4.0], [4, 6]),
-        ),
-        (
-            'more complicated BLs',
-            define_models.SetupModel(
-                'testcase',
-                (('Mid-crust', 'Moho', 'MLD', 'LAB'), [2., 3., 5., 10.]),
-            ),
-            ([0], [4.0]),
-            ([0., 12., 2., 12., 3., 12., 5., 12., 10.],
-             [4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0],
-             [1, 3, 5, 7]),
-        ),
-    ])
-    def test_append_BLs_to_surface_starting_model(
-            self, name, setup_model, inputs, expected):
-        """ Test the addition of the boundary layer frameworks.
-
-        Requires some shallower model with the starting thickness and Vs
-        to base the rest off.
-        """
-
-        t, vs = inputs
-        bi = define_models._append_BLs_to_surface_starting_model(
-            t, vs, setup_model,
-        )
-
-        exp_t, exp_vs, exp_bi = expected
-        self.assertEqual(t, exp_t)
-        self.assertEqual(vs, exp_vs)
-        self.assertEqual(bi, exp_bi)
-
     # test_fill_in_base_of_model
     @parameterized.expand([
         (
             'basic model',
-            define_models.SetupModel('testcase'),
+            define_models.SetupModel('testcase',
+                                     ref_card_csv_name='data/earth_models/test.csv'),
             ([0], [4.3]),
-            ([0., 400.], [4.3, 4.7699])
+            ([0.] + [400 / 66] * 66,
+             [4.3] + [3.2 + i * (4.7699 - 3.2) / 66 for i in range(1, 67)])
         ),
         (
-            'complex model',
-            define_models.SetupModel('testcase', depth_limits=(0, 220.)),
+            'prem',
+            define_models.SetupModel('testcase', min_layer_thickness=5.,
+                                     depth_limits=(0., 80.)),
+            ([0], [3.2]),
+            ([0.] + [5.] * 16,
+             ([3.2] * 4 + [3.9]
+              + [(25. + i * 5. - 24.41) / (42.933 - 24.41) * (4.40029 - 3.9) + 3.9 for i in range(4)]
+              + [(45. + i * 5. - 42.933) / (61.467 - 42.933) * (4.40456 - 4.40029) + 4.40029 for i in range(4)]
+              + [(65. + i * 5. - 61.467) / (80. - 61.467) * (4.40883 - 4.40456) + 4.40456 for i in range(4)]
+             )
+            )
+        ),
+        (
+            'complex starting model',
+            define_models.SetupModel('testcase',
+                                     ref_card_csv_name='data/earth_models/test.csv'),
             ([0., 30., 3., 40., 10.], [3.4, 3.6, 4.0, 4.2, 4.15]),
-            ([0., 30., 3., 40., 10., 137.], [3.4, 3.6, 4.0, 4.2, 4.15, 4.44109]),
+            ([0., 30., 3., 40., 10.] + [317. / 52.] * 52,
+             ([3.4, 3.6, 4.0, 4.2, 4.15]
+              + [(83. + i * 317. / 52.) / 400 * (4.7699 - 3.2) + 3.2 for i in range(1, 53)]
+             ),
+            )
+        ),
+        (
+            'starting model matches depth lims',
+            define_models.SetupModel('testcase', depth_limits=(0., 50.)),
+            ([0., 5., 5., 10., 10., 10., 10.], [3.4 + 0.1 * i for i in range(7)]),
+            ([0., 5., 5., 10., 10., 10., 10.], [3.4 + 0.1 * i for i in range(7)]),
+        ),
+        (
+            'starting model exceeds depth lims',
+            define_models.SetupModel('testcase', depth_limits=(0., 50.)),
+            ([0., 5., 5., 10., 10., 10., 12.], [3.4 + 0.1 * i for i in range(7)]),
+            ([0., 5., 5., 10., 10., 10., 10.], [3.4 + 0.1 * i for i in range(6)] + [3.9 + 10/12 * 0.1]),
         ),
     ])
     def test_fill_in_base_of_model(self, name, setup_model, inputs, expected):
@@ -176,32 +163,76 @@ class PipelineTest(unittest.TestCase):
 
         exp_t, exp_vs = expected
         self.assertEqual(t, exp_t)
-        self.assertEqual(vs, exp_vs)
+        np.testing.assert_almost_equal(vs, exp_vs)
+
+    # test_add_BLs_to_starting_model
+    @parameterized.expand([
+        (
+            'basic model',
+            define_models.SetupModel('testcase'),
+            [0.] + [50.] * 8,
+            ([0., 50., 50., 3., 50., 50., 10., 50., 137.], [2, 5]),
+        ),
+        (
+            'crustal model on top',
+            define_models.SetupModel('testcase', depth_limits=(0., 216.)),
+            [0., 5., 15., 16.] + [6.] * 30,
+            ([0., 5., 15., 16.] + [6.] * 3 + [3.] + [6.] * 9 + [10.] + [6.] * 15 + [5.],
+             [6, 16]),
+        ),
+        (
+            'more complicated BLs',
+            define_models.SetupModel(
+                'testcase',
+                (('Mid-crust', 'Moho', 'MLD', 'LAB'), [2.5, 3., 5., 10.]),
+            ),
+            [0.] + [5.] * 80,
+            (([0.] + [5.] * 14 + [2.5] + [5.] * 13 + [3.] + [5.] * 12 + [5.]
+              + [5.] * 13 + [10.] + [5.] * 23 + [4.5]),
+             [14, 28, 41, 55]),
+        ),
+    ])
+    def test_add_BLs_to_starting_model(
+            self, name, setup_model, thicknesses, expected):
+        """ Test the addition of the boundary layer frameworks.
+
+        Requires some shallower model with the starting thickness and Vs
+        to base the rest off.
+        """
+
+        calc_bi = define_models._add_BLs_to_starting_model(thicknesses, setup_model)
+
+        exp_t, exp_bi = expected
+        self.assertEqual(thicknesses, exp_t)
+        self.assertEqual(calc_bi, exp_bi)
 
     # test_add_noise_to_starting_model
     @parameterized.expand([
         (
             'basic model',
-            ([0., 30., 3., 40., 10., 137.],
-             [3.4, 3.6, 4.0, 4.2, 4.1, 4.4],
-             [1, 3]),
+            (np.array([0., 30., 3., 40., 10., 137.]),
+             np.array([3.4, 3.6, 4.0, 4.2, 4.1, 4.4]),
+             np.array([1, 3]),
+             list(range(5))),
             42,
-            ([0., 28.2440, 3., 55.7921, 10., 122.9639],
-             [3.4497, 3.5862, 4.0648, 4.3523, 4.0766, 4.4],
-             [1, 3]),
+            (np.array([0., 29.2976, 3., 46.3169, 10., 131.3855]),
+             np.array([3.4993, 3.5723, 4.1295, 4.5046, 4.0532, 4.4]),
+             np.array([1, 3]),
+             list(range(5))),
         ),
     ])
     def test_add_noise_to_starting_model(self, name, input, seed, expected):
         """
         """
-        t, vs, bi = input
+        t, vs, bi, d_inds = input
         np.random.seed(seed)
-        define_models._add_noise_to_starting_model(t, vs, bi)
+        define_models._add_noise_to_starting_model(t, vs, bi, d_inds)
 
-        exp_t, exp_vs, exp_bi = expected
+        exp_t, exp_vs, exp_bi, exp_di = expected
         np.testing.assert_allclose(np.array(t), np.array(exp_t), atol=1e-3)
-        np.testing.assert_allclose(np.array(vs), np.array(exp_vs), atol=1e-3)
-        self.assertEqual(bi, exp_bi)
+        np.testing.assert_almost_equal(np.array(vs), np.array(exp_vs), decimal=4)
+        self.assertEqual(list(bi), list(exp_bi))
+        self.assertEqual(d_inds, exp_di)
 
     # test_return_evenly_spaced_model
     @parameterized.expand([
@@ -348,7 +379,7 @@ class PipelineTest(unittest.TestCase):
             define_models.SetupModel('testcase', depth_limits=(0, 150)),
             (35, -120),
             [5, 8, 10, 15, 20, 30, 40, 60, 80, 100, 120],
-            ([1.05] * 5 + [0.95] * 5 + [1.02] * 5 + [0.99] * 5 + [1.06] * 2 + [1]
+            ([1.025] * 5 + [0.975] * 5 + [1.02] * 5 + [0.99] * 5 + [1.06] * 2 + [1]
             + [1.1] * 2),
         ),
         (
@@ -382,6 +413,8 @@ class PipelineTest(unittest.TestCase):
         Convert the starting model to the column vector.  Perturb the column
         vector in some way, and then convert it back to a MINEOS card.  Rerun
         MINEOS to get phase velocities.
+
+        Note that the mistmatch between these two methods gets worse for larger model perturbations, especially at shorter periods.
 
         As G is dV/dm, then G * dm == mineos(m_perturbed) - mineos(m0).
 
@@ -427,7 +460,7 @@ class PipelineTest(unittest.TestCase):
         )
 
         # Apply the perturbation
-        p = inversion._build_model_vector(model)
+        p = inversion._build_model_vector(model, setup_model.depth_limits)
         p_perturbed = p.copy() * np.array(model_perturbation)[:, np.newaxis]
         perturbation = p_perturbed - p
         model_perturbed = inversion._build_inversion_model_from_model_vector(
@@ -476,7 +509,6 @@ class PipelineTest(unittest.TestCase):
             ])
         ),
     ])
-    #@unittest.skipIf(skip_influx, "Changed this bit but not the test yet")
     def test_build_MINEOS_G_matrix(self, name, kernels, expected_G_MINEOS):
         """
         """
@@ -492,26 +524,26 @@ class PipelineTest(unittest.TestCase):
             'Simple',
             define_models.InversionModel(
                 vsv = np.array([[3.5, 4, 4.5, 4.6, 4.7]]).T,
-                thickness = np.array([[0, 30, 40, 50, 20]]).T,
-                boundary_inds = []
+                thickness = np.array([[0., 30., 40., 50., 20.]]).T,
+                boundary_inds = [], d_inds=[],
             ),
             np.arange(0, 150, 10),
             np.array([
-                [1., 0., 0., 0.],
-                [2./3., 1./3., 0, 0],
-                [1./3., 2./3., 0, 0],
-                [0, 1., 0, 0],
-                [0, 3./4., 1./4., 0],
-                [0, 1./2., 1./2., 0],
-                [0, 1./4., 3./4., 0],
-                [0, 0, 1., 0],
-                [0, 0, 4./5., 1./5.],
-                [0, 0, 3./5., 2./5.],
-                [0, 0, 2./5., 3./5.],
-                [0, 0, 1./5., 4./5],
-                [0, 0, 0, 1.],
-                [0, 0, 0, 1./2.],
-                [0, 0, 0, 0],
+                [1., 0., 0., 0., 0.],
+                [2./3., 1./3., 0, 0, 0.],
+                [1./3., 2./3., 0, 0, 0.],
+                [0, 1., 0, 0, 0.],
+                [0, 3./4., 1./4., 0, 0.],
+                [0, 1./2., 1./2., 0, 0.],
+                [0, 1./4., 3./4., 0, 0.],
+                [0, 0, 1., 0, 0.],
+                [0, 0, 4./5., 1./5., 0.],
+                [0, 0, 3./5., 2./5., 0.],
+                [0, 0, 2./5., 3./5., 0.],
+                [0, 0, 1./5., 4./5, 0.],
+                [0, 0, 0, 1., 0.],
+                [0, 0, 0, 1./2., 1./2.],
+                [0, 0, 0, 0, 1.],
             ]),
         ),
         (
@@ -519,29 +551,28 @@ class PipelineTest(unittest.TestCase):
             define_models.InversionModel(
                 vsv = np.array([[3.5, 3.6, 4., 4.2, 4.4, 4.3, 4.35, 4.4]]).T,
                 thickness = np.array([[0., 30., 10., 22., 22., 15., 22., 22.]]).T,
-                boundary_inds = np.array([1, 4])
+                boundary_inds = np.array([1, 4]), d_inds=[],
             ),
             np.arange(0, 150, 10),
             np.array([
-                [1., 0., 0., 0., 0., 0., 0.],
-                [2./3., 1./3., 0., 0., 0., 0., 0.],
-                [1./3., 2./3., 0., 0., 0., 0., 0.],
-                [0., 1., 0., 0., 0., 0., 0.],
-                [0., 0., 1., 0., 0., 0., 0.],
-                [0., 0., 12./22., 10./22., 0., 0., 0.],
-                [0., 0., 2./22., 20./22, 0., 0., 0.],
-                [0., 0., 0., 14./22., 8./22., 0., 0.],
-                [0., 0., 0., 4./22., 18./22., 0., 0.],
-                [0., 0., 0., 0., 9./15., 6./15., 0.],
-                [0., 0., 0., 0., 0., 21./22., 1./22.],
-                [0., 0., 0., 0., 0., 11./22., 11./22.],
-                [0., 0., 0., 0., 0., 1./22., 21./22.],
-                [0., 0., 0., 0., 0., 0., 13./22.],
-                [0., 0., 0., 0., 0., 0., 3./22.],
+                [1., 0., 0., 0., 0., 0., 0., 0.],
+                [2./3., 1./3., 0., 0., 0., 0., 0., 0.],
+                [1./3., 2./3., 0., 0., 0., 0., 0., 0.],
+                [0., 1., 0., 0., 0., 0., 0., 0.],
+                [0., 0., 1., 0., 0., 0., 0., 0.],
+                [0., 0., 12./22., 10./22., 0., 0., 0., 0.],
+                [0., 0., 2./22., 20./22, 0., 0., 0., 0.],
+                [0., 0., 0., 14./22., 8./22., 0., 0., 0.],
+                [0., 0., 0., 4./22., 18./22., 0., 0., 0.],
+                [0., 0., 0., 0., 9./15., 6./15., 0., 0.],
+                [0., 0., 0., 0., 0., 21./22., 1./22., 0.],
+                [0., 0., 0., 0., 0., 11./22., 11./22., 0.],
+                [0., 0., 0., 0., 0., 1./22., 21./22., 0.],
+                [0., 0., 0., 0., 0., 0., 13./22., 9./22.],
+                [0., 0., 0., 0., 0., 0., 3./22., 19./22.],
             ]),
         ),
     ])
-    #@unittest.skipIf(skip_influx, "Changed this bit but not the test yet")
     def test_calculate_dm_ds(self, name, model, depth, expected):
         """
         """
@@ -557,7 +588,7 @@ class PipelineTest(unittest.TestCase):
             define_models.InversionModel(
                 vsv = np.array([[3.5, 4, 4.5, 4.6, 4.7]]).T,
                 thickness = np.array([[0, 30, 40, 50, 10]]).T,
-                boundary_inds = []
+                boundary_inds = [], d_inds=[],
             ),
             np.arange(0, 150, 10),
             np.array([
@@ -580,7 +611,6 @@ class PipelineTest(unittest.TestCase):
 
         ),
     ])
-    # @unittest.skipIf(skip_influx, "Changed this bit but not the test yet")
     def test_convert_kernels_d_shallowerm_by_d_s(
         self, name, model, depth, expected_dm_ds):
         """
@@ -602,7 +632,7 @@ class PipelineTest(unittest.TestCase):
             define_models.InversionModel(
                 vsv = np.array([[3.5, 4, 4.5, 4.6, 4.7]]).T,
                 thickness = np.array([[0, 30, 40, 55, 10]]).T,
-                boundary_inds = []
+                boundary_inds = [], d_inds=[],
             ),
             np.arange(0, 150, 10),
             np.array([
@@ -625,7 +655,6 @@ class PipelineTest(unittest.TestCase):
 
         ),
     ])
-    # @unittest.skipIf(skip_influx, "Changed this bit but not the test yet")
     def test_convert_kernels_d_deeperm_by_d_s(
         self, name, model, depth, expected_dm_ds):
         """
@@ -647,7 +676,7 @@ class PipelineTest(unittest.TestCase):
             define_models.InversionModel(
                 vsv = np.array([[3.5, 3.6, 4., 4.2, 4.4, 4.3, 4.35, 4.4]]).T,
                 thickness = np.array([[0., 30., 10., 22., 21., 15., 23., 24.]]).T,
-                boundary_inds = np.array([1, 4])
+                boundary_inds = np.array([1, 4]), d_inds=[],
             ),
             np.arange(0, 150, 10),
             np.array([
@@ -669,7 +698,6 @@ class PipelineTest(unittest.TestCase):
             ])
         ),
     ])
-    # @unittest.skipIf(skip_influx, "Changed this bit but not the test yet")
     def test_calculate_dm_dt(self, name, model, depth, expected):
         """
         """
@@ -685,29 +713,28 @@ class PipelineTest(unittest.TestCase):
             define_models.InversionModel(
                 vsv = np.array([[3.5, 3.6, 4., 4.2, 4.4, 4.3, 4.35, 4.4]]).T,
                 thickness = np.array([[0., 30., 10., 22., 21., 15., 23., 24.]]).T,
-                boundary_inds = np.array([1, 4])
+                boundary_inds = np.array([1, 4]), d_inds=[],
             ),
             np.arange(0, 150, 10),
             np.array([
-                [1, 0, 0, 0, 0, 0, 0, 0, 0], #   0
-                [2/3, 1/3, 0, 0, 0, 0, 0, (3.5 - 3.6) * 10 / 30 ** 2, 0], #  10
-                [1/3, 2/3, 0, 0, 0, 0, 0, (3.5 - 3.6) * 20 / 30 ** 2, 0], #  20
-                [0, 1, 0, 0, 0, 0, 0, (3.6 - 4.) / 10, 0], #  30
-                [0, 0, 1, 0, 0, 0, 0, (4. - 4.2) * 22 / 22 ** 2, 0], #  40
-                [0, 0, 12/22, 10/22, 0, 0, 0, (4. - 4.2) * 12 / 22 ** 2, 0], #  50
-                [0, 0, 2/22, 20/22, 0, 0, 0, (4. - 4.2) * 2 / 22 ** 2, 0], #  60
-                [0, 0, 0, 13/21, 8/21, 0, 0, 0, (4.2 - 4.4) * 8 / 21 ** 2], #  70
-                [0, 0, 0, 3/21, 18/21, 0, 0, 0, (4.2 - 4.4) * 18 / 21 ** 2], #  80
-                [0, 0, 0, 0, 8/15, 7/15, 0, 0, (4.4 - 4.3) / 15], #  90
-                [0, 0, 0, 0, 0, 21/23, 2/23, 0, (4.3 - 4.35) * 21 / 23 ** 2 ], # 100
-                [0, 0, 0, 0, 0, 11/23, 12/23, 0, (4.3 - 4.35) * 11 / 23 ** 2], # 110
-                [0, 0, 0, 0, 0, 1/23, 22/23, 0, (4.3 - 4.35) * 1 / 23 ** 2], # 120
-                [0, 0, 0, 0, 0, 0, 15/24, 0, 0], # 130 - pegged
-                [0, 0, 0, 0, 0, 0, 5/24, 0, 0], # 140 - pegged
+                [1, 0, 0, 0, 0, 0, 0, 0, 0, 0], #   0
+                [2/3, 1/3, 0, 0, 0, 0, 0, 0, (3.5 - 3.6) * 10 / 30 ** 2, 0], #  10
+                [1/3, 2/3, 0, 0, 0, 0, 0, 0, (3.5 - 3.6) * 20 / 30 ** 2, 0], #  20
+                [0, 1, 0, 0, 0, 0, 0, 0, (3.6 - 4.) / 10, 0], #  30
+                [0, 0, 1, 0, 0, 0, 0, 0, (4. - 4.2) * 22 / 22 ** 2, 0], #  40
+                [0, 0, 12/22, 10/22, 0, 0, 0, 0, (4. - 4.2) * 12 / 22 ** 2, 0], #  50
+                [0, 0, 2/22, 20/22, 0, 0, 0, 0, (4. - 4.2) * 2 / 22 ** 2, 0], #  60
+                [0, 0, 0, 13/21, 8/21, 0, 0, 0, 0, (4.2 - 4.4) * 8 / 21 ** 2], #  70
+                [0, 0, 0, 3/21, 18/21, 0, 0, 0, 0, (4.2 - 4.4) * 18 / 21 ** 2], #  80
+                [0, 0, 0, 0, 8/15, 7/15, 0, 0, 0, (4.4 - 4.3) / 15], #  90
+                [0, 0, 0, 0, 0, 21/23, 2/23, 0, 0, (4.3 - 4.35) * 21 / 23 ** 2 ], # 100
+                [0, 0, 0, 0, 0, 11/23, 12/23, 0, 0, (4.3 - 4.35) * 11 / 23 ** 2], # 110
+                [0, 0, 0, 0, 0, 1/23, 22/23, 0, 0, (4.3 - 4.35) * 1 / 23 ** 2], # 120
+                [0, 0, 0, 0, 0, 0, 15/24, 9/24, 0, 0], # 130 - pegged
+                [0, 0, 0, 0, 0, 0, 5/24, 19/24, 0, 0], # 140 - pegged
             ])
         )
     ])
-    # @unittest.skipIf(skip_influx, "Changed this bit but not the test yet")
     def test_convert_to_model_kernels(self, name, model, depth, expected):
         """
         """
@@ -755,7 +782,6 @@ class PipelineTest(unittest.TestCase):
             ]),
         ),
     ])
-    # @unittest.skipIf(skip_influx, "Changed this bit but not the test yet")
     def test_scale_dvsv_dp_to_other_variables(self, name, dvsv_dp,
                                               setup_model, expected):
         """
@@ -792,7 +818,6 @@ class PipelineTest(unittest.TestCase):
             })
         )
     ])
-    # @unittest.skipIf(skip_influx, "Changed this bit but not the test yet")
     def test_set_layer_values(self, name, layers, damping,
                                   expected_s, expected_t):
         damp_s = pd.DataFrame({'Depth': layers.depth})
@@ -834,7 +859,6 @@ class PipelineTest(unittest.TestCase):
             np.array([10, 20, 20, 80, 50, 180, 70, 40, 20])[:, np.newaxis],
         ),
     ])
-    # @unittest.skipIf(skip_influx, "Changed this bit but not the test yet")
     def test_damp_constraints(self, name, H, h, damp_s, damp_t,
                               expected_H, expected_h):
 
@@ -853,28 +877,27 @@ class PipelineTest(unittest.TestCase):
                     [0] + [6] * 3
                     + [7, 5, 4] + [6] * 1
                     + [10, 15, 12] + [6] * 1)[:, np.newaxis],
-                boundary_inds = np.array([4, 8])
+                boundary_inds = np.array([4, 8]), d_inds=[],
             ),
             np.array([
-                [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
-                [6, -12,  6,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
-                [0,  6, -12,  6,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
-                [0,  0,  7, -13,  6,  0,  0,  0,  0,  0,  0,  0,  0,  0],
-                [0,  0,  0,  5./2,  -12./2,  7./2,  0,  0,  0,  0,  0,  0,  0,  0],
-                [0,  0,  0,  0,  4./2,  -9./2,  5./2,  0,  0,  0,  0,  0,  0,  0],
-                [0,  0,  0,  0,  0,  6, -10,  4,  0,  0,  0,  0,  0,  0],
-                [0,  0,  0,  0,  0,  0,  10,  -16,  6,  0,  0,  0,  0,  0],
-                [0,  0,  0,  0,  0,  0,  0,  15./2,  -25./2,  10./2,  0,  0,  0,  0],
-                [0,  0,  0,  0,  0,  0,  0,  0,  12./2, -27./2,  15./2,  0,  0,  0],
-                [0,  0,  0,  0,  0,  0,  0,  0,  0,  6,  -18,  12,  0,  0],
-                [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  10,  -16,  0,  0],
-                [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
-                [0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
+                [0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.],
+                [6, -12,   6,   0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.],
+                [0.,  6.,-12.,  6.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.],
+                [0.,  0.,  7.,-13.,  6.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.],
+                [0.,  0.,  7.,-13.,  6.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.],
+                [0.,  0.,  0.,  0.,  0.,  6.,-10.,  4.,  0.,  0.,  0.,  0.,  0.,  0.],
+                [0.,  0.,  0.,  0.,  0.,  6.,-10.,  4.,  0.,  0.,  0.,  0.,  0.,  0.],
+                [0.,  0.,  0.,  0.,  0.,  0., 10.,-16.,  6.,  0.,  0.,  0.,  0.,  0.],
+                [0.,  0.,  0.,  0.,  0.,  0., 10.,-16.,  6.,  0.,  0.,  0.,  0.,  0.],
+                [0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  6.,-18., 12.,  0.,  0.],
+                [0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  6.,-18., 12.,  0.,  0.],
+                [0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0., 10.,-16.,  0.,  0.],
+                [0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.],
+                [0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.,  0.],
             ]),
             np.array([0] * 11 + [-6 * 4.411829121] + [0] * 2)[:, np.newaxis],
         ),
     ])
-    # @unittest.skipIf(skip_influx, "Changed this bit but not the test yet")
     def test_build_smoothing_constraints(self, name, model,
                                          expected_H, expected_h):
 
@@ -917,7 +940,6 @@ class PipelineTest(unittest.TestCase):
             np.array([1, 2, 3, 4, 5])[:, np.newaxis],
         ),
     ])
-    # @unittest.skipIf(skip_influx, "Changed this bit but not the test yet")
     def test_build_constraint_damp_to_m0(self, name, p, expected_H, expected_h):
         H, h, label = weights._build_constraint_damp_to_m0(p)
         self.assertEqual(label, 'to_m0')
@@ -931,7 +953,7 @@ class PipelineTest(unittest.TestCase):
             define_models.InversionModel(
                 vsv = np.array([1, 2, 3, 4, 5, 6., 7., 8.])[:, np.newaxis],
                 thickness = np.array([6., 6., 6., 6., 6., 6., 6., 6.])[:, np.newaxis],
-                boundary_inds = np.array([2, 4])
+                boundary_inds = np.array([2, 4]), d_inds=[],
             ),
             np.array([
                 [1./1., -1./2., 0, 0, 0, 0, 0, 0, 0],

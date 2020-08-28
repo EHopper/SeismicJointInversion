@@ -294,6 +294,8 @@ def _build_MINEOS_G_matrix(kernels:pd.DataFrame):
     entry in the matrix above (including the 0) is actually a row vector
     n_depth_points long.
 
+    Note that for Love waves, only the toroidal Frechet kernels are non-zero - i.e. only sensitive to Vsv and Vsh.  For Rayleigh waves, only the spheroidal Frechet kernels are non-zero - i.e. sensitive to Vsv, Vpv, Vph and eta, but NOT to Vsh.
+
     For now, we are only using Rayleigh waves, so in the above explanation,
     n_Love_periods = 0, i.e. there are no rows in G for the T_*** kernels.
 
