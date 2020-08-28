@@ -47,7 +47,7 @@ class ModelLayerValues(typing.NamedTuple):
 
 def build_weighting_damping(std_obs:np.array, p:np.array,
                             model:define_models.InversionModel,
-                            setup_model:define_models.SetupModel):
+                            model_params:define_models.ModelParams):
     """
     """
 
@@ -55,7 +55,7 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
     W = _build_error_weighting_matrix(std_obs)
 
     # Record level of damping on the Vsv model parameters
-    layers = define_models._set_model_indices(setup_model, model)
+    layers = define_models._set_model_indices(model_params, model)
     damp_s = pd.DataFrame({'Depth': layers.depth})
     # Record level of damping on the boundary layer depth parameters
     damp_t = pd.DataFrame({
@@ -71,7 +71,7 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
     sc = 0.
     _set_layer_values((sc / 5., sc / 5., sc, 2, sc), layers, damp_s, damp_t, 'roughness')
     roughness_mat, roughness_vec = _damp_constraints(
-        _build_smoothing_constraints(model, setup_model), damp_s, damp_t
+        _build_smoothing_constraints(model, model_params), damp_s, damp_t
     )
 
     # Linear constraint equations
@@ -107,7 +107,7 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
 
 
     # Record damping parameters
-    save_name = 'output/{0}/{0}'.format(setup_model.id)
+    save_name = 'output/{0}/{0}'.format(model_params.id)
     damp_s.to_csv(save_name + 'damp_s.csv', index=False)
     damp_t.to_csv(save_name + 'damp_t.csv', index=False)
 
@@ -232,7 +232,7 @@ def _build_error_weighting_matrix(obs_std):
 
 def _build_smoothing_constraints(
         model:define_models.InversionModel,
-        setup_model:define_models.SetupModel) -> (np.array, np.array):
+        model_params:define_models.ModelParams) -> (np.array, np.array):
     """ Build the matrices needed to minimise second derivative of the model.
 
     That is, for each layer, we want to minimise the second derivative
@@ -259,8 +259,8 @@ def _build_smoothing_constraints(
             - define_models.InversionModel
             - model.vsv.size = n_depth_points + 1 (deepest Vs is fixed)
             - model.boundary_inds.size = n_boundary_layers
-        setup_model:
-            - define_models.SetupModel
+        model_params:
+            - define_models.ModelParams
 
     Returns:
         roughness_mat
@@ -303,7 +303,7 @@ def _build_smoothing_constraints(
 
     # Add smoothing at base of the model
     base_t = list(sum(t)); base_vs = list(model.vsv[-1])
-    define_models._fill_in_base_of_model(base_t, base_vs, setup_model._replace(
+    define_models._fill_in_base_of_model(base_t, base_vs, model_params._replace(
         depth_limits=(base_t[0], base_t[0] + 10) # Interpolate 10 km below base
     ))
     ir += 1

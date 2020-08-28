@@ -24,7 +24,7 @@ class PipelineTest(unittest.TestCase):
     # =========================================================================
     # Set up specific assertions for locally defined classes
     # =========================================================================
-    def assertSetupModelEqual(self, actual, expected):
+    def assertModelParamsEqual(self, actual, expected):
         self.assertEqual(actual.id, expected.id)
         act_bnames, act_bwidths = actual.boundaries
         exp_bnames, exp_bwidths = expected.boundaries
@@ -39,6 +39,7 @@ class PipelineTest(unittest.TestCase):
                          expected.vpv_vsv_ratio)
         self.assertEqual(actual.vpv_vph_ratio,
                          expected.vpv_vph_ratio)
+        self.assertEqual(actual.eta, expected.eta)
         self.assertEqual(actual.ref_card_csv_name,
                          expected.ref_card_csv_name)
 
@@ -61,48 +62,49 @@ class PipelineTest(unittest.TestCase):
     #      define_models.py     #
     # ************************* #
 
-    # test_SetupModel
+    # test_ModelParams
     @parameterized.expand([
             (
                 "Using default values",
                 (
                     'moho lab',
                     ('Moho', 'LAB'), [3., 10.],
-                    (0, 400), 6, 1, 1.75, 1,
+                    (0, 400), 6, 1, 1.75, 1, 1,
                     'data/earth_models/prem.csv',
                 ),
-                define_models.SetupModel('moho lab'),
+                define_models.ModelParams('moho lab'),
             ),
             (
                 "Moho only, no defaults",
                 (
                     'moho',
                     ('Moho',), [5.],
-                    (-10., 100.), 10., 1.1, 1.8, 0.9,
+                    (-10., 100.), 10., 1.1, 1.8, 0.9, 1.04,
                     'prem.csv',
                 ),
-                define_models.SetupModel(
+                define_models.ModelParams(
                     id = 'moho',
                     boundaries = (('Moho',), [5.]),
                     depth_limits = (-10., 100.),
                     min_layer_thickness = 10.,
                     vsv_vsh_ratio = 1.1, vpv_vsv_ratio = 1.8,
-                    vpv_vph_ratio = 0.9, ref_card_csv_name = 'prem.csv',
+                    vpv_vph_ratio = 0.9, eta = 1.04,
+                    ref_card_csv_name = 'prem.csv',
                 )
             )
 
     ])
-    def test_SetupModel(self, name, inputs, expected):
-        """ Test that the SetupModel class defaults work as expected.
+    def test_ModelParams(self, name, inputs, expected):
+        """ Test that the ModelParams class defaults work as expected.
         """
-        id, bds, bw, dl, mlt, svsh, ps, pvph, csv = inputs
-        self.assertSetupModelEqual(
-            define_models.SetupModel(
+        id, bds, bw, dl, mlt, svsh, ps, pvph, eta, csv = inputs
+        self.assertModelParamsEqual(
+            define_models.ModelParams(
                 id=id,
                 boundaries=(bds, bw),
                 min_layer_thickness=mlt, depth_limits=dl,
                 vsv_vsh_ratio=svsh, vpv_vph_ratio=pvph, vpv_vsv_ratio=ps,
-                ref_card_csv_name=csv,
+                eta=eta, ref_card_csv_name=csv,
             ),
             expected
         )
@@ -111,7 +113,7 @@ class PipelineTest(unittest.TestCase):
     @parameterized.expand([
         (
             'basic model',
-            define_models.SetupModel('testcase',
+            define_models.ModelParams('testcase',
                                      ref_card_csv_name='data/earth_models/test.csv'),
             ([0], [4.3]),
             ([0.] + [400 / 66] * 66,
@@ -119,7 +121,7 @@ class PipelineTest(unittest.TestCase):
         ),
         (
             'prem',
-            define_models.SetupModel('testcase', min_layer_thickness=5.,
+            define_models.ModelParams('testcase', min_layer_thickness=5.,
                                      depth_limits=(0., 80.)),
             ([0], [3.2]),
             ([0.] + [5.] * 16,
@@ -132,7 +134,7 @@ class PipelineTest(unittest.TestCase):
         ),
         (
             'complex starting model',
-            define_models.SetupModel('testcase',
+            define_models.ModelParams('testcase',
                                      ref_card_csv_name='data/earth_models/test.csv'),
             ([0., 30., 3., 40., 10.], [3.4, 3.6, 4.0, 4.2, 4.15]),
             ([0., 30., 3., 40., 10.] + [317. / 52.] * 52,
@@ -143,23 +145,23 @@ class PipelineTest(unittest.TestCase):
         ),
         (
             'starting model matches depth lims',
-            define_models.SetupModel('testcase', depth_limits=(0., 50.)),
+            define_models.ModelParams('testcase', depth_limits=(0., 50.)),
             ([0., 5., 5., 10., 10., 10., 10.], [3.4 + 0.1 * i for i in range(7)]),
             ([0., 5., 5., 10., 10., 10., 10.], [3.4 + 0.1 * i for i in range(7)]),
         ),
         (
             'starting model exceeds depth lims',
-            define_models.SetupModel('testcase', depth_limits=(0., 50.)),
+            define_models.ModelParams('testcase', depth_limits=(0., 50.)),
             ([0., 5., 5., 10., 10., 10., 12.], [3.4 + 0.1 * i for i in range(7)]),
             ([0., 5., 5., 10., 10., 10., 10.], [3.4 + 0.1 * i for i in range(6)] + [3.9 + 10/12 * 0.1]),
         ),
     ])
-    def test_fill_in_base_of_model(self, name, setup_model, inputs, expected):
+    def test_fill_in_base_of_model(self, name, model_params, inputs, expected):
         """
         """
 
         t, vs = inputs
-        define_models._fill_in_base_of_model(t, vs, setup_model)
+        define_models._fill_in_base_of_model(t, vs, model_params)
 
         exp_t, exp_vs = expected
         self.assertEqual(t, exp_t)
@@ -169,20 +171,20 @@ class PipelineTest(unittest.TestCase):
     @parameterized.expand([
         (
             'basic model',
-            define_models.SetupModel('testcase'),
+            define_models.ModelParams('testcase'),
             [0.] + [50.] * 8,
             ([0., 50., 50., 3., 50., 50., 10., 50., 137.], [2, 5]),
         ),
         (
             'crustal model on top',
-            define_models.SetupModel('testcase', depth_limits=(0., 216.)),
+            define_models.ModelParams('testcase', depth_limits=(0., 216.)),
             [0., 5., 15., 16.] + [6.] * 30,
             ([0., 5., 15., 16.] + [6.] * 3 + [3.] + [6.] * 9 + [10.] + [6.] * 15 + [5.],
              [6, 16]),
         ),
         (
             'more complicated BLs',
-            define_models.SetupModel(
+            define_models.ModelParams(
                 'testcase',
                 (('Mid-crust', 'Moho', 'MLD', 'LAB'), [2.5, 3., 5., 10.]),
             ),
@@ -193,14 +195,14 @@ class PipelineTest(unittest.TestCase):
         ),
     ])
     def test_add_BLs_to_starting_model(
-            self, name, setup_model, thicknesses, expected):
+            self, name, model_params, thicknesses, expected):
         """ Test the addition of the boundary layer frameworks.
 
         Requires some shallower model with the starting thickness and Vs
         to base the rest off.
         """
 
-        calc_bi = define_models._add_BLs_to_starting_model(thicknesses, setup_model)
+        calc_bi = define_models._add_BLs_to_starting_model(thicknesses, model_params)
 
         exp_t, exp_bi = expected
         self.assertEqual(thicknesses, exp_t)
@@ -371,42 +373,42 @@ class PipelineTest(unittest.TestCase):
     @parameterized.expand([
         (
             'basic model',
-            define_models.SetupModel('testcase', depth_limits=(0, 200)),
+            define_models.ModelParams('testcase', depth_limits=(0, 200)),
             (35, -110),
             [10, 20, 30, 40, 60, 80, 100],
             [1.05] + [1] * 33,
         ),
-        (
-            'more perturbed',
-            define_models.SetupModel('testcase', depth_limits=(0, 150)),
-            (35, -120),
-            [5, 8, 10, 15, 20, 30, 40, 60, 80, 100, 120],
-            ([1.025] * 5 + [0.975] * 5 + [1.02] * 5 + [0.99] * 5 + [1.06] * 2 + [1]
-            + [1.1] * 2),
-        ),
-        (
-            'small perturbations',
-            define_models.SetupModel('testcase', depth_limits=(0, 175)),
-            (35, -100),
-            [10, 20, 30, 40, 60, 80, 100],
-            ([1.005] * 5 + [0.995] * 5 + [1.01] * 5 + [0.997] * 5
-            + [1.001] * 4 + [0.999] * 2 + [1]
-            + [1.05] * 2),
-        ),
-        (
-            'sharp LAB',
-            define_models.SetupModel(
-                'testcase', boundaries=(('Moho', 'LAB'), [3., 3.]),
-                depth_limits=(0, 150)
-            ),
-            (35, -110),
-            [10, 20, 30, 40, 60, 80, 100],
-            ([1.005] * 5 + [0.995] * 5 + [1.01] * 5 + [0.997] * 5 + [1.0001] * 4 + [1]
-            + [1.05] * 2),
-        ),
+        # (
+        #     'more perturbed',
+        #     define_models.ModelParams('testcase', depth_limits=(0, 150)),
+        #     (35, -120),
+        #     [5, 8, 10, 15, 20, 30, 40, 60, 80, 100, 120],
+        #     ([1.025] * 5 + [0.975] * 5 + [1.02] * 5 + [0.99] * 5 + [1.06] * 2 + [1]
+        #     + [1.1] * 2),
+        # ),
+        # (
+        #     'small perturbations',
+        #     define_models.ModelParams('testcase', depth_limits=(0, 175)),
+        #     (35, -100),
+        #     [10, 20, 30, 40, 60, 80, 100],
+        #     ([1.005] * 5 + [0.995] * 5 + [1.01] * 5 + [0.997] * 5
+        #     + [1.001] * 4 + [0.999] * 2 + [1]
+        #     + [1.05] * 2),
+        # ),
+        # (
+        #     'sharp LAB',
+        #     define_models.ModelParams(
+        #         'testcase', boundaries=(('Moho', 'LAB'), [3., 3.]),
+        #         depth_limits=(0, 150)
+        #     ),
+        #     (35, -110),
+        #     [10, 20, 30, 40, 60, 80, 100],
+        #     ([1.005] * 5 + [0.995] * 5 + [1.01] * 5 + [0.997] * 5 + [1.0001] * 4 + [1]
+        #     + [1.05] * 2),
+        # ),
     ])
     @unittest.skipIf(skipMINEOS, "MINEOS runs too slow to test every time")
-    def test_G_sw(self, name, setup_model, location, periods, model_perturbation):
+    def test_G_sw(self, name, model_params, location, periods, model_perturbation):
         """ Test G by comparing the dV from G * dm to the dV output from MINEOS.
 
         From a given starting model, calculate phase velocities and kernels
@@ -446,30 +448,30 @@ class PipelineTest(unittest.TestCase):
         # Calculate the G matrix from a starting model
         np.random.seed(42) # need to set the seed because model length can be
                            # different depending on the random variation
-        model = define_models.setup_starting_model(setup_model, location)
+        model = define_models.setup_starting_model(model_params, location)
         # No need for output on MINEOS model as saved to .card file
         _ = define_models.convert_inversion_model_to_mineos_model(
-            model, setup_model
+            model, model_params
         )
         params = mineos.RunParameters(
             freq_max = 1000 / min(periods) + 1, max_run_N = 5,
         )
         ph_vel_pred, kernels = mineos.run_mineos_and_kernels(
-            params, periods, setup_model.id
+            params, periods, model_params.id
         )
         G = partial_derivatives._build_partial_derivatives_matrix_sw(
-            kernels, model, setup_model,
+            kernels, model, model_params,
         )
 
         # Apply the perturbation
-        p = inversion._build_model_vector(model, setup_model.depth_limits)
+        p = inversion._build_model_vector(model, model_params.depth_limits)
         p_perturbed = p.copy() * np.array(model_perturbation)[:, np.newaxis]
         perturbation = p_perturbed - p
         model_perturbed = inversion._build_inversion_model_from_model_vector(
             p_perturbed, model
         )
         _ = define_models.convert_inversion_model_to_mineos_model(
-            model_perturbed, setup_model._replace(id='testcase_perturbed')
+            model_perturbed, model_params._replace(id='testcase_perturbed')
         )
         ph_vel_perturbed, _ = mineos.run_mineos(
             params, periods, 'testcase_perturbed'
@@ -756,7 +758,7 @@ class PipelineTest(unittest.TestCase):
                 [10/30, 20/30, 0, 0],
                 [0, 40/40, 0, 0],
             ]),
-            define_models.SetupModel('basic',
+            define_models.ModelParams('basic',
                 vsv_vsh_ratio = 1.1, vpv_vsv_ratio = 1.8,
                 vpv_vph_ratio = 0.9, ref_card_csv_name = 'prem.csv'
             ),
@@ -785,12 +787,12 @@ class PipelineTest(unittest.TestCase):
         ),
     ])
     def test_scale_dvsv_dp_to_other_variables(self, name, dvsv_dp,
-                                              setup_model, expected):
+                                              model_params, expected):
         """
         """
         np.testing.assert_allclose(
             partial_derivatives._scale_dvsv_dp_to_other_variables(
-                dvsv_dp, setup_model
+                dvsv_dp, model_params
             ),
             expected,
         )
@@ -903,7 +905,7 @@ class PipelineTest(unittest.TestCase):
     def test_build_smoothing_constraints(self, name, model,
                                          expected_H, expected_h):
 
-        sm = define_models.SetupModel('junk') # need PREM path only
+        sm = define_models.ModelParams('junk') # need PREM path only
         H, h, label = weights._build_smoothing_constraints(model, sm)
 
         self.assertEqual(label, 'roughness')

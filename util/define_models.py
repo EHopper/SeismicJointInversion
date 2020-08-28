@@ -1,7 +1,7 @@
 """ Generate Earth models to work with surface_waves
 
 Classes:
-    1. SetupModel
+    1. ModelParams
         - Fixed input parameters for the velocity model
         - Fields:
             id                  - Unique name for the run, used for saving
@@ -14,7 +14,7 @@ Classes:
             vpv_vsv_ratio       - Ratio of Vpv to Vsv
             vpv_vph_ratio       - Ratio of Vpv to Vph
             ref_card_csv_name   - Path to a reference full MINEOS model card
-    2. InversionModel
+    2. VsvModel
         - Shear velocity model
         - Fields:
             vsv                 - Shear velocities, given at model nodes
@@ -41,19 +41,19 @@ from util import constraints
 # Set up classes for commonly used variables
 # =============================================================================
 
-class SetupModel(typing.NamedTuple):
+class ModelParams(typing.NamedTuple):
     """ Fixed input parameters for a velocity model.
 
     This records values that will remain fixed for a given inversion.  This includes an id, various fixed values around the boundaries in velocity (e.g. Moho, LAB), and various parameters needed to convert between the Vsv model of the crust and uppermost mantle calculated by the inversion and the earth model used by MINEOS.
 
-    MINEOS is used to calculate the predicted phase velocities and associated kernels. This needs a full earth model (i.e. surface to the core; Vsv, Vsh, Vpv, Vph, eta).  Here, we set the depth limits of the model to invert, a reference earth model to use outside of that range, and a linear scaling from Vsv to Vsh, from Vsv to Vpv, and from Vpv to Vph.  These all have default values if the user has no preference. Eta is fixed, assuming
+    MINEOS is used to calculate the predicted phase velocities and associated kernels. This needs a more complete earth model (i.e. surface to the core; Vsv, Vsh, Vpv, Vph, eta).  Here, we set the depth limits of the model to invert, a reference earth model to use outside of that range, and a linear scaling from Vsv to Vsh, from Vsv to Vpv, and from Vpv to Vph.  These all have default values if the user has no preference.
 
     Fields:
         id:
             - str
             - Unique name of model for saving things.
         boundaries:
-            - tuple of length 2, where each item in the tuple is a tuple or list with (n_boundary_depths_inverted_for) items in it
+            - tuple (length = 2), where each item in the tuple is a tuple (length = n_boundaries)
             - Items in tuple:
                 boundary names:
                     - Units: none
@@ -86,6 +86,10 @@ class SetupModel(typing.NamedTuple):
             - float
             - Units:    dimensionless
             - Ratio of Vpv to Vph, default value = 1 (i.e. radial isotropy)
+        eta:
+            - float:
+            - Units:    dimensionless
+            - Shape factor, a measure of ellipticity of seismic anisotropy, default value = 1. (i.e. radial isotropy)
         ref_card_csv_name:
             - str
             - Default value: 'data/earth_model/prem.csv'
@@ -102,6 +106,7 @@ class SetupModel(typing.NamedTuple):
     vsv_vsh_ratio: float = 1.
     vpv_vsv_ratio: float = 1.75
     vpv_vph_ratio: float = 1.
+    eta: float = 1.
     ref_card_csv_name: str = 'data/earth_models/prem.csv'
 
 
@@ -136,7 +141,7 @@ class InversionModel(typing.NamedTuple):
             - Indices in .vsv and .thickness identifying the boundaries of
               special interest, e.g. Moho, LAB.  For these boundaries, we
               will want to specifically prescribe the width of the layer
-              (originally set as SetupModel.boundary_widths), and to invert for
+              (originally set as ModelParams.boundary_widths), and to invert for
               the thickness of the overlying layer (i.e. the depth to the top
               of this boundary).
             - That is, InversionModel.(vsv|thickness)[boundary_inds[i]] is
@@ -149,7 +154,7 @@ class InversionModel(typing.NamedTuple):
             - (n_velocities_inverted_for, ) np.array of indices
             - Units:    n/a
             - Indices in .vsv identifying the depths within the depth_limits
-              given by setup_model.  Note that if the upper depth limit is 0,
+              given by model_params.  Note that if the upper depth limit is 0,
               this will be all [True, True, True, ...., True, False] - that is,
               everything but the last velocity value is inverted for.
 
@@ -210,10 +215,10 @@ class ModelLayerIndices(typing.NamedTuple):
 # =============================================================================
 
 
-def setup_starting_model(setup_model: SetupModel, location: tuple):
-    """ Convert from SetupModel to InversionModel.
+def setup_starting_model(model_params: ModelParams, location: tuple):
+    """ Convert from ModelParams to InversionModel.
 
-    SetupModel is the bare bones of what we want to constrain for the starting
+    ModelParams is the bare bones of what we want to constrain for the starting
     model, which is in a different format to the model that we actually want
     to invert, m = np.vstack(
                     (InversionModel.vsv[InversionModel.d_inds],
@@ -226,8 +231,8 @@ def setup_starting_model(setup_model: SetupModel, location: tuple):
     here, but that is probably ok as we will be inverting for all Vs points.
 
     Arguments:
-        setup_model:
-            - SetupModel
+        model_params:
+            - ModelParams
             - Units:    seismological, i.e. km, km/s
             - Starting model, defined elsewhere
         location:
@@ -245,8 +250,8 @@ def setup_starting_model(setup_model: SetupModel, location: tuple):
     # Set up directory to save to
     if not os.path.exists('output'):
         os.mkdir('output')
-    if not os.path.exists('output/' + setup_model.id):
-        os.mkdir('output/' + setup_model.id)
+    if not os.path.exists('output/' + model_params.id):
+        os.mkdir('output/' + model_params.id)
     else:
         print('This model ID has already been used!')
 
@@ -255,17 +260,17 @@ def setup_starting_model(setup_model: SetupModel, location: tuple):
     t, vs = constraints.get_vels_ShenRitzwoller2016(location)
 
     # Fill in to the base of the model
-    _fill_in_base_of_model(t, vs, setup_model)
+    _fill_in_base_of_model(t, vs, model_params)
 
     # Add on the boundary layers at arbitrary depths (will be fixed by inversion)
-    bi = _add_BLs_to_starting_model(t, setup_model)
+    bi = _add_BLs_to_starting_model(t, model_params)
 
     # Fix the model spacing
     thickness, vsv, boundary_inds = _return_evenly_spaced_model(
         np.array(t), np.array(vs), np.array(bi),
-        setup_model.min_layer_thickness,
+        model_params.min_layer_thickness,
     )
-    depth_inds = _find_depth_indices(thickness, setup_model.depth_limits)
+    depth_inds = _find_depth_indices(thickness, model_params.depth_limits)
 
     # Add random noise
     _add_noise_to_starting_model(
@@ -277,23 +282,23 @@ def setup_starting_model(setup_model: SetupModel, location: tuple):
                           thickness = thickness[np.newaxis].T,
                           boundary_inds = np.array(boundary_inds),
                           d_inds = _find_depth_indices(thickness,
-                                                       setup_model.depth_limits),
+                                                       model_params.depth_limits),
                           )
 
-def _fill_in_base_of_model(t:list, vs:list, setup_model:SetupModel):
+def _fill_in_base_of_model(t:list, vs:list, model_params:ModelParams):
 
-    if sum(t) >= setup_model.depth_limits[1]:
-        i = np.argmax(np.cumsum(t) >= setup_model.depth_limits[1])
-        vs[i] = np.interp(setup_model.depth_limits[1],
+    if sum(t) >= model_params.depth_limits[1]:
+        i = np.argmax(np.cumsum(t) >= model_params.depth_limits[1])
+        vs[i] = np.interp(model_params.depth_limits[1],
                           sum(t[:i - 1]) + np.cumsum(t[i - 1:i + 2]), vs[i - 1:i + 2])
-        t[i] = setup_model.depth_limits[1] - sum(t[:i])
+        t[i] = model_params.depth_limits[1] - sum(t[:i])
         vs = vs[:i + 1]
         t = t[:i + 1]
         return
 
 
 
-    ref_model =  pd.read_csv(setup_model.ref_card_csv_name)
+    ref_model =  pd.read_csv(model_params.ref_card_csv_name)
     ref_depth = (ref_model['radius'].iloc[-1] - ref_model['radius']) * 1e-3
     ref_vs = ref_model['vsv'] * 1e-3
     # Remove discontinuities and make depth increasing for purposes of interp
@@ -301,8 +306,8 @@ def _fill_in_base_of_model(t:list, vs:list, setup_model:SetupModel):
     ref_depth = ref_depth.iloc[::-1].values
     ref_vs = ref_vs.iloc[::-1].values
 
-    remaining_depth = setup_model.depth_limits[1] - sum(t)
-    n_layers = int(remaining_depth // setup_model.min_layer_thickness)
+    remaining_depth = model_params.depth_limits[1] - sum(t)
+    n_layers = int(remaining_depth // model_params.min_layer_thickness)
     thickness_to_end = [remaining_depth / n_layers] * n_layers
     vs += list(np.interp(sum(t) + np.cumsum(thickness_to_end), ref_depth, ref_vs))
     t += thickness_to_end
@@ -310,15 +315,15 @@ def _fill_in_base_of_model(t:list, vs:list, setup_model:SetupModel):
 
     return
 
-def _add_BLs_to_starting_model(t:list, setup_model:SetupModel):
+def _add_BLs_to_starting_model(t:list, model_params:ModelParams):
 
-    _, bwidths = setup_model.boundaries
+    _, bwidths = model_params.boundaries
     n_bounds = len(bwidths)
     boundary_inds = []
 
     # For now, distribute the boundary layers evenly over the depth range
     # (and space away from surface and base of model)
-    spacing = np.diff(setup_model.depth_limits) / (n_bounds + 2)
+    spacing = np.diff(model_params.depth_limits) / (n_bounds + 2)
 
     i = 0
     for i_b in range(n_bounds):
@@ -327,7 +332,7 @@ def _add_BLs_to_starting_model(t:list, setup_model:SetupModel):
         boundary_inds += [i]
         t[i + 1] = bwidths[i_b]
 
-    t[-1] -= sum(t) - setup_model.depth_limits[1]
+    t[-1] -= sum(t) - model_params.depth_limits[1]
 
 
     return boundary_inds
@@ -442,7 +447,7 @@ def _add_random_noise(a:np.array, sc:float, pdf='normal'):
         return a + np.random.uniform(low=-sc, high=sc, size=a.shape)
 
 
-def convert_inversion_model_to_mineos_model(inversion_model, setup_model,
+def convert_inversion_model_to_mineos_model(inversion_model, model_params,
                                             **kwargs):
     """ Generate model that is used for all the MINEOS interfacing.
 
@@ -457,8 +462,8 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model,
         - inversion_model:
             - InversionModel
             - Units:    seismological
-        - setup_model:
-            - SetupModel
+        - model_params:
+            - ModelParams
             - Units:    seismological
         - kwargs
             - key word argument of format:
@@ -468,19 +473,19 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model,
     """
     if not os.path.exists('output'):
         os.mkdir('output')
-    if not os.path.exists('output/' + setup_model.id):
-        os.mkdir('output/' + setup_model.id)
+    if not os.path.exists('output/' + model_params.id):
+        os.mkdir('output/' + model_params.id)
         print("This test ID hasn't been used before!")
 
     # Load PREM (http://ds.iris.edu/ds/products/emc-prem/)
     # Slightly edited to remove the water layer and give the model point
     # at 24 km depth lower crustal parameter values.
-    ref_model =  pd.read_csv(setup_model.ref_card_csv_name)
+    ref_model =  pd.read_csv(model_params.ref_card_csv_name)
 
     radius_Earth = ref_model['radius'].iloc[-1] * 1e-3
-    radius_model_top = radius_Earth - setup_model.depth_limits[0]
-    radius_model_base = radius_Earth - setup_model.depth_limits[1]
-    step = setup_model.min_layer_thickness / 3
+    radius_model_top = radius_Earth - model_params.depth_limits[0]
+    radius_model_base = radius_Earth - model_params.depth_limits[1]
+    step = model_params.min_layer_thickness / 3
     radius = np.arange(radius_model_base, radius_model_top, step)
     radius = np.append(radius, radius_model_top)
     depth = (radius_Earth - radius) # still in km at this point
@@ -489,15 +494,15 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model,
     vsv = np.interp(depth,
                     np.cumsum(inversion_model.thickness),
                     inversion_model.vsv.flatten()) * 1e3 # convert to SI
-    vsh = vsv / setup_model.vsv_vsh_ratio
-    vpv = vsv * setup_model.vpv_vsv_ratio
-    vph = vpv / setup_model.vpv_vph_ratio
-    eta = np.ones(vsv.shape)
+    vsh = vsv / model_params.vsv_vsh_ratio
+    vpv = vsv * model_params.vpv_vsv_ratio
+    vph = vpv / model_params.vpv_vph_ratio
+    eta = np.ones(vsv.shape) * model_params.eta
     q_mu = np.interp(radius, ref_model['radius'], ref_model['q_mu'])
     q_kappa = np.interp(radius, ref_model['radius'], ref_model['q_kappa'])
     rho = np.interp(radius, ref_model['radius'], ref_model['rho'])
 
-    bnames, _ = setup_model.boundaries
+    bnames, _ = model_params.boundaries
     if 'Moho' in bnames:
         Moho_ind = (inversion_model.boundary_inds[bnames.index('Moho')])
         Moho_depth = np.sum(inversion_model.thickness[:Moho_ind + 1])
@@ -526,10 +531,10 @@ def convert_inversion_model_to_mineos_model(inversion_model, setup_model,
 
     mineos_card_model = pd.concat([smoothed_below, new_model,
                                    smoothed_above]).reset_index(drop=True)
-    mineos_card_model.to_csv('output/{0}/{0}.csv'.format(setup_model.id),
+    mineos_card_model.to_csv('output/{0}/{0}.csv'.format(model_params.id),
                              index=False)
 
-    _write_mineos_card(mineos_card_model, setup_model.id)
+    _write_mineos_card(mineos_card_model, model_params.id)
 
     return mineos_card_model
 
@@ -643,15 +648,15 @@ def smooth_to_ref_model_above(ref_model, new_model):
     return pd.concat([smoothed_ref_model, unadulterated_ref_model])
 
 
-def _set_model_indices(setup_model, model, **kwargs):
+def _set_model_indices(model_params, model, **kwargs):
     """ Return the indices of different geological layers in the model.
 
     This is useful for if we want to damp the different layers with different
     parameters.
 
     Arguments:
-        - setup_model:
-            - SetupModel
+        - model_params:
+            - ModelParams
             - Units:    seismological
         - model:
             - InversionModel
@@ -669,7 +674,7 @@ def _set_model_indices(setup_model, model, **kwargs):
 
     sed_inds = [list(model.vsv).index(v) for v in model.vsv if v <= 3]
 
-    bnames, _ = setup_model.boundaries
+    bnames, _ = model_params.boundaries
     if 'Moho' in bnames:
         moho_ind = model.boundary_inds[bnames.index('Moho')]
     else:

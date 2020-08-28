@@ -18,7 +18,7 @@ from util import plots
 
 
 
-def test_G(setup_model, periods, model_perturbation):
+def test_G(model_params, periods, model_perturbation):
     """ Test G by comparing the dV from G * dm to the dV output from MINEOS.
 
     From a given starting model, calculate phase velocities and kernels
@@ -40,17 +40,17 @@ def test_G(setup_model, periods, model_perturbation):
     cbar.set_label('Periods (s)', rotation=90)
     """
     # Calculate the G matrix from a starting model
-    model = define_models.setup_starting_model(setup_model)
+    model = define_models.setup_starting_model(model_params)
     # No need for output on MINEOS model as saved to .card file
     minmod = define_models.convert_inversion_model_to_mineos_model(
-        model, setup_model
+        model, model_params
     )
     params = mineos.RunParameters(freq_max = 1000 / min(periods) + 1)
     ph_vel_pred, kernels = mineos.run_mineos_and_kernels(
-        params, periods, setup_model.id
+        params, periods, model_params.id
     )
     G = partial_derivatives._build_partial_derivatives_matrix(
-        kernels, model, setup_model
+        kernels, model, model_params
     )
     # G_MINEOS = partial_derivatives._build_MINEOS_G_matrix(kernels)
     # G_MINEOS = G_MINEOS[:, :G_MINEOS.shape[1] // 5]
@@ -71,7 +71,7 @@ def test_G(setup_model, periods, model_perturbation):
         p_perturbed, model
     )
     minmod_perturbed = define_models.convert_inversion_model_to_mineos_model(
-        model_perturbed, setup_model._replace(id='testcase_perturbed')
+        model_perturbed, model_params._replace(id='testcase_perturbed')
     )
     # minmod.vsv = minmod_perturbed.vsv
     # define_models._write_mineos_card(minmod, 'testcase_perturbed')
@@ -121,7 +121,7 @@ def test_G(setup_model, periods, model_perturbation):
 
 
 def run_test_G():
-    setup_model = define_models.SetupModel(
+    model_params = define_models.ModelParams(
         'testcase', np.array([25., 120.]), np.array([5, 20]),
         np.array([10, 30]), np.array([3.6, 4.0, 4.4, 4.3]),
         np.array([0, 300])
@@ -130,7 +130,7 @@ def run_test_G():
     model_perturbation = ([1.05] * 5 + [0.95] * 5 + [1.02] * 5 + [0.99] * 5
     + [1.06] * 5 + [0.97] * 5 + [1.01] * 5 + [1]
     + [1.1] * 2)
-    dc_mineos, dc_Gdm = test_G(setup_model, periods, model_perturbation)
+    dc_mineos, dc_Gdm = test_G(model_params, periods, model_perturbation)
     print(dc_mineos, dc_Gdm)
 
 
@@ -162,20 +162,20 @@ def test_damping(): #n_iter
                     lat, -lon, t_LAB
                 ))
 
-                setup_model = define_models.SetupModel('test_damp' + lab,
+                model_params = define_models.ModelParams('test_damp' + lab,
                     boundaries=(('Moho', 'LAB'), [3., t_LAB]),
                     depth_limits=(0, 300),
                 )
                 #location = (35, -112)
                 obs, std_obs, periods = constraints.extract_observations(
-                    location, setup_model.id, setup_model.boundaries,
-                    setup_model.vpv_vsv_ratio,
+                    location, model_params.id, model_params.boundaries,
+                    model_params.vpv_vsv_ratio,
                 )
 
-                model = define_models.setup_starting_model(setup_model, location)
+                model = define_models.setup_starting_model(model_params, location)
 
                 run_plot_inversion(
-                    setup_model, model, obs, std_obs, periods, location
+                    model_params, model, obs, std_obs, periods, location
                     )
 
 def test_MonteCarlo(n_MonteCarlo): #n_iter
@@ -204,21 +204,21 @@ def test_MonteCarlo(n_MonteCarlo): #n_iter
         lat, -lon, t_LAB
     ))
 
-    setup_model = define_models.SetupModel('test_MC',
+    model_params = define_models.ModelParams('test_MC',
         boundaries=(('Moho', 'LAB'), [3., t_LAB]),
         depth_limits=(0, 420),
     )
     obs, std_obs, periods = constraints.extract_observations(
-        location, setup_model.id, setup_model.boundaries,
-        setup_model.vpv_vsv_ratio,
+        location, model_params.id, model_params.boundaries,
+        model_params.vpv_vsv_ratio,
     )
 
 
-    ic = list(range(len(obs) - 2 * len(setup_model.boundaries[0])))
+    ic = list(range(len(obs) - 2 * len(model_params.boundaries[0])))
     i_rf = list(range(ic[-1] + 1, len(obs)))
 
-    #setup_model = setup_model._replace(boundary_names = [])
-    save_name = 'output/{0}/{0}.q'.format(setup_model.id)
+    #model_params = model_params._replace(boundary_names = [])
+    save_name = 'output/{0}/{0}.q'.format(model_params.id)
     lat, lon = location
 
     f = plt.figure()
@@ -251,7 +251,7 @@ def test_MonteCarlo(n_MonteCarlo): #n_iter
                   'k-', linewidth=3, label='SL14')
 
     for trial in range(n_MonteCarlo):
-        m = define_models.setup_starting_model(setup_model, location)
+        m = define_models.setup_starting_model(model_params, location)
         plots.plot_model_simple(m, 'm0 ' + str(trial), ax_m0, (0, 150))
 
         dc = np.ones_like(periods)
@@ -262,7 +262,7 @@ def test_MonteCarlo(n_MonteCarlo): #n_iter
             old_dc = dc.copy()
 
             print('****** ITERATION ' +  str(n) + ' ******')
-            m, G = inversion._inversion_iteration(setup_model, m, location)
+            m, G = inversion._inversion_iteration(model_params, m, location)
             c = mineos._read_qfile(save_name, periods)
             dc = np.array([c[i] - obs[ic[i]] for i in range(len(c))])
 
@@ -270,13 +270,13 @@ def test_MonteCarlo(n_MonteCarlo): #n_iter
         # Plot up the model that reached convergence
         plots.plot_model_simple(m, 'm' + str(n + 1), ax_m150, (0, 150))
         plots.plot_model_simple(m, 'm' + str(n + 1), ax_mDeep,
-                                (150, setup_model.depth_limits[1]), False)
+                                (150, model_params.depth_limits[1]), False)
         p_rf = inversion._predict_RF_vals(m)
         plots.plot_rf_data(p_rf, 'm' + str(n + 1), ax_rf)
         # Run MINEOS on final model
         params = mineos.RunParameters(freq_max = 1000 / min(periods) + 1)
-        _ = define_models.convert_inversion_model_to_mineos_model(m, setup_model)
-        c, _ = mineos.run_mineos(params, periods, setup_model.id)
+        _ = define_models.convert_inversion_model_to_mineos_model(m, model_params)
+        c, _ = mineos.run_mineos(params, periods, model_params.id)
         plots.plot_ph_vel_simple(periods, c, ax_c)
         dc = [c[i] - obs[ic[i]] for i in range(len(c))]
         plots.plot_ph_vel_simple(periods, dc, ax_dc)
@@ -285,7 +285,7 @@ def test_MonteCarlo(n_MonteCarlo): #n_iter
         plots.make_plot_symmetric_in_y_around_zero(ax_rf)
 
     print(trial + 1, ' TRIALS')
-    save_name = 'output/{0}/{0}'.format(setup_model.id)
+    save_name = 'output/{0}/{0}'.format(model_params.id)
 
     f.savefig(
         '/media/sf_VM_Shared/rftests/MC_{}N_{}W_{}kmLAB_{}trials.png'.format(
@@ -293,13 +293,13 @@ def test_MonteCarlo(n_MonteCarlo): #n_iter
         )
     )
 
-def run_plot_MC_inversion(setup_model, orig_model,
+def run_plot_MC_inversion(model_params, orig_model,
                           obs, std_obs, periods, location,
                           n_MonteCarlo=5, max_runs=10):
 
-    ic = list(range(len(obs) - 2 * len(setup_model.boundaries[0])))
+    ic = list(range(len(obs) - 2 * len(model_params.boundaries[0])))
     i_rf = list(range(ic[-1] + 1, len(obs)))
-    t_LAB = setup_model.boundaries[1][1]
+    t_LAB = model_params.boundaries[1][1]
 
     # Setup the figure and reference plots
     f, ax_c, ax_dc, ax_rf, ax_m150, ax_mDeep, ax_map = (
@@ -337,7 +337,7 @@ def run_plot_MC_inversion(setup_model, orig_model,
         t = orig_model.thickness.copy()
         v = orig_model.vsv.copy()
         bi = orig_model.boundary_inds.copy()
-        di = define_models._find_depth_indices(t, setup_model.depth_limits)
+        di = define_models._find_depth_indices(t, model_params.depth_limits)
         define_models._add_noise_to_starting_model(t, v, bi, di)
         model = define_models.InversionModel(v, t, bi, di)
 
@@ -357,25 +357,25 @@ def run_plot_MC_inversion(setup_model, orig_model,
             old_dc = dc.copy()
             # Run inversion
             print('****** ITERATION ' +  str(n) + ' ******')
-            model, G, o = inversion._inversion_iteration(setup_model, model, location,
+            model, G, o = inversion._inversion_iteration(model_params, model, location,
                                                       (obs, std_obs, periods))
 
             # Read ouput file to check change in predicted phase velocities
-            c = mineos._read_qfile('output/{0}/{0}.q'.format(setup_model.id), periods)
+            c = mineos._read_qfile('output/{0}/{0}.q'.format(model_params.id), periods)
             dc = np.array([c[i] - obs[ic[i]] for i in range(len(c))])
             n += 1
             if n == 1:
                 plots.plot_model(model, 'MC{}_m{}'.format(trial, n), ax_m1_150,
                                  (0, 150), True, pcol)
                 plots.plot_model(model, 'MC{}_m{}'.format(trial, n), ax_m1_Deep,
-                                 (150, setup_model.depth_limits[1]), False, pcol)
+                                 (150, model_params.depth_limits[1]), False, pcol)
 
         # Plot values for final model
         plots.plot_model(model, 'MC{}_m{}'.format(trial, n), ax_m150, (0, 150))
         plots.plot_model(model, 'MC{}_m{}'.format(trial, n), ax_mDeep,
-                         (150, setup_model.depth_limits[1]), False)
+                         (150, model_params.depth_limits[1]), False)
         if trial == 0:
-            base_z = np.arange(0, setup_model.depth_limits[1], 0.5)
+            base_z = np.arange(0, model_params.depth_limits[1], 0.5)
             base_v = np.interp(base_z, np.cumsum(model.thickness), model.vsv.ravel())
             orig_v = np.interp(base_z, np.cumsum(orig_model.thickness), orig_model.vsv.ravel())
 
@@ -401,7 +401,7 @@ def run_plot_MC_inversion(setup_model, orig_model,
 
         p_rf = inversion._predict_RF_vals(model)
         plots.plot_rf_data(p_rf, 'MC{}_m{}'.format(trial, n), ax_rf)
-        c = mineos.calculate_c_from_card(setup_model, model, periods)
+        c = mineos.calculate_c_from_card(model_params, model, periods)
         dc = [c[i] - obs[ic[i]] for i in range(len(c))]
         plots.plot_ph_vel(periods, c, 'MC{}_m{}'.format(trial, n), ax_c)
         plots.plot_dc(periods, dc, ax_dc)
@@ -410,7 +410,7 @@ def run_plot_MC_inversion(setup_model, orig_model,
     ax_dc.set_ylim(max(max(abs(np.array(dc))) * 1.25, 0.06) * np.array([-1, 1]))
     xl = maxdiff * 1.1 * np.array([-1, 1])
     ax_diff_m150.set(ylim = [150, 0], xlim = xl)
-    ax_diff_mDeep.set(ylim = [setup_model.depth_limits[1], 150], xlim = xl)
+    ax_diff_mDeep.set(ylim = [model_params.depth_limits[1], 150], xlim = xl)
     plots.make_plot_symmetric_in_y_around_zero(ax_rf)
     ax_m150.set_xlim([2, 5.5])
     ax_mDeep.set_xlim([2, 5.5])
@@ -420,14 +420,14 @@ def run_plot_MC_inversion(setup_model, orig_model,
 
     f.savefig(
         '/media/sf_VM_Shared/rftests/{}N_{}W_{}kmLAB{}_{}MC.png'.format(
-        location[0], -location[1], round(t_LAB), setup_model.id, n_MonteCarlo
+        location[0], -location[1], round(t_LAB), model_params.id, n_MonteCarlo
         )
     )
 
-def run_plot_inversion(setup_model, model,
+def run_plot_inversion(model_params, model,
                        obs, std_obs, periods, location, m, max_runs=10):
 
-    ic = list(range(len(obs) - 2 * len(setup_model.boundaries[0])))
+    ic = list(range(len(obs) - 2 * len(model_params.boundaries[0])))
     i_rf = list(range(ic[-1] + 1, len(obs)))
 
     t_LAB = model.thickness.item(model.boundary_inds[-1] + 1)
@@ -439,7 +439,7 @@ def run_plot_inversion(setup_model, model,
     plots.plot_area_map(location, ax_map)
     #plots.plot_SL14_profile(location, ax_m150)
     #plots.plot_SL14_profile(location, ax_mDeep)
-    ph_vel_pred = mineos.calculate_c_from_card(setup_model, m, periods)
+    ph_vel_pred = mineos.calculate_c_from_card(model_params, m, periods)
     ax_m150.plot(m.vsv, np.cumsum(m.thickness), 'k-', linewidth=3, label='SR16')
     ax_mDeep.plot(m.vsv, np.cumsum(m.thickness), 'k-', linewidth=3, label='SR16')
     ax_c.plot(periods, ph_vel_pred, 'k--o', markersize=3, label='SR16')
@@ -462,7 +462,7 @@ def run_plot_inversion(setup_model, model,
         # Plot starting model of this iteration
         plots.plot_model(model, 'm' + str(n), ax_m150, (0, 150))
         plots.plot_model(model, 'm' + str(n), ax_mDeep,
-                         (150, setup_model.depth_limits[1]), False)
+                         (150, model_params.depth_limits[1]), False)
 
         # Plot predicted RF vals of this iteration
         p_rf = inversion._predict_RF_vals(model)
@@ -470,11 +470,11 @@ def run_plot_inversion(setup_model, model,
 
         # Run inversion
         print('****** ITERATION ' +  str(n) + ' ******')
-        model, G, o = inversion._inversion_iteration(setup_model, model, location,
+        model, G, o = inversion._inversion_iteration(model_params, model, location,
                                                   (obs, std_obs, periods))
 
         # Plot predicted c from previous iteration (calculated for inversion)
-        c = mineos._read_qfile('output/{0}/{0}.q'.format(setup_model.id), periods)
+        c = mineos._read_qfile('output/{0}/{0}.q'.format(model_params.id), periods)
         dc = np.array([c[i] - obs[ic[i]] for i in range(len(c))])
         plots.plot_ph_vel(periods, c, 'm' + str(n), ax_c)
         plots.plot_dc(periods, dc, ax_dc)
@@ -485,10 +485,10 @@ def run_plot_inversion(setup_model, model,
     # Plot values for final model
     plots.plot_model(model, 'm' + str(n), ax_m150, (0, 150))
     plots.plot_model(model, 'm' + str(n), ax_mDeep,
-                     (150, setup_model.depth_limits[1]), False)
+                     (150, model_params.depth_limits[1]), False)
     p_rf = inversion._predict_RF_vals(model)
     plots.plot_rf_data(p_rf, 'm' + str(n), ax_rf)
-    c = mineos.calculate_c_from_card(setup_model, model, periods)
+    c = mineos.calculate_c_from_card(model_params, model, periods)
     dc = [c[i] - obs[ic[i]] for i in range(len(c))]
     plots.plot_ph_vel(periods, c, 'm' + str(n + 1), ax_c)
     plots.plot_dc(periods, dc, ax_dc)
@@ -501,7 +501,7 @@ def run_plot_inversion(setup_model, model,
     ax_c.set_ylim([2, 4.5])
 
     # Plot on the damping parameters
-    #plots.plot_damping_params(setup_model.id, f)
+    #plots.plot_damping_params(model_params.id, f)
 
     # Print on the observed constraints
     obs_c_t = ['{:3.0f} s: {:.3f} {:s} {:.2f} km/s'.format(
@@ -529,7 +529,7 @@ def run_plot_inversion(setup_model, model,
 
     f.savefig(
         '/media/sf_VM_Shared/rftests/{}N_{}W_{}kmLAB_{}.png'.format(
-        location[0], -location[1], round(t_LAB), setup_model.id
+        location[0], -location[1], round(t_LAB), model_params.id
         )
     )
     plt.close()
@@ -539,7 +539,7 @@ def run_plot_inversion(setup_model, model,
 def try_run(location:tuple, t_BLs:tuple, id:str):
 
     t_Moho, t_LAB = t_BLs
-    sm = define_models.SetupModel(id,
+    sm = define_models.ModelParams(id,
                                   min_layer_thickness=6,
                                   depth_limits=(0, 350),
                                   boundaries=(('Moho','LAB'), [t_Moho, t_LAB]),

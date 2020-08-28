@@ -113,7 +113,7 @@ class RunParameters(typing.NamedTuple):
 # =============================================================================
 #       Run MINEOS - calculate phase velocity, group velocity, kernels
 # =============================================================================
-def calculate_c_from_card(setup_model: define_models.SetupModel,
+def calculate_c_from_card(model_params: define_models.ModelParams,
                           model: define_models.InversionModel,
                           periods: np.array) -> np.array:
     """ Calculate phase velocities from the inversion models.
@@ -121,8 +121,8 @@ def calculate_c_from_card(setup_model: define_models.SetupModel,
     MINEOS-compatible Earth models, called 'cards', can be generated using define_models.convert_inversion_model_to_mineos_model(). This writes the card to disk, starting from the models used in the rest of the inversion. The name of the card is passed to run_mineos() with an array of periods at which to calculate the predicted phase velocity, c.
 
     Arguments:
-        setup_model
-            - define_models.SetupModel
+        model_params
+            - define_models.ModelParams
             - Units:    seismological (km/s, km)
             - Initial model constraints, including fixed parameters describing
               the relationship between Vsv and other model parameters used
@@ -142,8 +142,8 @@ def calculate_c_from_card(setup_model: define_models.SetupModel,
             - Calculated phase velocities at each input period
     """
     params = RunParameters(freq_max = 1000 / min(periods) + 1)
-    _ = define_models.convert_inversion_model_to_mineos_model(model, setup_model)
-    c, _ = run_mineos(params, periods, setup_model.id)
+    _ = define_models.convert_inversion_model_to_mineos_model(model, model_params)
+    c, _ = run_mineos(params, periods, model_params.id)
 
     return c
 

@@ -90,12 +90,12 @@ from util import constraints
 
 def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
                                       model:define_models.InversionModel,
-                                      setup_model:define_models.SetupModel):
+                                      model_params:define_models.ModelParams):
     """ Make partial derivative matrix, G, for phase velocities and RFs
     """
 
-    g_sw = _build_partial_derivatives_matrix_sw(kernels, model, setup_model)
-    g_rf = _build_partial_derivatives_matrix_rf(model, setup_model)
+    g_sw = _build_partial_derivatives_matrix_sw(kernels, model, model_params)
+    g_rf = _build_partial_derivatives_matrix_rf(model, model_params)
     print(g_sw.shape, g_rf.shape)
 
     return np.vstack((
@@ -107,7 +107,7 @@ def _build_partial_derivatives_matrix(kernels:pd.DataFrame,
 
 def _build_partial_derivatives_matrix_sw(kernels:pd.DataFrame,
                                       model:define_models.InversionModel,
-                                      setup_model:define_models.SetupModel):
+                                      model_params:define_models.ModelParams):
     """ Make partial derivative matrix, G, from the Frechet kernels.
 
     First, assemble the G_MINEOS matrix from kernels in the format
@@ -133,8 +133,8 @@ def _build_partial_derivatives_matrix_sw(kernels:pd.DataFrame,
             - define_models.InversionModel
             - Units:    seismological (km/s, km)
             - Current iteration of velocity (Vsv) model
-        setup_model:
-            - define_models.SetupModel
+        model_params:
+            - define_models.ModelParams
             - Units:    seismological (km/s, km)
             - Initial model constraints, including fixed parameters describing
               the relationship between Vsv and other model parameters used
@@ -155,20 +155,20 @@ def _build_partial_derivatives_matrix_sw(kernels:pd.DataFrame,
     dvsv_dp_mat = _convert_to_model_kernels(depth, model)
     # Frechet kernels cover Vsv, Vsh, Vpv, Vph, Eta.  We assume that eta is
     # kept constant, and all of the others are linearly dependent on Vsv.
-    dm_dp_mat = _scale_dvsv_dp_to_other_variables(dvsv_dp_mat, setup_model)
+    dm_dp_mat = _scale_dvsv_dp_to_other_variables(dvsv_dp_mat, model_params)
     G_inversion_model_sw = _integrate_dc_dvsv_dvsv_dp_indepth(
         G_MINEOS, depth, dm_dp_mat
     )
 
     # Identify depth indices of interest
     model_d = np.round(np.cumsum(model.thickness), 3)
-    vs_depth_inds = np.logical_and(model_d >= setup_model.depth_limits[0],
-                                model_d < setup_model.depth_limits[1])
+    vs_depth_inds = np.logical_and(model_d >= model_params.depth_limits[0],
+                                model_d < model_params.depth_limits[1])
     # # Identify the indices for boundary layer depth parameters
-    # bl_inds = [True] * len(setup_model.boundaries[0])
+    # bl_inds = [True] * len(model_params.boundaries[0])
     #     #(G_inversion_model_sw.shape[1]
-    #     #      - np.arange(len(setup_model.boundaries[0]), 0, -1))
-    bl_inds = len(model.thickness) + np.arange(len(setup_model.boundaries[0]))
+    #     #      - np.arange(len(model_params.boundaries[0]), 0, -1))
+    bl_inds = len(model.thickness) + np.arange(len(model_params.boundaries[0]))
 
     return G_inversion_model_sw[:, np.append(model.d_inds, bl_inds)]
 
@@ -196,7 +196,7 @@ def _integrate_dc_dvsv_dvsv_dp_indepth(G_MINEOS, depth, dm_dp_mat):
     Note: this can be explicitly calculated in a (slow) loop.  Given that in the
     depth range of interest (i.e. everywhere that dm/dp is non-zero), the
     MINEOS card is sampled at a constant depth interval (if using the default
-    values, this is 2 km:  step = setup_model.min_layer_thickness / 3), this
+    values, this is 2 km:  step = model_params.min_layer_thickness / 3), this
     integral is really close to (fast!) matrix multiplication, where every
     value in the matrix just needs to be multipled by the change in depth
     and have 1/2 * (f(x_0) + f(x_n)) subtracted from it.
@@ -969,8 +969,8 @@ def _convert_kernels_d_deeperm_by_d_t(model:define_models.InversionModel,
     return dm_dt_mat
 
 def _scale_dvsv_dp_to_other_variables(dvsv_dp_mat:np.array,
-                                      setup_model:define_models.SetupModel):
-    """ Use scaling relatioships in setup_model to define other partials.
+                                      model_params:define_models.ModelParams):
+    """ Use scaling relatioships in model_params to define other partials.
 
     Here, we assume that there is a constant Vsv/Vsh, Vpv/Vph, Vpv/Vsv, eta.
     This allows us to construct a full dm/dp matrix by just scaling up the
@@ -990,16 +990,16 @@ def _scale_dvsv_dp_to_other_variables(dvsv_dp_mat:np.array,
 
     return np.vstack((
                 dvsv_dp_mat,
-                dvsv_dp_mat / setup_model.vsv_vsh_ratio,
-                dvsv_dp_mat * setup_model.vpv_vsv_ratio,
+                dvsv_dp_mat / model_params.vsv_vsh_ratio,
+                dvsv_dp_mat * model_params.vpv_vsv_ratio,
                 dvsv_dp_mat
-                    * setup_model.vpv_vsv_ratio / setup_model.vpv_vph_ratio,
+                    * model_params.vpv_vsv_ratio / model_params.vpv_vph_ratio,
                 np.zeros_like(dvsv_dp_mat)
     ))
 
 
 def _build_partial_derivatives_matrix_rf(model:define_models.InversionModel,
-                                         setup_model:define_models.SetupModel):
+                                         model_params:define_models.ModelParams):
     """
     We have two bits of data for each model boundary layer:
        - travel time
@@ -1015,7 +1015,7 @@ def _build_partial_derivatives_matrix_rf(model:define_models.InversionModel,
                      model.vsv.size + n_boundary_layers))
 
     i_bl = 0
-    bnames, _ = setup_model.boundaries
+    bnames, _ = model_params.boundaries
     for bl in bnames:
         # Calculate partials for travel time constraint
         _calculate_travel_time_partial(model, i_bl, G_rf)
@@ -1025,10 +1025,10 @@ def _build_partial_derivatives_matrix_rf(model:define_models.InversionModel,
 
     # # Identify depth indices of interest
     # model_d = np.round(np.cumsum(model.thickness), 3)
-    # vs_depth_inds = np.logical_and(model_d >= setup_model.depth_limits[0],
-    #                             model_d < setup_model.depth_limits[1])
+    # vs_depth_inds = np.logical_and(model_d >= model_params.depth_limits[0],
+    #                             model_d < model_params.depth_limits[1])
     # # Identify the indices for boundary layer depth parameters
-    bl_inds = len(model.thickness) + np.arange(len(setup_model.boundaries[0]))
+    bl_inds = len(model.thickness) + np.arange(len(model_params.boundaries[0]))
 
     return G_rf[:, np.append(model.d_inds, bl_inds)]
 

@@ -29,7 +29,7 @@ from util import weights
 # =============================================================================
 def run_with_no_inputs():
 
-    setup_model = define_models.SetupModel(
+    model_params = define_models.ModelParams(
         depth_limits=np.array([0., 200.]),
         boundary_vsv=np.array([3.5, 4.0, 4.2, 4.1]),
         boundary_widths=np.array([5., 10.]),
@@ -39,29 +39,29 @@ def run_with_no_inputs():
 
     location = (35, -104)
 
-    return run_inversion(setup_model, loc)
+    return run_inversion(model_params, loc)
 
 
-def run_inversion(setup_model:define_models.SetupModel,
+def run_inversion(model_params:define_models.ModelParams,
                   location:tuple,
                   n_iterations:int=5) -> (define_models.InversionModel):
     """ Set the inversion running over some number of iterations.
 
     """
 
-    model = define_models.setup_starting_model(setup_model)
+    model = define_models.setup_starting_model(model_params)
     obs_constraints = constraints.extract_observations(
-        location, setup_model.id, setup_model.boundaries, setup_model.vpv_vsv_ratio
+        location, model_params.id, model_params.boundaries, model_params.vpv_vsv_ratio
     )
 
     for i in range(n_iterations):
-        # Still need to pass setup_model as it has info on e.g. vp/vs ratio
+        # Still need to pass model_params as it has info on e.g. vp/vs ratio
         # needed to convert from InversionModel to MINEOS card
-        model = _inversion_iteration(setup_model, model, obs_constraints)
+        model = _inversion_iteration(model_params, model, obs_constraints)
 
     return model
 
-def _inversion_iteration(setup_model:define_models.SetupModel,
+def _inversion_iteration(model_params:define_models.ModelParams,
                          model:define_models.InversionModel,
                          obs_constraints:tuple,
                          ) -> define_models.InversionModel:
@@ -74,23 +74,23 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
     # Build all of the inputs to the damped least squares
     # Run MINEOS to get phase velocities and kernels
     mineos_model = define_models.convert_inversion_model_to_mineos_model(
-        model, setup_model
+        model, model_params
     )
     # Can vary other parameters in MINEOS by putting them as inputs to this call
     # e.g. defaults include l_min, l_max; qmod_path; phase_or_group_velocity
     params = mineos.RunParameters(freq_max = 1000 / min(periods) + 1)
     ph_vel_pred, kernels = mineos.run_mineos_and_kernels(
-        params, periods, setup_model.id
+        params, periods, model_params.id
     )
-    kernels = kernels[kernels['z'] <= setup_model.depth_limits[1]]
+    kernels = kernels[kernels['z'] <= model_params.depth_limits[1]]
 
     # Assemble G, p, and d
     G = partial_derivatives._build_partial_derivatives_matrix(
-        kernels, model, setup_model
+        kernels, model, model_params
     )
     print('*****************')
 
-    p = _build_model_vector(model, setup_model.depth_limits)
+    p = _build_model_vector(model, model_params.depth_limits)
     predictions = np.concatenate((ph_vel_pred, _predict_RF_vals(model)))
     print('G: {}, p: {}, preds: {}'.format(
         G.shape, p.shape, predictions.shape
@@ -104,7 +104,7 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
 
     # Build all of the weighting functions for damped least squares
     W, H_mat, h_vec = (
-        weights.build_weighting_damping(std_obs, p, model, setup_model)
+        weights.build_weighting_damping(std_obs, p, model, model_params)
     )
     # Perform inversion
     # print('G: {}, p: {}, W: {}, d: {}, H_mat: {}, h_vec: {}'.format(
@@ -116,13 +116,13 @@ def _inversion_iteration(setup_model:define_models.SetupModel,
 
     thickness, vsv, bi = define_models._return_evenly_spaced_model(
         model.thickness, model.vsv, model.boundary_inds,
-        setup_model.min_layer_thickness
+        model_params.min_layer_thickness
     )
 
     return define_models.InversionModel(
         np.array(vsv)[:, np.newaxis], np.array(thickness)[:, np.newaxis],
         np.array(bi),
-        define_models._find_depth_indices(thickness, setup_model.depth_limits)
+        define_models._find_depth_indices(thickness, model_params.depth_limits)
         ), G, obs#p, G, d, W, H_mat, h_vec
 
 

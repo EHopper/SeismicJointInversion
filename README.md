@@ -76,12 +76,12 @@ The inversion is described more fully (including equations) in this Google Doc: 
    - inversion.\_inversion_iteration() - see docstring
    - Can either iterate some set number of times, or break out of loop when the new model is sufficiently similar to the starting model at that iteration
      - Note that you should always set an upper limit to number of iterations, as there are some locations (normally with very slow phase velocities at the shortest periods) which will not converge
-  - Steps at this stage
-    - Pass the starting model to MINEOS to calculate surface wave kernels and predicted phase velocities
-    - Calculate the partial derivatives for gradient descent using the surface wave kernels and the starting model
-    - Calculate regularisation matrices (see step 5)
-    - Perform the damped least-squares inversion (gradient descent step)
-    - Build a new model from the output and reformat it
+   - Steps at this stage
+     - Pass the starting model to MINEOS to calculate surface wave kernels and predicted phase velocities
+     - Calculate the partial derivatives for gradient descent using the surface wave kernels and the starting model
+     - Calculate regularisation matrices (see step 5)
+     - Perform the damped least-squares inversion (gradient descent step)
+     - Build a new model from the output and reformat it
 5. Set regularisation
    - weights.build_weighting_damping() - see docstring
    - Various regularisation options are actually coded up here, but the only ones with non-zero coefficients are from weights.\_build_constraint_damp_zero_gradient()
