@@ -457,8 +457,8 @@ def load_literature_vel_model(ref:str):
     except:
 
         print(
-            'You need to download the {} model from'
-            + ' IRIS EMC\n\t{} \nand save to \n\t{}'.format(ref, url, nm)
+            'You need to download the {} model from'.format(ref)
+            + ' IRIS EMC\n\t{} \nand save to \n\t{}'.format(url, nm)
         )
         return
 
