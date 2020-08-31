@@ -118,7 +118,7 @@ def calculate_c_from_card(model_params: define_models.ModelParams,
                           periods: np.array) -> np.array:
     """ Calculate phase velocities from the inversion models.
 
-    MINEOS-compatible Earth models, called 'cards', can be generated using define_models.convert_inversion_model_to_mineos_model(). This writes the card to disk, starting from the models used in the rest of the inversion. The name of the card is passed to run_mineos() with an array of periods at which to calculate the predicted phase velocity, c.
+    MINEOS-compatible Earth models, called 'cards', can be generated using define_models.convert_vsv_model_to_mineos_model(). This writes the card to disk, starting from the models used in the rest of the inversion. The name of the card is passed to run_mineos() with an array of periods at which to calculate the predicted phase velocity, c.
 
     Arguments:
         model_params
@@ -142,7 +142,7 @@ def calculate_c_from_card(model_params: define_models.ModelParams,
             - Calculated phase velocities at each input period
     """
     params = RunParameters(freq_max = 1000 / min(periods) + 1)
-    _ = define_models.convert_inversion_model_to_mineos_model(model, model_params)
+    _ = define_models.convert_vsv_model_to_mineos_model(model, model_params)
     c, _ = run_mineos(params, periods, model_params.id)
 
     return c
@@ -550,7 +550,7 @@ quit
 echo "======================" > {0}.log
 echo "Making frechet phV kernels binary" > {0}.log
 #
-rm {0}.cvfrechet
+if [ -f "{0}.cvfrechet" ]; then rm {0}.cvfrechet; fi
 {1}/frechet_cv <<! >> {0}.log
 {6}
 {0}.table_hdr.branch
