@@ -22,7 +22,7 @@ class ModelLayerValues(typing.NamedTuple):
     All fields should be an (n_values_in_layer, 1)
     array, where
         n_values_in_layer:
-            Can be 1 or ModelLayerIndices.[field_name].size.
+            Can be 1 or EarthLayerIndices.[field_name].size.
                 i.e. constant within a layer, or specified for each depth point
                      in that layer.
 

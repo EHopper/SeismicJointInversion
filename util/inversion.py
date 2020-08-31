@@ -73,7 +73,7 @@ def _inversion_iteration(model_params:define_models.ModelParams,
 
     # Build all of the inputs to the damped least squares
     # Run MINEOS to get phase velocities and kernels
-    mineos_model = define_models.convert_inversion_model_to_mineos_model(
+    mineos_model = define_models.convert_vsv_model_to_mineos_model(
         model, model_params
     )
     # Can vary other parameters in MINEOS by putting them as inputs to this call

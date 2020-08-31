@@ -42,7 +42,7 @@ def test_G(model_params, periods, model_perturbation):
     # Calculate the G matrix from a starting model
     model = define_models.setup_starting_model(model_params)
     # No need for output on MINEOS model as saved to .card file
-    minmod = define_models.convert_inversion_model_to_mineos_model(
+    minmod = define_models.convert_vsv_model_to_mineos_model(
         model, model_params
     )
     params = mineos.RunParameters(freq_max = 1000 / min(periods) + 1)
@@ -70,7 +70,7 @@ def test_G(model_params, periods, model_perturbation):
     model_perturbed = inversion._build_inversion_model_from_model_vector(
         p_perturbed, model
     )
-    minmod_perturbed = define_models.convert_inversion_model_to_mineos_model(
+    minmod_perturbed = define_models.convert_vsv_model_to_mineos_model(
         model_perturbed, model_params._replace(id='testcase_perturbed')
     )
     # minmod.vsv = minmod_perturbed.vsv
@@ -275,7 +275,7 @@ def test_MonteCarlo(n_MonteCarlo): #n_iter
         plots.plot_rf_data(p_rf, 'm' + str(n + 1), ax_rf)
         # Run MINEOS on final model
         params = mineos.RunParameters(freq_max = 1000 / min(periods) + 1)
-        _ = define_models.convert_inversion_model_to_mineos_model(m, model_params)
+        _ = define_models.convert_vsv_model_to_mineos_model(m, model_params)
         c, _ = mineos.run_mineos(params, periods, model_params.id)
         plots.plot_ph_vel_simple(periods, c, ax_c)
         dc = [c[i] - obs[ic[i]] for i in range(len(c))]
@@ -576,7 +576,7 @@ def try_run(location:tuple, t_BLs:tuple, id:str):
         boundary_inds = np.array(boundary_inds),
         d_inds = define_models._find_depth_indices(thickness, sm.depth_limits),
     )
-    # mineos_model = define_models.convert_inversion_model_to_mineos_model(m, sm)
+    # mineos_model = define_models.convert_vsv_model_to_mineos_model(m, sm)
 
     # Get predicted values
     # rf_p = inversion._predict_RF_vals(m)

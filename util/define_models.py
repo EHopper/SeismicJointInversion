@@ -21,8 +21,25 @@ Classes:
             thickness           - Layer thicknesses between the model nodes
             boundary_inds       - Indices of boundaries of special interest, e.g. Moho, LAB
             d_inds              - List of Booleans indicating whether the velocity at a model node is being solved for
+    3. EarthLayerIndices
+        - Indices for different layers (e.g. crust, lithosphere, asthenosphere) for which you might want to weight the regularisation differently (see weights.py)
+        - Fields:
+            sediment            - Depth indices for sedimentary layer.
+            crust               - Depth indices for crust.
+            lithospheric_mantle - Depth indices for lithospheric mantle.
+            asthenosphere       - Depth indices for asthenosphere.
+            discontinuities     - Depth indices of discontinuties
+            depth               - Depth vector for the whole model space.
+            layer_names         - All layer names in order of increasing depth.
 Functions:
-
+    1. setup_starting_model(model_params: ModelParams, location: tuple) -> VsvModel
+        - Create VsvModel from ModelParams and a location (used for initial Vsv values)
+    2. _fill_in_base_of_model(thick:list, vs:list, model_params:ModelParams)
+        - Append values to lists of Vsv and layer thickness to fit depth limits
+    3. _add_BLs_to_starting_model(thick:list, model_params:ModelParams) -> list
+        - Return boundary layer indices for starting model, and update input list of thickness
+    4. _find_depth_indices(thick:list, depth_limits:tuple) -> list
+        - Return list of indices in input layer thickness within the inversion depth limits
 
 
 """
@@ -53,18 +70,20 @@ class ModelParams(typing.NamedTuple):
             - str
             - Unique name of model for saving things.
         boundaries:
-            - tuple (length = 2), where each item in the tuple is a tuple (length = n_boundaries)
-            - Items in tuple:
+            - tuple - (tuple, tuple)
+            - Items in tuple (each of these tuples is of length n_boundaries):
                 boundary names:
+                    - tuple - (str, str, ...)
                     - Units: none
                     - Labels for each of the boundaries
                     - Default = ('Moho', 'LAB')
                 boundary widths:
+                    - tuple - (float, float, ...)
                     - Units: kilometres
                     - (Fixed) width of the boundary layer.  This is fixed for a given inversion (though we will allow the depth of the boundary layer as a whole to change).
                     - Default = [3., 10.]
         depth_limits:
-            - (length 2) tuple
+            - tuple - (float, float)
             - Units:    km
             - Top and base of the model that we are inverting for.
             - Outside of this range, the model is fixed to our starting MINEOS model card (which extends throughout the whole Earth).
@@ -109,9 +128,6 @@ class ModelParams(typing.NamedTuple):
     eta: float = 1.
     ref_card_csv_name: str = 'data/earth_models/prem.csv'
 
-
-
-
 class VsvModel(typing.NamedTuple):
     """ Vsv model with some additional information for the inversion.
 
@@ -134,7 +150,7 @@ class VsvModel(typing.NamedTuple):
                 Note that this means the sum of thicknesses up to and including the ith point.
             - That is, as the first .vsv point is defined at the surface, the first value of .thickness will be 0 always.
         boundary_inds:
-            - (n_boundary_depths_inverted_for, ) np.array of integers
+            - (n_boundaries, ) np.array of integers
             - Units:    n/a
             - Indices in .vsv and .thickness identifying the boundaries of special interest, e.g. Moho, LAB.  For these boundaries, we will want to specifically prescribe the width of the layer (originally set as ModelParams.boundary_widths), and to invert for the thickness of the overlying layer (i.e. the depth to the top of this boundary).
             - That is, VsvModel.vsv[boundary_inds[i]] is the velocity at the top of the boundary and VsvModel.thickness[boundary_inds[i]] is the thickness of the layer above it, defining boundary depth.
@@ -151,9 +167,8 @@ class VsvModel(typing.NamedTuple):
     boundary_inds: np.array
     d_inds: np.array
 
-
-class ModelLayerIndices(typing.NamedTuple):
-    """ Parameters used for smoothing.
+class EarthLayerIndices(typing.NamedTuple):
+    """ Indices for geologically significant layers used for different levels of regularisation.
 
     Fields:
         sediment:
@@ -168,13 +183,11 @@ class ModelLayerIndices(typing.NamedTuple):
         asthenosphere:
             - (n_depth_points_in_this_layer, ) np.array
             - Depth indices for asthenosphere.
-
         discontinuities:
             - (n_different_layers + 1, ) np.array
             - Depth indices of model discontinuties, including the surface
               and the base of the model.
-            - i.e. [0, mid-crustal boundary, Moho, LAB, base of mode]
-
+            - i.e. [0, mid-crustal boundary, Moho, LAB, base of model]
         depth:
             - (n_depth_points, ) np.array
             - Units:    kilometres
@@ -201,37 +214,31 @@ class ModelLayerIndices(typing.NamedTuple):
 # =============================================================================
 
 
-def setup_starting_model(model_params: ModelParams, location: tuple):
+def setup_starting_model(model_params: ModelParams, location: tuple) -> VsvModel:
     """ Convert from ModelParams to VsvModel.
 
-    ModelParams is the bare bones of what we want to constrain for the starting
-    model, which is in a different format to the model that we actually want
-    to invert, m = np.vstack(
+    ModelParams is the bare bones of fixed parameters for the starting model. Here we create a VsvModel object using ModelParams. Note that this is in a different format to the model that we actually want to invert, m = np.vstack(
                     (VsvModel.vsv[VsvModel.d_inds],
                      VsvModel.thickness[VsvModel.boundary_inds)
                      )
 
-    Calculate appropriate layer thicknesses such that the inversion will have
-    all the required flexibility when inverting for the depth of the
-    boundaries of interest.  Starting model Vs is kind of just randomly bodged
-    here, but that is probably ok as we will be inverting for all Vs points.
+    We calculate appropriate layer thicknesses such that the inversion will have all the required flexibility when inverting for the depth of the boundaries of interest.  Starting model Vs is kind of just randomly bodged here (taken from a reference model at your input location), but that is not important as the inversion is not regularised by tending towards the starting model.  That is, the starting model has no significant impact on the final model.
 
     Arguments:
         model_params:
             - ModelParams
             - Units:    seismological, i.e. km, km/s
-            - Starting model, defined elsewhere
+            - Starting model parameters, defined elsewhere
         location:
-            - tuple
+            - tuple, length 2 (latitude, longitude)
             - Units:    degrees latitude (N), degrees longitude (E)
-            - Location for constraints - used here to put in appropriate
-              crustal structure, Moho, and LAB
+            - Location for constraints - used here to put in appropriate crustal structure, Moho, and LAB
 
     Returns:
-        inversion_model:
+        vsv_model:
             - VsvModel
             - Units:    seismological, i.e. km, km/s
-            - Model primed for use in the inversion.
+            - Model primed for use in the inversion
     """
     # Set up directory to save to
     if not os.path.exists('output'):
@@ -242,18 +249,18 @@ def setup_starting_model(model_params: ModelParams, location: tuple):
         print('This model ID has already been used!')
 
     # Load in Crust 1.0 crustal structure, defined globally (but coarsely)
-    #t, vs = constraints.get_vels_Crust1(location)
-    t, vs = constraints.get_vels_ShenRitzwoller2016(location)
+    #thick, vs = constraints.get_vels_Crust1(location)
+    thick, vs = constraints.get_vels_ShenRitzwoller2016(location)
 
     # Fill in to the base of the model
-    _fill_in_base_of_model(t, vs, model_params)
+    _fill_in_base_of_model(thick, vs, model_params)
 
     # Add on the boundary layers at arbitrary depths (will be fixed by inversion)
-    bi = _add_BLs_to_starting_model(t, model_params)
+    bi = _add_BLs_to_starting_model(thick, model_params)
 
     # Fix the model spacing
     thickness, vsv, boundary_inds = _return_evenly_spaced_model(
-        np.array(t), np.array(vs), np.array(bi),
+        np.array(thick), np.array(vs), np.array(bi),
         model_params.min_layer_thickness,
     )
     depth_inds = _find_depth_indices(thickness, model_params.depth_limits)
@@ -271,19 +278,30 @@ def setup_starting_model(model_params: ModelParams, location: tuple):
                                                        model_params.depth_limits),
                           )
 
-def _fill_in_base_of_model(t:list, vs:list, model_params:ModelParams):
+def _fill_in_base_of_model(thick:list, vs:list, model_params:ModelParams):
+    """ Ensure model has the correct depth limits.
 
-    if sum(t) >= model_params.depth_limits[1]:
-        i = np.argmax(np.cumsum(t) >= model_params.depth_limits[1])
-        vs[i] = np.interp(model_params.depth_limits[1],
-                          sum(t[:i - 1]) + np.cumsum(t[i - 1:i + 2]), vs[i - 1:i + 2])
-        t[i] = model_params.depth_limits[1] - sum(t[:i])
-        vs = vs[:i + 1]
-        t = t[:i + 1]
-        return
+    Given a list of Vsv values (vs) and layer thicknesses (thick), append any necessary values to fill in any necessary values to reach the depth limit of the inversion.  These values are taken from the reference card listed in model_params, with the deepest value of Vs always pinned to the relevant value in the reference card.
 
+    Arguments:
+        thick:
+            - list of floats
+            - Units:    kilometres
+            - Layer thicknesses, like VsvModel.thickness
+            - This list is changed inside this function!
+        vs:
+            - list of floats
+            - Units:    km/s
+            - Vsv at nodes, like VsvModel.vsv
+            - This list is changed inside this function!
+        model_params:
+            - ModelParams object
+            - Fixed parameters for velocity model
+    Returns:
+        thick and vs lists are changed in this function
+    """
 
-
+    # Load reference Vs model
     ref_model =  pd.read_csv(model_params.ref_card_csv_name)
     ref_depth = (ref_model['radius'].iloc[-1] - ref_model['radius']) * 1e-3
     ref_vs = ref_model['vsv'] * 1e-3
@@ -292,17 +310,47 @@ def _fill_in_base_of_model(t:list, vs:list, model_params:ModelParams):
     ref_depth = ref_depth.iloc[::-1].values
     ref_vs = ref_vs.iloc[::-1].values
 
-    remaining_depth = model_params.depth_limits[1] - sum(t)
+    # If model already exceeds the depth limit, crop thick and vs and return
+    if sum(thick) >= model_params.depth_limits[1]:
+        i = np.argmax(np.cumsum(thick) >= model_params.depth_limits[1])
+        thick[i] = model_params.depth_limits[1] - sum(thick[:i])
+        vs[i] = np.interp(model_params.depth_limits[1], ref_depth, ref_vs)
+        vs = vs[:i + 1]
+        thick = thick[:i + 1]
+        return
+
+
+    remaining_depth = model_params.depth_limits[1] - sum(thick)
     n_layers = int(remaining_depth // model_params.min_layer_thickness)
     thickness_to_end = [remaining_depth / n_layers] * n_layers
-    vs += list(np.interp(sum(t) + np.cumsum(thickness_to_end), ref_depth, ref_vs))
-    t += thickness_to_end
+    vs += list(np.interp(sum(thick) + np.cumsum(thickness_to_end), ref_depth, ref_vs))
+    thick += thickness_to_end
 
 
     return
 
-def _add_BLs_to_starting_model(t:list, model_params:ModelParams):
+def _add_BLs_to_starting_model(thick:list, model_params:ModelParams) -> list:
+    """ Return boundary layer indices, evenly distributed in starting model depth.
 
+    As the inversion is not regularised with respect to the starting model, the boundaries can be seeded anywhere in the starting model without affecting the final model.  Here, we evenly distribute them in depth.  The thicknesses of the relevant layers are updated to match the fixed values given in model_params.
+
+    Arguments:
+        thick:
+            - list of floats
+            - Units:    kilometres
+            - Layer thicknesses, like VsvModel.thickness
+            - This list is changed inside this function!
+        model_params:
+            - ModelParams object
+            - Fixed parameters for velocity model
+    Returns:
+        boundary_inds:
+            - list of inds
+            - Units:    none
+            - Indices of boundary layers, like VsvModel.boundary_inds
+        thick is updated in this function
+
+    """
     _, bwidths = model_params.boundaries
     n_bounds = len(bwidths)
     boundary_inds = []
@@ -313,44 +361,67 @@ def _add_BLs_to_starting_model(t:list, model_params:ModelParams):
 
     i = 0
     for i_b in range(n_bounds):
-        while sum(t[:i + 1]) < spacing * (i_b + 1):
+        while sum(thick[:i + 1]) < spacing * (i_b + 1):
             i += 1
         boundary_inds += [i]
-        t[i + 1] = bwidths[i_b]
+        thick[i + 1] = bwidths[i_b]
 
-    t[-1] -= sum(t) - model_params.depth_limits[1]
+    thick[-1] -= sum(thick) - model_params.depth_limits[1]
 
 
     return boundary_inds
 
+def _find_depth_indices(thick:list, depth_limits:tuple) -> list:
+    """ Return a list of the indices of thickness within the depth limits
 
-def _find_depth_indices(t:list, depth_limits:tuple):
-    """
+    Arguments:
+        thick:
+            - list of floats
+            - Units:    kilometres
+            - Layer thicknesses, like VsvModel.thickness
+        depth_limits:
+            - tuple (float, float)
+            - Units:    kilometres
+            - Depth limits for inversion, as ModelParams.depth_limits field
+    Returns:
+        List of indices in the input list, thick, that are within the input depth limits
     """
 
-    d = np.round(np.cumsum(t), 3) # round to the nearest metre
+    d = np.round(np.cumsum(thick), 3) # round to the nearest metre
     # argmax gives earliest index with maximum value in array (here 0s & 1s only)
     return list(range(np.argmax(d >= depth_limits[0]),
                       np.argmax(d >= depth_limits[1])))
 
-def _return_evenly_spaced_model(t:np.array, vs:np.array, boundary_inds:np.array,
+def _return_evenly_spaced_model(thick:np.array, vs:np.array, boundary_inds:np.array,
                                 min_layer_thickness:float):
+    """ Refactor the Vsv model so layer thicknesses are more even.
+
+    As the inversion updates some layer thicknesses, this will make the model layer thicknesses very uneven unless the starting model is approximately correct.  Indeed, the inversion can lead to negative layer thicknesses if a boundary layer is too deep.  As we do not want dependence on the starting model, we need to respace the model.
+
+    It is very important to keep the boundary layer thicknesses the same!
+
+    Arguments:
+        thick:
+            - (n_layers, ) np.array
+            - Units:    kilometres
+            - Layer thicknesses, as VsvModel.thickness
+        vs:
+            - (n_layers, ) np.array
+
     """
-    Important to keep the boundary layer thicknesses the same.
-    """
-    t = t.flatten().tolist()
+    thick = thick.flatten().tolist()
     vs = vs.flatten().tolist()
     boundary_inds = boundary_inds.flatten().tolist()
 
-    # Set uppermost value of t
-    nt = [t[0]]
+    # Set uppermost value of thick
+    nt = [thick[0]]
     bi = [-1] + boundary_inds
     nbi = []
 
     # Loop through all BLs to get velocities above and within them
     for ib in range(len(bi[:-1])):
-        inter_boundary_depth = (sum(t[:bi[ib + 1] + 1])
-                                - sum(t[:bi[ib] + 2]))
+        inter_boundary_depth = (sum(thick[:bi[ib + 1] + 1])
+                                - sum(thick[:bi[ib] + 2]))
         n_layers = max(int(inter_boundary_depth // min_layer_thickness), 1)
         # if ib == 0:
         #     n_layers *= 3 # Have denser spacing in the crust
@@ -358,43 +429,43 @@ def _return_evenly_spaced_model(t:np.array, vs:np.array, boundary_inds:np.array,
 
         # set uppermost value of Vs
         if ib == 0:
-            nv = [_mean_val_in_interval(vs, t, sum(nt), sum(nt) + layer_t / 2)]
+            nv = [_mean_val_in_interval(vs, thick, sum(nt), sum(nt) + layer_t / 2)]
 
         for il in range(n_layers - 1):
             nt += [layer_t]
-            nv += [_mean_val_in_interval(vs, t, sum(nt) - layer_t / 2,
+            nv += [_mean_val_in_interval(vs, thick, sum(nt) - layer_t / 2,
                                          sum(nt) + layer_t / 2)]
         nbi += [len(nt)]
-        nt += [layer_t, t[bi[ib + 1] + 1]]
+        nt += [layer_t, thick[bi[ib + 1] + 1]]
         nv += vs[bi[ib + 1]:bi[ib + 1] + 2]
 
 
     # For the deepest BL to the base of the model
-    inter_boundary_depth = sum(t) - sum(t[:boundary_inds[-1] + 2])
+    inter_boundary_depth = sum(thick) - sum(thick[:boundary_inds[-1] + 2])
     # need at least one layer
     n_layers = max(int(inter_boundary_depth // min_layer_thickness), 1)
     layer_t = inter_boundary_depth / n_layers
     for il in range(n_layers - 1):
         nt += [layer_t]
-        nv += [_mean_val_in_interval(vs, t, sum(nt) - layer_t / 2,
+        nv += [_mean_val_in_interval(vs, thick, sum(nt) - layer_t / 2,
                                      sum(nt) + layer_t / 2)]
     nt += [layer_t]
     nv += [vs[-1]]
     return np.array(nt), np.array(nv), np.array(nbi)
 
 
-def _mean_val_in_interval(v, t, d1, d2):
+def _mean_val_in_interval(v, thick, d1, d2):
     """
     All assumed to be lists or floats!!
     """
-    interp_d = np.arange(t[0], sum(t), 0.1)
-    interp_vs = np.interp(interp_d, np.cumsum(t), v)
+    interp_d = np.arange(thick[0], sum(thick), 0.1)
+    interp_vs = np.interp(interp_d, np.cumsum(thick), v)
 
     return np.mean(interp_vs[np.logical_and(
                 d1 <= interp_d, interp_d < d2
             )])
 
-def _add_noise_to_starting_model(t, vs, bi, d_inds):
+def _add_noise_to_starting_model(thick, vs, bi, d_inds):
     """
     """
 
@@ -403,15 +474,15 @@ def _add_noise_to_starting_model(t, vs, bi, d_inds):
 
     # For thickness, as layer thickness can be very different, scale
     # perturbations by thickness of layer
-    # Note: do not want to change t[0] (depth to top of model, e.g. 0)
+    # Note: do not want to change thick[0] (depth to top of model, e.g. 0)
     # or the thicknesses of any of the BLs
     # and want to maintain total thickness of inversion model
-    #  i.e. sum(t) = sum(t after perturbations)
-    max_depth = sum(t)
-    for i in range(len(t) - 1):
+    #  i.e. sum(thick) = sum(thick after perturbations)
+    max_depth = sum(thick)
+    for i in range(len(thick) - 1):
         if i - 1 not in bi and i - 1 in d_inds:
-            t[i] = _add_random_noise(np.array(t[i]), np.array(t[i]) / 10)
-    t[-1] = max_depth - sum(t[:-1])
+            thick[i] = _add_random_noise(np.array(thick[i]), np.array(thick[i]) / 10)
+    thick[-1] = max_depth - sum(thick[:-1])
 
     return
 
@@ -433,19 +504,14 @@ def _add_random_noise(a:np.array, sc:float, pdf='normal'):
         return a + np.random.uniform(low=-sc, high=sc, size=a.shape)
 
 
-def convert_inversion_model_to_mineos_model(inversion_model, model_params,
+def convert_vsv_model_to_mineos_model(vsv_model, model_params,
                                             **kwargs):
     """ Generate model that is used for all the MINEOS interfacing.
 
-    MINEOS requires radius, rho, vpv, vsv, vph, vsh, bulk and shear Q, and eta,
-    where eta is the shape factor and is 1 always for isotropic materials.
-    Rows are ordered by increasing radius.  There should be some reference
-    MINEOS card that can be loaded in and have this pasted on the bottom
-    for using with MINEOS, as MINEOS requires a card that goes all the way to
-    the centre of the Earth.
+    MINEOS requires radius, rho, vpv, vsv, vph, vsh, bulk and shear Q, and eta, where eta is the shape factor and is 1 always for isotropic materials. Rows are ordered by increasing radius.  There should be some reference MINEOS card that can be loaded in and have this pasted on the bottom for using with MINEOS, as MINEOS requires a card that goes all the way to the centre of the Earth.
 
     Arguments:
-        - inversion_model:
+        - vsv_model:
             - VsvModel
             - Units:    seismological
         - model_params:
@@ -478,8 +544,8 @@ def convert_inversion_model_to_mineos_model(inversion_model, model_params,
     radius *= 1e3 # convert to SI
 
     vsv = np.interp(depth,
-                    np.cumsum(inversion_model.thickness),
-                    inversion_model.vsv.flatten()) * 1e3 # convert to SI
+                    np.cumsum(vsv_model.thickness),
+                    vsv_model.vsv.flatten()) * 1e3 # convert to SI
     vsh = vsv / model_params.vsv_vsh_ratio
     vpv = vsv * model_params.vpv_vsv_ratio
     vph = vpv / model_params.vpv_vph_ratio
@@ -490,8 +556,8 @@ def convert_inversion_model_to_mineos_model(inversion_model, model_params,
 
     bnames, _ = model_params.boundaries
     if 'Moho' in bnames:
-        Moho_ind = (inversion_model.boundary_inds[bnames.index('Moho')])
-        Moho_depth = np.sum(inversion_model.thickness[:Moho_ind + 1])
+        Moho_ind = (vsv_model.boundary_inds[bnames.index('Moho')])
+        Moho_depth = np.sum(vsv_model.thickness[:Moho_ind + 1])
     else:
         try:
             Moho_depth = kwargs['Moho']
@@ -680,7 +746,7 @@ def _set_model_indices(model_params, model, **kwargs):
             lab_ind = np.argmin(np.abs(depth - 80))
 
 
-    return ModelLayerIndices(
+    return EarthLayerIndices(
         sediment = np.array(sed_inds),
         crust = np.arange(len(sed_inds), moho_ind + 1),
         lithospheric_mantle = np.arange(moho_ind + 1, lab_ind + 1),

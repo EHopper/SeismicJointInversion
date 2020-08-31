@@ -147,13 +147,13 @@ class PipelineTest(unittest.TestCase):
             'starting model matches depth lims',
             define_models.ModelParams('testcase', depth_limits=(0., 50.)),
             ([0., 5., 5., 10., 10., 10., 10.], [3.4 + 0.1 * i for i in range(7)]),
-            ([0., 5., 5., 10., 10., 10., 10.], [3.4 + 0.1 * i for i in range(7)]),
+            ([0., 5., 5., 10., 10., 10., 10.], [3.4 + 0.1 * i for i in range(6)] + [4.4019181]),
         ),
         (
             'starting model exceeds depth lims',
             define_models.ModelParams('testcase', depth_limits=(0., 50.)),
             ([0., 5., 5., 10., 10., 10., 12.], [3.4 + 0.1 * i for i in range(7)]),
-            ([0., 5., 5., 10., 10., 10., 10.], [3.4 + 0.1 * i for i in range(6)] + [3.9 + 10/12 * 0.1]),
+            ([0., 5., 5., 10., 10., 10., 10.], [3.4 + 0.1 * i for i in range(6)] + [4.4019181]),
         ),
     ])
     def test_fill_in_base_of_model(self, name, model_params, inputs, expected):
@@ -450,7 +450,7 @@ class PipelineTest(unittest.TestCase):
                            # different depending on the random variation
         model = define_models.setup_starting_model(model_params, location)
         # No need for output on MINEOS model as saved to .card file
-        _ = define_models.convert_inversion_model_to_mineos_model(
+        _ = define_models.convert_vsv_model_to_mineos_model(
             model, model_params
         )
         params = mineos.RunParameters(
@@ -470,7 +470,7 @@ class PipelineTest(unittest.TestCase):
         model_perturbed = inversion._build_inversion_model_from_model_vector(
             p_perturbed, model
         )
-        _ = define_models.convert_inversion_model_to_mineos_model(
+        _ = define_models.convert_vsv_model_to_mineos_model(
             model_perturbed, model_params._replace(id='testcase_perturbed')
         )
         ph_vel_perturbed, _ = mineos.run_mineos(
@@ -806,7 +806,7 @@ class PipelineTest(unittest.TestCase):
     @parameterized.expand([
         (
             'simple',
-            define_models.ModelLayerIndices(
+            define_models.EarthLayerIndices(
                 np.arange(2), np.arange(2, 5), np.arange(5, 10),
                 np.arange(10, 16), np.arange(16, 20),
                 np.arange(0, 16 * 3, 3)
@@ -916,7 +916,7 @@ class PipelineTest(unittest.TestCase):
         n_layers = expected_h.shape[0] - n_bls
         damp_s = pd.DataFrame({'Depth': np.cumsum(model.thickness)})
         damp_t = pd.DataFrame({'Depth': [0] * n_bls})
-        layers = define_models.ModelLayerIndices(
+        layers = define_models.EarthLayerIndices(
             np.arange(2), np.arange(2, 3), np.arange(3, 4),
             np.arange(4, n_layers), np.arange(n_layers, n_layers + n_bls),
             np.arange(0)
