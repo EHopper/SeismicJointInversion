@@ -115,15 +115,13 @@ def _inversion_iteration(model_params:define_models.ModelParams,
     model = _build_inversion_model_from_model_vector(p_new, model)
 
     thickness, vsv, bi = define_models._return_evenly_spaced_model(
-        model.thickness, model.vsv, model.boundary_inds,
-        model_params.min_layer_thickness
+        model, model_params.min_layer_thickness
     )
 
     return define_models.VsvModel(
-        np.array(vsv)[:, np.newaxis], np.array(thickness)[:, np.newaxis],
-        np.array(bi),
-        define_models._find_depth_indices(thickness, model_params.depth_limits)
-        ), G, obs#p, G, d, W, H_mat, h_vec
+            vsv, thickness, bi,
+            define_models._find_depth_indices(thickness, model_params.depth_limits)
+           ), G, obs #p, G, d, W, H_mat, h_vec
 
 
 def _predict_RF_vals(model:define_models.VsvModel):

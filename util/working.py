@@ -539,7 +539,7 @@ def run_plot_inversion(model_params, model,
 def try_run(location:tuple, t_BLs:tuple, id:str):
 
     t_Moho, t_LAB = t_BLs
-    sm = define_models.ModelParams(id,
+    mp = define_models.ModelParams(id,
                                   min_layer_thickness=6,
                                   depth_limits=(0, 350),
                                   boundaries=(('Moho','LAB'), [t_Moho, t_LAB]),
@@ -554,7 +554,7 @@ def try_run(location:tuple, t_BLs:tuple, id:str):
     t[bi[0] + 1] = t_Moho
     t[bi[1] + 1] = t_LAB
 
-    define_models._fill_in_base_of_model(t, v, sm)
+    define_models._fill_in_base_of_model(t, v, mp)
     t = np.array(t)
     v = np.array(v)
 
@@ -567,38 +567,40 @@ def try_run(location:tuple, t_BLs:tuple, id:str):
     # ))
 
     thickness, vsv, boundary_inds = define_models._return_evenly_spaced_model(
-        t, v, bi, sm.min_layer_thickness,
+        define_models.VsvModel(
+            define_models._list_to_col(v), define_models._list_to_col(t), np.array(bi), []),
+            mp.min_layer_thickness,
     )
 
     m = define_models.VsvModel(
         vsv = vsv[np.newaxis].T,
         thickness = thickness[np.newaxis].T,
         boundary_inds = np.array(boundary_inds),
-        d_inds = define_models._find_depth_indices(thickness, sm.depth_limits),
+        d_inds = define_models._find_depth_indices(thickness, mp.depth_limits),
     )
-    # mineos_model = define_models.convert_vsv_model_to_mineos_model(m, sm)
+    # mineos_model = define_models.convert_vsv_model_to_mineos_model(m, mp)
 
     # Get predicted values
     # rf_p = inversion._predict_RF_vals(m)
     obs, std_obs, periods = constraints.extract_observations(
-            location, sm.id, sm.boundaries, sm.vpv_vsv_ratio
+            location, mp.id, mp.boundaries, mp.vpv_vsv_ratio
             )
-    #ph_vel_pred = mineos.calculate_c_from_card(sm, m, periods)
+    #ph_vel_pred = mineos.calculate_c_from_card(mp, m, periods)
 
     m0 = define_models.VsvModel(
             vsv = vsv[np.newaxis].T * 0 + vsv[-1],
             thickness = thickness[np.newaxis].T,
             boundary_inds = np.array(boundary_inds),
-            d_inds = define_models._find_depth_indices(thickness, sm.depth_limits),
+            d_inds = define_models._find_depth_indices(thickness, mp.depth_limits),
         )
     max_runs = 10
-    # return run_plot_inversion(sm, m0, np.hstack((ph_vel_pred, rf_p))[:, np.newaxis],
+    # return run_plot_inversion(mp, m0, np.hstack((ph_vel_pred, rf_p))[:, np.newaxis],
     #                    std_obs, periods, location, m, max_runs
     #                    )
-    return run_plot_inversion(sm, m0, obs,
+    return run_plot_inversion(mp, m0, obs,
                        std_obs, periods, location, m, max_runs
                        )
-    #return run_plot_MC_inversion(sm, m, obs, std_obs, periods, location)
+    #return run_plot_MC_inversion(mp, m, obs, std_obs, periods, location)
 
 def loop_through_locs():
 

@@ -1,4 +1,4 @@
-""" Generate Earth models to work with surface_waves
+""" Generate Earth models to work with the inversion and MINEOS.
 
 Classes:
     1. ModelParams
@@ -20,7 +20,7 @@ Classes:
             vsv                 - Shear velocities, given at model nodes
             thickness           - Layer thicknesses between the model nodes
             boundary_inds       - Indices of boundaries of special interest, e.g. Moho, LAB
-            d_inds              - List of Booleans indicating whether the velocity at a model node is being solved for
+            d_inds              - Indices of velocity points that are being solved for
     3. EarthLayerIndices
         - Indices for different layers (e.g. crust, lithosphere, asthenosphere) for which you might want to weight the regularisation differently (see weights.py)
         - Fields:
@@ -32,14 +32,39 @@ Classes:
             depth               - Depth vector for the whole model space.
             layer_names         - All layer names in order of increasing depth.
 Functions:
-    1. setup_starting_model(model_params: ModelParams, location: tuple) -> VsvModel
+    1. setup_starting_model(model_params: ModelParams, location: tuple) -> VsvModel:
         - Create VsvModel from ModelParams and a location (used for initial Vsv values)
+    3. _list_to_col(l: list) -> np.array:
+        - Convert a list into a column vector
     2. _fill_in_base_of_model(thick:list, vs:list, model_params:ModelParams)
         - Append values to lists of Vsv and layer thickness to fit depth limits
-    3. _add_BLs_to_starting_model(thick:list, model_params:ModelParams) -> list
+    3. _add_BLs_to_starting_model(thick:list, model_params:ModelParams) -> list:
         - Return boundary layer indices for starting model, and update input list of thickness
-    4. _find_depth_indices(thick:list, depth_limits:tuple) -> list
+    4. _find_depth_indices(thick:list, depth_limits:tuple) -> list:
         - Return list of indices in input layer thickness within the inversion depth limits
+    5. _return_evenly_spaced_model(model: VsvModel, min_layer_thickness:float
+                                   ) -> (np.array, np.array, np.array):
+        - Refactor VsvModel so that layers are a more uniform thickness
+    6. _mean_val_in_interval(v:list, thick:list , d1:float, d2:float) -> float:
+        - Find mean value of v within some depth range d1 to d2
+    7. _add_noise_to_starting_model(model:VsvModel, depth_limits:tuple) -> VsvModel:
+        - Add random noise to a VsvModel
+    9. _add_random_noise(a:np.array, sc:float, pdf='normal') -> np.array:
+        - Add random noise to an array of a given scale (i.e. standard deviation for normal pdf)
+    10. convert_vsv_model_to_mineos_model(vsv_model:VsvModel, model_params:ModelParams,
+                                                **kwargs) -> pd.DataFrame:
+        - Convert VsvModel to have all values necessary for MINEOS, and write to disk as csv
+    11. _write_mineos_card(mineos_card_model:pd.DataFrame, name:str):
+        - Add header information and write MINEOS compatible model as a .card file
+    12. _set_earth_layer_indices(model_params:ModelParams, model:VsvModel, **kwargs) -> EarthLayerIndices:
+        - Find the indices of various geological layers
+    13. save_model(model:VsvModel, fname:str):
+        - Save VsvModel to file
+    14. read_model(fname:str):
+        - Read VsvModel from file
+    15. load_all_models(z:np.array, lats:np.array, lons:np.array, t_LAB:int, lab:str=''
+                        ) -> (np.array, np.array, np.array):
+        - Load a bunch of models saved with predictable file names for plotting purposes
 
 
 """
@@ -260,23 +285,29 @@ def setup_starting_model(model_params: ModelParams, location: tuple) -> VsvModel
 
     # Fix the model spacing
     thickness, vsv, boundary_inds = _return_evenly_spaced_model(
-        np.array(thick), np.array(vs), np.array(bi),
+        VsvModel(_list_to_col(vs), _list_to_col(thick), np.array(bi), []),
         model_params.min_layer_thickness,
     )
     depth_inds = _find_depth_indices(thickness, model_params.depth_limits)
 
     # Add random noise
-    _add_noise_to_starting_model(
-        thickness, vsv, boundary_inds, depth_inds
+    model = _add_noise_to_starting_model(
+        VsvModel(vsv, thickness, boundary_inds, depth_inds), model_params.depth_limits
     )
 
+    return model
 
-    return VsvModel(vsv = vsv[np.newaxis].T,
-                          thickness = thickness[np.newaxis].T,
-                          boundary_inds = np.array(boundary_inds),
-                          d_inds = _find_depth_indices(thickness,
-                                                       model_params.depth_limits),
-                          )
+def _list_to_col(l):
+    """ Convert list into column vector (np array of size (n_elements, 1))
+
+    Arguments:
+        l:
+            - list of values compatible with numpy array
+    Returns:
+        Column vector of same values:
+            - (n_elements, 1) np.array
+    """
+    return np.reshape(np.array(l), (np.size(np.array(l)), 1))
 
 def _fill_in_base_of_model(thick:list, vs:list, model_params:ModelParams):
     """ Ensure model has the correct depth limits.
@@ -371,14 +402,14 @@ def _add_BLs_to_starting_model(thick:list, model_params:ModelParams) -> list:
 
     return boundary_inds
 
-def _find_depth_indices(thick:list, depth_limits:tuple) -> list:
+def _find_depth_indices(thick:np.array, depth_limits:tuple) -> list:
     """ Return a list of the indices of thickness within the depth limits
 
     Arguments:
         thick:
-            - list of floats
+            - (n_layers, 1) np.array
             - Units:    kilometres
-            - Layer thicknesses, like VsvModel.thickness
+            - Layer thicknesses, as VsvModel.thickness
         depth_limits:
             - tuple (float, float)
             - Units:    kilometres
@@ -392,8 +423,8 @@ def _find_depth_indices(thick:list, depth_limits:tuple) -> list:
     return list(range(np.argmax(d >= depth_limits[0]),
                       np.argmax(d >= depth_limits[1])))
 
-def _return_evenly_spaced_model(thick:np.array, vs:np.array, boundary_inds:np.array,
-                                min_layer_thickness:float):
+def _return_evenly_spaced_model(model: VsvModel, min_layer_thickness:float
+                                ) -> (np.array, np.array, np.array):
     """ Refactor the Vsv model so layer thicknesses are more even.
 
     As the inversion updates some layer thicknesses, this will make the model layer thicknesses very uneven unless the starting model is approximately correct.  Indeed, the inversion can lead to negative layer thicknesses if a boundary layer is too deep.  As we do not want dependence on the starting model, we need to respace the model.
@@ -401,22 +432,40 @@ def _return_evenly_spaced_model(thick:np.array, vs:np.array, boundary_inds:np.ar
     It is very important to keep the boundary layer thicknesses the same!
 
     Arguments:
-        thick:
-            - (n_layers, ) np.array
+        model:
+            - VsvModel object
+            - Units:    seismological - km, km/s etc
+            - Velocity model
+            - All fields except d_inds are used here
+        min_layer_thickness:
+            - float
+            - Units:    kilometres
+            - Minimum allowable layer thickness in VsvModel.thickness, as ModelParams.minimum_layer_thickness
+    Returns:
+        new_thick:
+            - (n_layers, 1) np.array
             - Units:    kilometres
             - Layer thicknesses, as VsvModel.thickness
-        vs:
-            - (n_layers, ) np.array
+            - Note that n_layers in outputs may be different to the input model!
+        new_v:
+            - (n_layers, 1) np.array
+            - Units:    seismological - km, km/s
+            - Node velocities, as VsvModel.vsv
+        new_bi:
+            - (n_boundaries, ) np.array of integers
+            - Units:    none
+            - Boundary indices, as VsvModel.boundary_inds
+
 
     """
-    thick = thick.flatten().tolist()
-    vs = vs.flatten().tolist()
-    boundary_inds = boundary_inds.flatten().tolist()
+    thick = model.thickness.flatten().tolist()
+    vs = model.vsv.flatten().tolist()
+    boundary_inds = model.boundary_inds.flatten().tolist()
 
     # Set uppermost value of thick
-    nt = [thick[0]]
+    new_thick = [thick[0]]
     bi = [-1] + boundary_inds
-    nbi = []
+    new_bi = []
 
     # Loop through all BLs to get velocities above and within them
     for ib in range(len(bi[:-1])):
@@ -429,15 +478,15 @@ def _return_evenly_spaced_model(thick:np.array, vs:np.array, boundary_inds:np.ar
 
         # set uppermost value of Vs
         if ib == 0:
-            nv = [_mean_val_in_interval(vs, thick, sum(nt), sum(nt) + layer_t / 2)]
+            new_v = [_mean_val_in_interval(vs, thick, sum(new_thick), sum(new_thick) + layer_t / 2)]
 
         for il in range(n_layers - 1):
-            nt += [layer_t]
-            nv += [_mean_val_in_interval(vs, thick, sum(nt) - layer_t / 2,
-                                         sum(nt) + layer_t / 2)]
-        nbi += [len(nt)]
-        nt += [layer_t, thick[bi[ib + 1] + 1]]
-        nv += vs[bi[ib + 1]:bi[ib + 1] + 2]
+            new_thick += [layer_t]
+            new_v += [_mean_val_in_interval(vs, thick, sum(new_thick) - layer_t / 2,
+                                         sum(new_thick) + layer_t / 2)]
+        new_bi += [len(new_thick)]
+        new_thick += [layer_t, thick[bi[ib + 1] + 1]]
+        new_v += vs[bi[ib + 1]:bi[ib + 1] + 2]
 
 
     # For the deepest BL to the base of the model
@@ -446,17 +495,41 @@ def _return_evenly_spaced_model(thick:np.array, vs:np.array, boundary_inds:np.ar
     n_layers = max(int(inter_boundary_depth // min_layer_thickness), 1)
     layer_t = inter_boundary_depth / n_layers
     for il in range(n_layers - 1):
-        nt += [layer_t]
-        nv += [_mean_val_in_interval(vs, thick, sum(nt) - layer_t / 2,
-                                     sum(nt) + layer_t / 2)]
-    nt += [layer_t]
-    nv += [vs[-1]]
-    return np.array(nt), np.array(nv), np.array(nbi)
+        new_thick += [layer_t]
+        new_v += [_mean_val_in_interval(vs, thick, sum(new_thick) - layer_t / 2,
+                                     sum(new_thick) + layer_t / 2)]
+    new_thick += [layer_t]
+    new_v += [vs[-1]]
+    return _list_to_col(new_thick), _list_to_col(new_v), np.array(new_bi)
 
 
-def _mean_val_in_interval(v, thick, d1, d2):
-    """
-    All assumed to be lists or floats!!
+def _mean_val_in_interval(v:list, thick:list , d1:float, d2:float) -> float:
+    """ Calculate the mean value of v in some depth interval.
+
+    Arguments:
+        - v:
+            - list of floats
+            - Units:    unspecified
+            - Some list of values defined at nodes (e.g. list of VsvModel.vsv)
+        - thick:
+            - list of floats
+            - Units:    same as d1, d2; e.g. kilometres
+            - Layer thicknesses, like VsvModel.thickness
+        - d1:
+            - float
+            - Units:    same as d2, thick
+            - Minimum depth of interval (range is inclusive at minimum)
+        - d2:
+            - float
+            - Units:    same as thick, d1
+            - Maximum depth of interval (range is exclusive at maximum)
+
+
+    Returns:
+        Mean value within the given range d1-d2:
+            - float
+            - Units:    same as v
+
     """
     interp_d = np.arange(thick[0], sum(thick), 0.1)
     interp_vs = np.interp(interp_d, np.cumsum(thick), v)
@@ -465,38 +538,64 @@ def _mean_val_in_interval(v, thick, d1, d2):
                 d1 <= interp_d, interp_d < d2
             )])
 
-def _add_noise_to_starting_model(thick, vs, bi, d_inds):
+def _add_noise_to_starting_model(model:VsvModel, depth_limits:tuple) -> VsvModel:
+    """ Add random noise to the starting model
+
+    To investigate dependence on starting model (which is negligible), we add random noise to the starting model at the beginning of the inversion.  We perturb both Vsv and layer thickness.  We maintain layer thickness of the boundary layers, the thickness of the surface layer (i.e. 0), and the total thickness of the velocity model to maintain the depth limits.
+
+    Arguments:
+        model:
+            - VsvModel
+            - Units:    seismological, km, km/s
+            - Velocity model
+        depth_limits:
+            - tuple, (float, float)
+            - Units:    kilometres
+            - Depth limits for inversion, i.e. only perturb values within these limits
+    Returns:
+        new model
+            - VsvModel
+            - Units:    seismological - km, km/s
+            - Input velocity model with some perturbations to vsv and thickness
     """
-    """
+    vs = model.vsv
+    thick = model.thickness
+    bi = model.boundary_inds
+    d_inds = model.d_inds
+
 
     # Perturb all Vs that we are inverting for
-    vs[d_inds] = _add_random_noise(np.array(vs[d_inds]), 0.2)
+    vs[d_inds] = _add_random_noise(vs[d_inds], 0.2)
 
     # For thickness, as layer thickness can be very different, scale
     # perturbations by thickness of layer
-    # Note: do not want to change thick[0] (depth to top of model, e.g. 0)
-    # or the thicknesses of any of the BLs
-    # and want to maintain total thickness of inversion model
-    #  i.e. sum(thick) = sum(thick after perturbations)
-    max_depth = sum(thick)
     for i in range(len(thick) - 1):
         if i - 1 not in bi and i - 1 in d_inds:
             thick[i] = _add_random_noise(np.array(thick[i]), np.array(thick[i]) / 10)
-    thick[-1] = max_depth - sum(thick[:-1])
+    thick[-1] = depth_limits[1] - sum(thick[:-1])
 
-    return
+    return VsvModel(vs, thick, bi, _find_depth_indices(thick, depth_limits))
 
-def _add_random_noise(a:np.array, sc:float, pdf='normal'):
+def _add_random_noise(a:np.array, sc:float, pdf='normal') -> np.array:
     """ Add random noise to an array of mean 0, scaled by sc.
 
     Arguments:
         a:
             - np.array
+            - Units:    should be the same as value for sc
         sc:
             - float
+            - Units:    should be the same as values in a
             - Size of noise to use
                 e.g. standard deviation of normal distribution
                 e.g. maximum value for a uniform distribution
+        pdf:
+            - str
+            - Label for type of noise distribution - normal or uniform
+            - Default value: 'normal'
+    Returns:
+        np.array of same shape as a with random perturbation of each element
+            - np.array
     """
     if pdf == 'normal':
         return a + np.random.normal(loc=0, scale=sc, size=a.shape)
@@ -504,8 +603,8 @@ def _add_random_noise(a:np.array, sc:float, pdf='normal'):
         return a + np.random.uniform(low=-sc, high=sc, size=a.shape)
 
 
-def convert_vsv_model_to_mineos_model(vsv_model, model_params,
-                                            **kwargs):
+def convert_vsv_model_to_mineos_model(vsv_model:VsvModel, model_params:ModelParams,
+                                            **kwargs) -> pd.DataFrame:
     """ Generate model that is used for all the MINEOS interfacing.
 
     MINEOS requires radius, rho, vpv, vsv, vph, vsh, bulk and shear Q, and eta, where eta is the shape factor and is 1 always for isotropic materials. Rows are ordered by increasing radius.  There should be some reference MINEOS card that can be loaded in and have this pasted on the bottom for using with MINEOS, as MINEOS requires a card that goes all the way to the centre of the Earth.
@@ -522,6 +621,14 @@ def convert_vsv_model_to_mineos_model(vsv_model, model_params,
                 - Moho = some_float
             - Units:    km
             - Depth of the Moho - needed to define density structure
+    Returns:
+        - mineos_model:
+            - pd.DataFrame
+            - Units:    SI - metres, m/s, etc
+            - Fields: radius, rho [density], vpv, vsv, q_kappa [bulk attenuation], q_mu [shear attenuation], vph, vsh, eta [shape factor]
+            - This is also written to a csv file
+              - output/[model_params.id]/[model_params.id].csv
+
     """
     if not os.path.exists('output'):
         os.mkdir('output')
@@ -597,30 +704,35 @@ def _write_mineos_card(mineos_card_model:pd.DataFrame, name:str):
         radius, rho, vpv, vsv, q_kappa, q_mu, vph, vsh, eta
     write a model card text file to output/(name)/(name).card.
 
-    All of the values in the input DataFrame are assumed to have the correct
-    units etc.  This code will work out how many inner core layers and total
-    core layers there are for the header of the model card.
+    All of the values in the input DataFrame are assumed to have the correct units etc.  This code will work out how many inner core layers and total core layers there are for the header of the model card.
 
     The layout of the card file:
     First line:
                     name of the model card
     Second line:
                     if_anisotropic   t_ref   if_deck
-        This is hardwired with if_anisotropic = 1, i.e. assume anisotropy
+        - This is hardwired with if_anisotropic = 1, i.e. assume anisotropy
               (even if not truly anisotropic)
-        tref is the reference period for dispersion calculation,
-              However, we correct for dispersion separately, so setting it to
-              < 1 means no dispersion corrections are done at this stage
-        NOTE: If set tref > 0, MINEOS will break when running the Q correction
-              through mineos_qcorrectphv, as the automatically generated
-              input file assumes tref < 0, so it enters an if statement
-              in the Fortran file that requires 'y'.  If tref > 0, having
-              y in the runfile breaks the code.
-        if_deck set to 1 for a model card or 0 for a polynomial model
+        - tref is the reference period for dispersion calculation,
+              However, we correct for dispersion separately, so setting it to < 1 means no dispersion corrections are done at this stage
+        - NOTE: If set tref > 0, MINEOS will break when running the Q correction through mineos_qcorrectphv, as the automatically generated input file assumes tref < 0, so it enters an if statement in the Fortran file that requires 'y'.  If tref > 0, having y in the runfile breaks the code.
+        - if_deck set to 1 for a model card or 0 for a polynomial model
     Third line:
                     total_layers, index_top_of_inner_core, i_top_of_outer_core
     Rest of file (each line is a depth point):
                     radius  rho  vpv  vsv  q_kappa  q_mu  vph  vsh  eta
+
+    Arguments:
+        mineos_card_model:
+            - pd.DataFrame
+            - Units:    SI - m, m/s, etc
+            - Columns radius, rho, vpv, vsv, q_kappa, q_mu, vph, vsh, eta
+        name:
+            - str
+            - Used for saving model to output/(name)/(name).card
+    Returns:
+        MINEOS card file (format described above) is written to disk at output/(name)/(name).card
+
     """
 
     # Write MINEOS model to .card (txt) file
@@ -647,8 +759,27 @@ def _write_mineos_card(mineos_card_model:pd.DataFrame, name:str):
 
 
 
-def smooth_to_ref_model_below(ref_model, new_model):
-    """
+def smooth_to_ref_model_below(ref_model:pd.DataFrame, new_model:pd.DataFrame
+                              ) -> pd.DataFrame:
+    """ Take a model of the relatively shallow Earth and smoothly append the reference model
+
+    Smooth the parameters over the 100 km below the base of new_model, then append the reference model.  Note that the bottom value of new_model should be pinned at the corresponding value for ref_model, so there won't really need to be a lot of smoothing!
+
+    Arguments:
+        - ref_model:
+            - pd.DataFrame
+            - Units:    SI - m, m/s etc
+            - Model specified in ModelParams.ref_card_csv_name
+        - new_model:
+            - pd.DataFrame
+            - Units:    SI
+            - Model built from VsvModel using values from ModelParams
+            - Only extends to ModelParams.depth_limits, and needs to be for the whole Earth for MINEOS
+    Returns:
+        - smoothed model
+            - pd.DataFrame
+            - Units:    SI
+            - new_model smoothly merged with ref_model.
     """
 
     smooth_z = 100 * 1e3  # 100 km in SI units - depth range to smooth over
@@ -673,8 +804,27 @@ def smooth_to_ref_model_below(ref_model, new_model):
 
     return pd.concat([unadulterated_ref_model, smoothed_ref_model])
 
-def smooth_to_ref_model_above(ref_model, new_model):
-    """
+def smooth_to_ref_model_above(ref_model:pd.DataFrame, new_model:pd.DataFrame
+                              ) -> pd.DataFrame:
+    """ Take a model of the relatively shallow Earth and smoothly prepend the reference model
+
+    Smooth the parameters over the 100 km above the base of new_model, then prepend the reference model.  If the ModelParams.depth_limits starts at 0 kilometres, the smoothed model will be identical to the input new_model.
+
+    Arguments:
+        - ref_model:
+            - pd.DataFrame
+            - Units:    SI - m, m/s etc
+            - Model specified in ModelParams.ref_card_csv_name
+        - new_model:
+            - pd.DataFrame
+            - Units:    SI
+            - Model built from VsvModel using values from ModelParams
+            - Only extends over ModelParams.depth_limits, and needs to be for the whole Earth for MINEOS
+    Returns:
+        - smoothed model
+            - pd.DataFrame
+            - Units:    SI
+            - new_model smoothly merged with ref_model
     """
 
     smooth_z = 100 * 1e3  # 100 km in SI units - depth range to smooth over
@@ -700,31 +850,36 @@ def smooth_to_ref_model_above(ref_model, new_model):
     return pd.concat([smoothed_ref_model, unadulterated_ref_model])
 
 
-def _set_model_indices(model_params, model, **kwargs):
+def _set_earth_layer_indices(model_params:ModelParams, model:VsvModel, **kwargs) -> EarthLayerIndices:
     """ Return the indices of different geological layers in the model.
 
-    This is useful for if we want to damp the different layers with different
-    parameters.
+    This is useful for if we want to damp the different geologically significant layers with different
+    parameters.  Here, we distinguish sediment (any Vsv below an arbitrary threshold value), crust, lithosphere, and asthenosphere.  The Moho and LAB will be taken from model_params and model if they are there, or should be specified as a kew word argument if they are not.
 
     Arguments:
-        - model_params:
-            - ModelParams
+        model_params:
+            - ModelParams object
             - Units:    seismological
-        - model:
-            - VsvModel
+        model:
+            - VsvModel object
             - Units:    seismological
-        - kwargs:
+        kwargs:
             - key word arguments of format
                 - Moho = some_float
                 - LAB = some_float
             - Units:    km
-            - If Moho and LAB are not specified in
+            - If Moho and LAB are not specified in model and model_params, they must be set here to distinguish crust, lithospheric mantle, and asthenosphere
+    Returns:
+        layer indices:
+            - EarthLayerIndices object
+            - Units:    mostly indices (ints), depth field is in kilometres
     """
 
     # Last model point is not included in the inversion
     depth = np.cumsum(model.thickness[:-1])
 
-    sed_inds = [list(model.vsv).index(v) for v in model.vsv if v <= 3]
+    max_sediment_velocity = 3
+    sed_inds = [list(model.vsv).index(v) for v in model.vsv if v <= max_sediment_velocity]
 
     bnames, _ = model_params.boundaries
     if 'Moho' in bnames:
@@ -755,7 +910,19 @@ def _set_model_indices(model_params, model, **kwargs):
         depth = list(depth)
     )
 
-def save_model(model, fname):
+def save_model(model:VsvModel, fname:str):
+    """ Save VsvModel to file, to be read with read_model(fname).
+    Arguments:
+        model:
+            - VsvModel object
+            - Units:    seismological
+        fname:
+            - str
+            - Model will be saved to output/models/(fname).csv
+    Returns:
+        Model will be saved to output/models/(fname).csv
+
+    """
     save_dir = 'output/models/'
 
     with open('{}{}.csv'.format(save_dir, fname), 'w') as fid:
@@ -774,7 +941,17 @@ def save_model(model, fname):
 
         fid.close()
 
-def read_model(fname):
+def read_model(fname:str):
+    """ Read VsvModel from file.
+    Arguments:
+        fname:
+            - str
+            - Model will be opened from output/models/(fname).csv
+    Returns:
+        model:
+            - VsvModel object
+            - Units:    seismological
+    """
     save_dir = 'output/models/'
 
     with open('{}{}.csv'.format(save_dir, fname), 'r') as fid:
@@ -789,7 +966,65 @@ def read_model(fname):
         d_inds = np.arange(len(params.vsv))[params.inverted_inds.values],
     )
 
-def load_all_models(z, lats, lons, t_LAB, lab=''):
+def load_all_models(z:np.array, lats:np.array, lons:np.array, t_LAB:int, lab:str=''
+                    ) -> (np.array, np.array, np.array):
+    """ Load a bunch of models from disk to make plotting comparisons easier
+
+    This assumes you have saved a bunch of models with filenames of the following format:
+        output/models/[lat]N_[lon]W_[t_LAB]kmLAB[lab]
+    Also, that you have calculated a rectangle of models, such that any combination of the values in lats and lons will have a model file saved.  This also assumes that your VsvModel has two boundary layers in it (i.e. Moho, LAB)
+
+    Arguments:
+        z:
+            - (n_z, ) np.array
+            - Units:    kilometres
+            - Whatever vector of depth points you want for plotting
+            - All loaded models will be interpolated along this vector
+        lats:
+            - (n_lats, ) np.array
+            - Units:    to match your saved file names
+            - This is only used to sub into file names, [lats[i]]N_[lon]W_[t_LAB]kmLAB[lab]
+        lons:
+            - (n_lons, ) np.array
+            - Units:    to match your saved file names
+            - This is only used to sub into file names, [lat]N_[lons[i]]W_[t_LAB]kmLAB[lab]
+        t_LAB:
+            - int
+            - Units:    to match your saved file names
+            - This is only used to sub into file names, [lat]N_[lon]W_[t_LAB]kmLAB[lab]
+            - If you save your model file using a script, make sure that t_LAB is in the same format (float or int), as '{}'.format(10.) -> '10.0' and '{}'.format(10) -> '10'
+        lab:
+            - str
+            - If you have some further identifying information in a label appended to your saved file names, you can pass it in here
+
+    Returns:
+        vs:
+            - (n_lats, n_lons, n_z) np.array
+            - Units:    km/s
+            - Tensor of Vsv values loaded in from saved VsvModel files
+        bls:
+            - (n_lats, n_lons, 4) np.array
+            - Units:    seismological - km, km/s
+            - Values around boundary layers
+            - Assumes you have two boundary layers
+            - bls[:, :, 0] is the depth to the centre of the upper boundary layer (e.g. Moho)
+            - bls[:, :, 1] is the depth to the centre of the lower boundary layer (e.g. LAB)
+            - bls[:, :, 2] is the relative velocity change across the upper boundary layer
+                - (velocity at base of BL / velocity at top of BL) - 1
+            - bls[:, :, 3] is the relative velocity change across the lower boundary layer
+                - (velocity at base of BL / velocity at top of BL) - 1
+        bis:
+            - (n_lats, n_lons, 4) np.array
+            - Units:    none
+            - Indices of boundary layers
+            - Assumes you have two boundary layers
+            - bis[:, :, 0] = Index of top of Moho
+            - bis[:, :, 1] = Index of base of Moho
+            - bis[:, :, 2] = Index of top of LAB
+            - bis[:, :, 3] = Index of base of LAB
+            - Note that bis[:, :, 1] = bis[:, :, 0] + 1 (and same for lower boundary layer info)
+
+    """
 
     vs = np.zeros((lats.size, lons.size, z.size))
     bls = np.zeros((lats.size, lons.size, 4), dtype=float)

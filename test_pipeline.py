@@ -44,13 +44,14 @@ class PipelineTest(unittest.TestCase):
                          expected.ref_card_csv_name)
 
     def assertVsvModelEqual(self, actual, expected):
-        np.testing.assert_allclose(actual.vsv, expected.vsv)
+        np.testing.assert_almost_equal(actual.vsv, expected.vsv, decimal=4)
         # Cannot compare values == 0 to relative precision via. assert_allclose
-        self.assertEqual(actual.thickness[0], expected.thickness[0])
-        np.testing.assert_allclose(actual.thickness[1:],
-                                   expected.thickness[1:])
+        np.testing.assert_allclose(actual.thickness,
+                                   expected.thickness, atol=1e-3)
         np.testing.assert_array_equal(actual.boundary_inds,
                                       expected.boundary_inds)
+        np.testing.assert_array_equal(actual.d_inds,
+                                      expected.d_inds)
 
 
     # =========================================================================
@@ -212,46 +213,42 @@ class PipelineTest(unittest.TestCase):
     @parameterized.expand([
         (
             'basic model',
-            (np.array([0., 30., 3., 40., 10., 137.]),
-             np.array([3.4, 3.6, 4.0, 4.2, 4.1, 4.4]),
-             np.array([1, 3]),
-             list(range(5))),
+            define_models.VsvModel(np.array([[3.4, 3.6, 4.0, 4.2, 4.1, 4.4]]).T,
+                                   np.array([[0., 30., 3., 40., 10., 137.]]).T,
+                                   np.array([1, 3]),
+                                   np.arange(5)),
+            (0, 220),
             42,
-            (np.array([0., 29.2976, 3., 46.3169, 10., 131.3855]),
-             np.array([3.4993, 3.5723, 4.1295, 4.5046, 4.0532, 4.4]),
-             np.array([1, 3]),
-             list(range(5))),
+            define_models.VsvModel(np.array([[3.4993, 3.5723, 4.1295, 4.5046, 4.0532, 4.4]]).T,
+                                   np.array([[0., 29.2976, 3., 46.3169, 10., 131.3855]]).T,
+                                   np.array([1, 3]),
+                                   np.arange(5)),
         ),
     ])
-    def test_add_noise_to_starting_model(self, name, input, seed, expected):
+    def test_add_noise_to_starting_model(self, name, in_model, depth_limits, seed, expected):
         """
         """
-        t, vs, bi, d_inds = input
         np.random.seed(seed)
-        define_models._add_noise_to_starting_model(t, vs, bi, d_inds)
+        calc_model = define_models._add_noise_to_starting_model(in_model, depth_limits)
 
-        exp_t, exp_vs, exp_bi, exp_di = expected
-        np.testing.assert_allclose(np.array(t), np.array(exp_t), atol=1e-3)
-        np.testing.assert_almost_equal(np.array(vs), np.array(exp_vs), decimal=4)
-        self.assertEqual(list(bi), list(exp_bi))
-        self.assertEqual(d_inds, exp_di)
+        self.assertVsvModelEqual(calc_model, expected)
 
     # test_return_evenly_spaced_model
     @parameterized.expand([
         (
             'basic model',
             (
-                [0, 30., 3., 24., 10., 30.], # t
-                [3.0, 3.5, 4.0, 4.6, 4.4, 4.65], # vs
-                [1, 3], # bi
+                np.array([0, 30., 3., 24., 10., 30.])[np.newaxis].T, # t
+                np.array([3.0, 3.5, 4.0, 4.6, 4.4, 4.65])[np.newaxis].T, # vs
+                np.array([1, 3]), # bi
                 6. #min layer thickness
              ),
              (
-                [0., 6., 6., 6., 6., 6., 3., 6., 6., 6., 6., 10.,
-                 6., 6., 6., 6., 6.], # expected t
-                [3.0, 3.1, 3.2, 3.3, 3.4, 3.5, 4.0, 4.15, 4.3,
-                 4.45, 4.6, 4.4, 4.45, 4.5, 4.55, 4.6, 4.65], # expected vs
-                [5, 10] # expected bi
+                np.array([0., 6., 6., 6., 6., 6., 3., 6., 6., 6., 6., 10.,
+                 6., 6., 6., 6., 6.])[np.newaxis].T, # expected t
+                np.array([3.0, 3.1, 3.2, 3.3, 3.4, 3.5, 4.0, 4.15, 4.3,
+                 4.45, 4.6, 4.4, 4.45, 4.5, 4.55, 4.6, 4.65])[np.newaxis].T, # expected vs
+                np.array([5, 10]) # expected bi
              ),
 
         ),
@@ -261,13 +258,13 @@ class PipelineTest(unittest.TestCase):
         """
         t, vs, bi, min_layer_thickness = inputs
         thickness, vsv, bound_inds = define_models._return_evenly_spaced_model(
-            np.array(t), np.array(vs), np.array(bi), min_layer_thickness,
+            define_models.VsvModel(vs, t, bi, []), min_layer_thickness,
         )
 
         exp_t, exp_vs, exp_bi = expected
-        np.testing.assert_array_equal(thickness, np.array(exp_t))
-        np.testing.assert_allclose(vsv, np.array(exp_vs), rtol=0.01, atol=0.05)
-        np.testing.assert_array_equal(bound_inds, np.array(exp_bi))
+        np.testing.assert_array_equal(thickness, exp_t)
+        np.testing.assert_allclose(vsv, exp_vs, rtol=0.01, atol=0.05)
+        np.testing.assert_array_equal(bound_inds, exp_bi)
 
 
 

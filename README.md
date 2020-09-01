@@ -12,6 +12,17 @@ We follow the inversion framework of Russell et al. (2019) and Menke (2012).
 This codebase is written in Python 3. (So remember to install libraries with pip3!)
 - Python (3.6.9)
 
+## Operating System
+Written on Ubuntu (18.04.3).
+To use on a Mac:
+- Install coreutils using Homebrew
+        brew install coreutils
+- In mineos.py
+  - Change 'timeout' to 'gtimeout' on line 331
+        suprocess.run(['timeout', '120', './{}'.format(execfile)])
+To use on Windows:
+- Install a virtual Linux box!!
+
 ## Required libraries:
 - Libraries that should come with Python
   - re

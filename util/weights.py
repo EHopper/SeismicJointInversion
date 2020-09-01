@@ -55,7 +55,7 @@ def build_weighting_damping(std_obs:np.array, p:np.array,
     W = _build_error_weighting_matrix(std_obs)
 
     # Record level of damping on the Vsv model parameters
-    layers = define_models._set_model_indices(model_params, model)
+    layers = define_models._set_earth_layer_indices(model_params, model)
     damp_s = pd.DataFrame({'Depth': layers.depth})
     # Record level of damping on the boundary layer depth parameters
     damp_t = pd.DataFrame({
